@@ -185,7 +185,7 @@ type Paint interface {
 }
 
 func NewPaint() Paint {
-	p := &paint{size: NewSize(SIZE_PIXEL, 14, 0), color: NewColor(0, 0, 0, 255)}
+	p := &paint{size: NewSize(SIZE_PIXEL, 16, 0), color: NewColor(0, 0, 0, 255)}
 	return p
 }
 
@@ -238,8 +238,10 @@ type Graphics interface {
 	DrawText(x, y, w, h int, paint Paint, text string)
 	DrawColor(x, y, w, h int, color Color)
 	DrawImage(x, y, w, h int, image Image)
-	// MeasureText 返回文本在给定字号下的像素宽高。
-	MeasureText(text string, fontSize int, bold bool) (w, h int)
+	// MeasureText 返回文本在给定字号/粗体/字族下的像素宽高。
+	// family 传 CSS font-family 原值（可含逗号列表）；度量必须与 DrawText
+	// 使用同一字体解析规则，否则混排宽度会错位。
+	MeasureText(text string, fontSize int, bold bool, family string) (w, h int)
 }
 
 // FakeGraphics 供测试与无显卡环境使用的空后端。
@@ -266,9 +268,9 @@ func (g *FakeGraphics) DrawImage(x, y, w, h int, image Image) {
 }
 
 // MeasureText 给出粗略估算：CJK 按全宽、拉丁按半宽，行高 1.3 倍字号。
-func (g *FakeGraphics) MeasureText(text string, fontSize int, bold bool) (w, h int) {
+func (g *FakeGraphics) MeasureText(text string, fontSize int, bold bool, family string) (w, h int) {
 	if fontSize <= 0 {
-		fontSize = 14
+		fontSize = 16
 	}
 	for _, r := range text {
 		if r > 0x2E80 {
@@ -414,9 +416,9 @@ func (g *BufferGraphics) DrawImage(x, y, w, h int, image Image) {
 
 // MeasureText 实现 Graphics：与 FakeGraphics 相同的粗略估算，
 // 保证布局结果可与断言表对应。
-func (g *BufferGraphics) MeasureText(text string, fontSize int, bold bool) (w, h int) {
+func (g *BufferGraphics) MeasureText(text string, fontSize int, bold bool, family string) (w, h int) {
 	if fontSize <= 0 {
-		fontSize = 14
+		fontSize = 16
 	}
 	for _, r := range text {
 		if r > 0x2E80 {

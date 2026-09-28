@@ -203,13 +203,15 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int,
 	var curLine []lineItem
 	maxRight := cx
 
-	fontPx := 14
+	fontPx := 16
 	bold := false
+	family := ""
 	if el.computed != nil {
 		if s := resolveLen(el.computed.FontSize(), 0); s > 0 {
 			fontPx = s
 		}
 		bold = el.computed.FontWeight() == FontWeightBold
+		family = el.computed.FontFamily()
 	}
 
 	flushLine := func() {
@@ -262,7 +264,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int,
 		if tnc, ok := child.(*textNode); ok {
 			tnc.node.runs = nil
 			for _, tok := range tokenizeText(tnc.Text()) {
-				tw, th := g.MeasureText(tok, fontPx, bold)
+				tw, th := g.MeasureText(tok, fontPx, bold, family)
 				if tw <= 0 {
 					continue
 				}

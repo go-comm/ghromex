@@ -109,6 +109,12 @@ libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 `border` 简写与 `border-width/color/style`、`border-radius`(四角统一，仅水平半径)、
 `background-color`/`background`、`color`、`font-size`、`font-weight(bold)`、`font-family`、
 `text-align(left/center/right)`；
+字体默认语义对齐 Chrome（Windows）并做 UI 取向调整：初始字号 16px；
+standard（未指定 family）默认 sans-serif → Arial（区别于 Chrome 的 Times，更贴桌面 UI）；
+serif → Times New Roman、monospace → Courier New、system-ui → Segoe UI；
+汉字/假名/谚文按字符级脚本分段 fallback 到微软雅黑（中英混排与 Chrome 一致）；
+每个字体文件只开一个 FT_Face，字号/粗体动态切换；
+文字渲染用 TTF LIGHT hinting（较默认 NORMAL 的网格吸附，小字号纵向硬跳变降约 60%，锯齿感明显减弱）；
 选择器支持标签、`.class`、`#id`、类型+class/id 组合链（如 `div.wide`）与特异度排序。
 
 ## 已知限制
@@ -117,7 +123,7 @@ libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 - `DrawImage` 尚未实现（接口已预留）
 - `input` 元素仅占位显示，键盘输入/焦点/IME 未接入
 - 边框样式目前按单色实心绘制（dashed/dotted 等不做虚线区分）
-- 字体回退：`GHROMEX_FONT` 指定字体文件，否则按微软雅黑 → 黑体 → 宋体 → Arial 顺序探测
+- 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；无 webfont 加载、无斜体渲染
 
 ## 调试环境变量
 
@@ -125,7 +131,8 @@ libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 |---|---|
 | `GHROMEX_DEBUG=1` | 回显绘制失败原因与每次点击的命中/派发结果 |
 | `GHROMEX_GPU=1` | 优先尝试硬件加速渲染器（默认软件渲染器，兼容性最好） |
-| `GHROMEX_FONT=路径` | 指定默认 TTF/TTC 字体 |
+| `GHROMEX_FONT=路径` | 指定 standard 字体（默认 Arial，即 sans-serif） |
+| `GHROMEX_CJK_FONT=路径` | 指定 CJK fallback 字体（默认微软雅黑） |
 | `SDL_VIDEO_DRIVER=dummy` | 无显示器运行（配合 `Window.Screenshot()` 做回读断言） |
 
 ## 开发与测试

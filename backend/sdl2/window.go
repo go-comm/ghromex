@@ -22,6 +22,10 @@ type Window struct {
 	lastChange  int64
 	autoExit    time.Duration
 	hasAutoExit bool
+
+	// dirty 为 true 才重绘：内容变化/窗口尺寸变化/首帧。空闲时零绘制，
+	// 避免每帧产生的绘制指令垃圾把稳态内存抬高数 MB。
+	dirty bool
 }
 
 // NewWindow 创建带渲染器的窗口。坐标体系 1:1（1 CSS px = 1 物理像素）。
@@ -96,6 +100,7 @@ func (win *Window) OpenDocument(src string) (engine.HTMLDocument, error) {
 	}
 	win.doc = doc
 	win.lastChange = doc.ChangeCount()
+	win.dirty = true // 首次打开强制出一帧
 	if t := doc.Title(); t != "" {
 		b, p := cBytes(t)
 		sdlSetWindowTitle(win.win, p)
@@ -179,6 +184,7 @@ func (win *Window) Run() error {
 						win.w = int(ev.data1)
 						win.h = int(ev.data2)
 						win.lastChange = -1 // 强制重排
+						win.dirty = true
 					}
 				}
 			case eventMouseButtonUp:
@@ -200,10 +206,14 @@ func (win *Window) Run() error {
 			if c := doc.ChangeCount(); c != win.lastChange {
 				engine.LayoutDocument(doc)
 				win.lastChange = c
+				win.dirty = true
 			}
-			win.g.Clear(255, 255, 255, 255)
-			engine.RenderNode(win.g, doc)
-			win.g.Present()
+			if win.dirty {
+				win.g.Clear(255, 255, 255, 255)
+				engine.RenderNode(win.g, doc)
+				win.g.Present()
+				win.dirty = false
+			}
 		}
 
 		sdlDelay(10)
@@ -218,16 +228,7 @@ func (win *Window) Run() error {
 // Close 释放窗口资源。
 func (win *Window) Close() {
 	if win.g != nil {
-		for _, f := range win.g.fonts {
-			if f.handle != 0 {
-				ttfCloseFont(f.handle)
-			}
-		}
-		for _, t := range win.g.textures {
-			if t.tex != 0 {
-				sdlDestroyTexture(t.tex)
-			}
-		}
+		win.g.CloseFonts()
 	}
 	if win.renderer != 0 {
 		sdlDestroyRenderer(win.renderer)

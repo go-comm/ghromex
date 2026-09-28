@@ -24,7 +24,7 @@ func resolveStylesTree(e HTMLElement, parentBase *htmlElement, author *Styleshee
 		comp.SetTextAlign(pc.TextAlign())
 	} else {
 		comp.SetColor(NewColor(0, 0, 0, 255))
-		comp.SetFontSize(NewSize(SIZE_PIXEL, 14, 0))
+		comp.SetFontSize(NewSize(SIZE_PIXEL, 16, 0))
 	}
 
 	applyMatchingRules(comp, userAgentStylesheet(), base, e)

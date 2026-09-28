@@ -35,9 +35,10 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement) {
 	}
 
 	if tn, ok := e.(*textNode); ok {
-		fs := 14
+		fs := 16
 		fill := "#000000"
 		fw := ""
+		fam := ""
 		if base.computed != nil {
 			if s := resolveLen(base.computed.FontSize(), 0); s > 0 {
 				fs = s
@@ -49,10 +50,12 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement) {
 			if base.computed.FontWeight() == FontWeightBold {
 				fw = ` font-weight="bold"`
 			}
+			fam = base.computed.FontFamily()
 		}
+		ff := fmt.Sprintf(` font-family="%s"`, escapeXML(svgFontStack(fam)))
 		for _, run := range tn.node.runs {
-			fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d"%s fill="%s">%s</text>`+"\n",
-				run.x, run.y+run.h, fs, fw, fill, escapeXML(run.text))
+			fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d"%s%s fill="%s">%s</text>`+"\n",
+				run.x, run.y+run.h, fs, ff, fw, fill, escapeXML(run.text))
 		}
 		return
 	}
@@ -100,6 +103,19 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement) {
 
 func hexColor(r, g, b uint8) string {
 	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+}
+
+// svgFontStack 为导出的 SVG 文本补全字体栈，让浏览器预览与引擎实际落字一致：
+// 未指定 family 时按引擎 standard（sans-serif → Arial）；
+// 末尾始终附加 CJK per-script fallback（微软雅黑）。浏览器按"字形覆盖"逐字回退，
+// 拉丁命中前者、汉字落到后者，与引擎的分段落字等价。缺省不附加时浏览器会用自己的
+// 默认中文字体（常为宋体），预览观感就与引擎不符了。仅调试导出用途。
+func svgFontStack(cssFamily string) string {
+	cssFamily = strings.TrimSpace(cssFamily)
+	if cssFamily == "" {
+		cssFamily = "Arial" // 引擎 standard = sans-serif（Arial）
+	}
+	return cssFamily + ", 'Microsoft YaHei'"
 }
 
 func escapeXML(s string) string {

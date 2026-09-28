@@ -10,14 +10,15 @@ import (
 
 // text-align：纯文本行按容器内容宽整体偏移（FakeGraphics 字宽估算确定）。
 func TestTextAlignTextLine(t *testing.T) {
-	// body margin 0；div 固定宽 200；"AB" 两个拉丁字符 = 2×(14*3/5)=16px
+	// body margin 0；div 固定宽 200；默认字号 16px（Chrome 基线）；
+	// "AB" 两个拉丁字符 = 2×(16*3/5)=18px
 	for _, tc := range []struct {
 		align string
 		wantX int
 	}{
 		{"left", 0},
-		{"center", (200 - 16) / 2},
-		{"right", 200 - 16},
+		{"center", (200 - 18) / 2},
+		{"right", 200 - 18},
 	} {
 		src := fmt.Sprintf(
 			`<html><body><div id="c" style="width:200px;text-align:%s">AB</div></body></html>`, tc.align)
@@ -54,9 +55,9 @@ func TestTextAlignAtomicBox(t *testing.T) {
 	if got := r.Left().Pixel(); got != 80 {
 		t.Fatalf("atomic box left = %d, want 80", got)
 	}
-	// 内部文本 "Q"(8px) 在 span 内再居中：80 + (40-8)/2 = 96
-	if !strings.Contains(doc.DumpSVG(), `x="96"`) {
-		t.Fatalf("inner run not shifted to 96:\n%s", doc.DumpSVG())
+	// 内部文本 "Q"(16*3/5=9px) 在 span 内再居中：80 + (40-9)/2 = 95
+	if !strings.Contains(doc.DumpSVG(), `x="95"`) {
+		t.Fatalf("inner run not shifted to 95:\n%s", doc.DumpSVG())
 	}
 }
 

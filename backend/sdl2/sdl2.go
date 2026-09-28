@@ -62,6 +62,13 @@ var (
 	ttfSizeUTF8          nativeCall
 	ttfRenderUTF8Blended nativeCall
 	ttfSetFontStyle      nativeCall
+	ttfSetFontSize       nativeCall
+	ttfFontAscent        nativeCall
+	ttfSetFontHinting    nativeCall
+	ttfRenderUTF8LCD     nativeCall
+	hasTTFSetFontSize    bool
+	hasTTFHinting        bool
+	hasTTFLCD            bool
 )
 
 // SDL 常量
@@ -70,6 +77,17 @@ const (
 	windowShown        = 0x00000004
 	windowResizable    = 0x00000020
 	windowPosCenteredX = 0x2FFF0000
+
+	// SDL_ttf 提示模式（TTF_SetFontHinting 参数，整型走 GP 寄存器）。
+	// 实测锁定于捆绑的 SDL2_ttf 2.20.1（TestHintingValueScan 逐个取值渲染
+	// 并与 NORMAL 比 hash）：越界值（如 0x20）被 DLL 静默归一化为 NORMAL，
+	// 输出与 NORMAL 逐字节相同——曾误按"NORMAL=0 LIGHT=2 MONO=4 NONE=8"
+	// 传参，导致 NONE 静默失效、LIGHT 实为 MONO。取值不可凭记忆修改。
+	hintNormal        = 0x00
+	hintLight         = 0x01
+	hintMono          = 0x02
+	hintNone          = 0x03
+	hintLightSubpixel = 0x04
 
 	rendererSoftware     = 0x00000001
 	rendererAccelerated  = 0x00000002
@@ -154,6 +172,12 @@ func doLoad() error {
 	ttfSizeUTF8 = bindTtf("TTF_SizeUTF8")
 	ttfRenderUTF8Blended = bindTtf("TTF_RenderUTF8_Blended")
 	ttfSetFontStyle = bindTtf("TTF_SetFontStyle")
+	// 动态字号与基线查询：face 复用（一个字体文件一个 FT_Face）依赖这两个符号，
+	// 缺失时 Graphics 自动退化为按 (文件,字号,粗体) 各开一个 face 的旧路径。
+	ttfSetFontSize, hasTTFSetFontSize = bindProbe(dllTTF, "TTF_SetFontSize")
+	ttfFontAscent, _ = bindProbe(dllTTF, "TTF_FontAscent")
+	ttfSetFontHinting, hasTTFHinting = bindProbe(dllTTF, "TTF_SetFontHinting")
+	ttfRenderUTF8LCD, hasTTFLCD = bindProbe(dllTTF, "TTF_RenderUTF8_LCD")
 	if bindErr != nil {
 		return fmt.Errorf("解析 SDL2_ttf.dll 符号失败: %w", bindErr)
 	}
@@ -194,6 +218,18 @@ func bindProcOpt(dll *windows.LazyDLL, name string) nativeCall {
 		r, _, _ := proc.Call(args...)
 		return r
 	}
+}
+
+// bindProbe 绑定可选符号并回报是否存在，供调用方按能力选择实现路径。
+func bindProbe(dll *windows.LazyDLL, name string) (nativeCall, bool) {
+	proc := dll.NewProc(name)
+	if err := proc.Find(); err != nil {
+		return func(args ...uintptr) uintptr { return 0 }, false
+	}
+	return func(args ...uintptr) uintptr {
+		r, _, _ := proc.Call(args...)
+		return r
+	}, true
 }
 
 func findLibsDir() string {
