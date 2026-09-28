@@ -58,20 +58,43 @@ func NewWindow(w, h int, title string) (*Window, error) {
 		return nil, fmt.Errorf("SDL_CreateWindow: %s", lastError())
 	}
 
-	// 软件渲染器优先：SDL 的 "software" 后端把像素直接落在窗口表面，
-	// 跨驱动/远程桌面/无 GPU 环境表现一致，且支持 SDL_RenderReadPixels
-	// 回读（accelerated 后端在虚拟显示环境下经常"窗口能开、像素不出"）。
-	// 仅在 software 创建失败时才尝试加速 + vsync。
-	renderer := sdlCreateRenderer(hwnd, ^uintptr(0), rendererSoftware)
-	if renderer == 0 {
-		if os.Getenv("GHROMEX_GPU") != "" {
-			renderer = sdlCreateRenderer(hwnd, ^uintptr(0), rendererAccelerated|rendererPresentVsync)
+	// GPU（accelerated + vsync）优先：硬件后端缩放/合成表现好、功耗低。
+	// 创建失败（无 GPU、驱动不可用）自动回退软件渲染器——"software" 把像素
+	// 直接落在窗口表面，跨驱动/远程桌面环境表现一致，且支持
+	// SDL_RenderReadPixels 回读（Screenshot 依赖它）。
+	// 两类环境直接用软件：GHROMEX_SOFTWARE=1 逃生口（部分虚拟显示驱动能创建
+	// accelerated 渲染器却"窗口能开、像素不出"，自动回退不会触发）；
+	// dummy 无头自检要保持确定性回读行为，不尝试 GPU。
+	softwareOnly := os.Getenv("GHROMEX_SOFTWARE") != "" ||
+		os.Getenv("SDL_VIDEO_DRIVER") == "dummy"
+	gpu := false
+	var gpuErr string
+	var renderer uintptr
+	if !softwareOnly {
+		clearError()
+		renderer = sdlCreateRenderer(hwnd, ^uintptr(0), rendererAccelerated|rendererPresentVsync)
+		if renderer != 0 {
+			gpu = true
+		} else {
+			gpuErr = lastError()
+			fmt.Fprintf(os.Stderr, "ghromex: GPU 渲染器不可用（%s），回退软件渲染\n", gpuErr)
 		}
+	}
+	if renderer == 0 {
+		clearError()
+		renderer = sdlCreateRenderer(hwnd, ^uintptr(0), rendererSoftware)
 	}
 	if renderer == 0 {
 		sdlDestroyWindow(hwnd)
 		runtime.UnlockOSThread()
 		return nil, fmt.Errorf("SDL_CreateRenderer: %s", lastError())
+	}
+	if drawDebug {
+		if gpu {
+			fmt.Fprintln(os.Stderr, "ghromex: renderer=accelerated(GPU)")
+		} else {
+			fmt.Fprintln(os.Stderr, "ghromex: renderer=software")
+		}
 	}
 	sdlSetRenderDrawBlendMode(renderer, blendModeBlend)
 

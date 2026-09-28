@@ -130,7 +130,7 @@ serif → Times New Roman、monospace → Courier New、system-ui → Segoe UI�
 | 变量 | 作用 |
 |---|---|
 | `GHROMEX_DEBUG=1` | 回显绘制失败原因与每次点击的命中/派发结果 |
-| `GHROMEX_GPU=1` | 优先尝试硬件加速渲染器（默认软件渲染器，兼容性最好） |
+| `GHROMEX_SOFTWARE=1` | 强制软件渲染器（默认 GPU 加速，创建失败自动回退软件；用于 GPU 可创建但不出像素的虚拟显示环境） |
 | `GHROMEX_FONT=路径` | 指定 standard 字体（默认 Arial，即 sans-serif） |
 | `GHROMEX_CJK_FONT=路径` | 指定 CJK fallback 字体（默认微软雅黑） |
 | `SDL_VIDEO_DRIVER=dummy` | 无显示器运行（配合 `Window.Screenshot()` 做回读断言） |
