@@ -1,27 +1,99 @@
 <!doctype html>
 <html>
 <head>
-	<title>Ghromex Demo</title>
+	<meta charset="utf-8">
+	<title>Ghromex · 登录</title>
 	<style>
-		body { margin: 0; padding: 24px; background-color: #EDEEF2; }
-		.card { width: 320px; margin: 24px; padding: 20px; background-color: #FFFFFF; border: 1px solid #C8C8C8; }
-		.title { font-size: 20px; font-weight: bold; color: #1F2937; }
-		.row { margin: 12px 0; }
-		.label { width: 64px; }
-		.btn-primary { background-color: #2563EB; color: #FFFFFF; border: 1px solid #2563EB; }
-		#status { color: #6B7280; font-size: 13px; }
+		/* 引擎的 inline 是原子盒：任何文本一律用块级盒，
+		   只有「装饰小块 + 单行短文本」这类确定不换行的才用 inline */
+		body { margin: 0; padding-bottom: 16px; background-color: #EEF1F7; color: #334155; font-size: 14px; }
+
+		/* ── 顶部标题栏 ─────────────────────────────── */
+		.topbar { background-color: #0F172A; padding: 15px 32px 14px 32px; }
+		.brandmark { display: inline-block; width: 12px; height: 12px; background-color: #34D399; margin: 4px 10px 0 0; }
+		.brand { font-size: 15px; font-weight: bold; color: #F8FAFC; }
+		.ver { font-size: 12px; color: #64748B; }
+
+		/* ── 主体：品牌列 + 表单卡片 ─────────────────── */
+		.stage { padding: 40px 40px 0 40px; }
+
+		/* 高度随内容自适应，与右卡片底部大致齐平 */
+		.hero { display: inline-block; width: 300px; padding: 36px;
+		        background-color: #1E293B; border-radius: 10px; margin-right: 32px; }
+		.hero-title { font-size: 26px; font-weight: bold; color: #F8FAFC; margin: 0; }
+		.rule { height: 3px; width: 56px; background-color: #3B82F6; margin: 16px 0 18px 0; }
+		.hero-sub { font-size: 13px; color: #94A3B8; margin: 0 0 40px 0; }
+		.featrow { margin: 0 0 12px 0; }
+		.fdot { display: inline-block; width: 10px; height: 10px; margin: 7px 10px 0 0; }
+		.fdot-green { background-color: #34D399; }
+		.fdot-blue { background-color: #60A5FA; }
+		.fdot-amber { background-color: #FBBF24; }
+		.ftext { font-size: 13px; color: #CBD5E1; }
+		.hero-ver { font-size: 12px; color: #475569; margin-top: 120px; }
+
+		.card { display: inline-block; width: 452px; padding: 36px;
+		        background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; }
+		.eyebrow { font-size: 12px; font-weight: bold; color: #2563EB; margin: 0 0 10px 0; }
+		.card-title { font-size: 22px; font-weight: bold; color: #0F172A; margin: 0; }
+		.card-sub { font-size: 13px; color: #64748B; margin: 10px 0 24px 0; }
+
+		.lbl { font-size: 12px; font-weight: bold; color: #475569; margin: 0 0 8px 0; }
+		.input { display: inline-block; width: 426px; font-size: 14px; padding: 10px 12px; margin: 0 0 18px 0;
+		         background-color: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 6px; }
+
+		.actions { margin: 6px 0 0 0; text-align: center; }
+		.btn-primary { display: inline-block; font-size: 14px; padding: 8px 16px;
+		               background-color: #2563EB; color: #FFFFFF;
+		               border: 1px solid #2563EB; border-radius: 6px; font-weight: bold; }
+		.btn-plain { display: inline-block; font-size: 14px; padding: 8px 16px;
+		             background-color: #FFFFFF; color: #475569;
+		             border: 1px solid #94A3B8; border-radius: 6px; margin-left: 10px; }
+
+		.sep { height: 1px; background-color: #E2E8F0; margin: 26px 0 16px 0; }
+		.sdot { display: inline-block; width: 8px; height: 8px; background-color: #34D399; margin: 7px 10px 0 0; }
+		.status { font-size: 13px; color: #64748B; }
+
+		.foot { font-size: 12px; color: #94A3B8; margin: 8px 0 0 0; padding: 0 40px; }
+		.foot-top { margin-top: 28px; }
 	</style>
 </head>
 <body>
-	<div class="card">
-		<span class="title">Ghromex 登录</span>
-		<div class="row"><span class="label">User:</span><input type="text"></div>
-		<div class="row"><span class="label">Pwd:</span><input type="text"></div>
-		<div class="row">
-			<button class="btn-primary" id="login">登录</button>
-			<button id="reset">重置</button>
-		</div>
-		<span id="status">Ready.</span>
+	<div class="topbar">
+		<span class="brandmark"></span><span class="brand">Ghromex Studio</span><span class="ver">engine v0.1 · HTML/CSS 原生渲染</span>
 	</div>
+
+	<div class="stage">
+		<div class="hero">
+			<div class="hero-title">Ghromex</div>
+			<div class="rule"></div>
+			<div class="hero-sub">用 HTML 与 CSS 直接编写桌面界面。轻量、声明式、所见即所得。</div>
+			<div class="featrow"><span class="fdot fdot-green"></span><span class="ftext">纯 Go 渲染引擎，无 CGO</span></div>
+			<div class="featrow"><span class="fdot fdot-blue"></span><span class="ftext">盒模型布局与 CSS 级联</span></div>
+			<div class="featrow"><span class="fdot fdot-amber"></span><span class="ftext">SDL2 原生窗口后端</span></div>
+			<div class="hero-ver">demo build · 2026-09</div>
+		</div>
+
+		<div class="card">
+			<div class="eyebrow">WELCOME BACK</div>
+			<div class="card-title">登录工作台</div>
+			<div class="card-sub">继续使用 Ghromex 本地引擎渲染的界面。</div>
+
+			<div class="lbl">账号</div>
+			<input class="input" type="text">
+
+			<div class="lbl">密码</div>
+			<input class="input" type="text">
+
+			<div class="actions">
+				<button class="btn-primary" id="login">登 录</button><button class="btn-plain" id="reset">重 置</button>
+			</div>
+
+			<div class="sep"></div>
+			<span class="sdot"></span><span class="status" id="status">等待登录…</span>
+		</div>
+	</div>
+
+	<div class="foot foot-top">Ghromex · 本页面由内置 HTML/CSS 引擎渲染，点击按钮查看交互</div>
+	<div class="foot">© 2026 ghromex · github.com/go-comm/ghromex</div>
 </body>
 </html>

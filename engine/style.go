@@ -23,6 +23,14 @@ const (
 	FontWeightBold
 )
 
+type TextAlign uint8
+
+const (
+	TextAlignLeft TextAlign = iota // 默认（等同 CSS start）
+	TextAlignCenter
+	TextAlignRight
+)
+
 type OnCSSStyleDeclarationChanged interface {
 	OnChanged()
 }
@@ -60,6 +68,10 @@ type CSSStyleDeclaration interface {
 	SetFontFamily(family string) CSSStyleDeclaration
 	FontWeight() FontWeight
 	SetFontWeight(weight FontWeight) CSSStyleDeclaration
+	TextAlign() TextAlign
+	SetTextAlign(align TextAlign) CSSStyleDeclaration
+	BorderRadius() Size
+	SetBorderRadius(radius Size) CSSStyleDeclaration
 }
 
 func newStyle() CSSStyleDeclaration {
@@ -71,6 +83,7 @@ func newStyle() CSSStyleDeclaration {
 	style.padding = NewZeroRect()
 	style.borderW = NewZeroRect()
 	style.borderStyle = BorderStyleSolid
+	style.borderRadius = NewZeroSize()
 	return style
 }
 
@@ -91,6 +104,8 @@ type cssStyleDeclaration struct {
 	fontSize        Size
 	fontFamily      string
 	fontWeight      FontWeight
+	textAlign       TextAlign
+	borderRadius    Size
 }
 
 // copyStyle 复制样式值（不含继承字段之外的引用语义差异）。
@@ -110,6 +125,8 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetFontSize(s.FontSize())
 	c.SetFontFamily(s.FontFamily())
 	c.SetFontWeight(s.FontWeight())
+	c.SetTextAlign(s.TextAlign())
+	c.SetBorderRadius(s.BorderRadius())
 	return c
 }
 
@@ -256,5 +273,25 @@ func (style *cssStyleDeclaration) FontWeight() FontWeight {
 
 func (style *cssStyleDeclaration) SetFontWeight(weight FontWeight) CSSStyleDeclaration {
 	style.fontWeight = weight
+	return style
+}
+
+func (style *cssStyleDeclaration) TextAlign() TextAlign {
+	return style.textAlign
+}
+
+func (style *cssStyleDeclaration) SetTextAlign(align TextAlign) CSSStyleDeclaration {
+	style.textAlign = align
+	return style
+}
+
+func (style *cssStyleDeclaration) BorderRadius() Size {
+	return style.borderRadius
+}
+
+func (style *cssStyleDeclaration) SetBorderRadius(radius Size) CSSStyleDeclaration {
+	if radius != nil {
+		style.borderRadius = radius
+	}
 	return style
 }

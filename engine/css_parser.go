@@ -378,7 +378,28 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		}
 	case "font-family":
 		comp.SetFontFamily(strings.Trim(strings.TrimSpace(value), "\"'"))
-		// border-radius / background-image 等暂未实现，解析容忍、渲染忽略
+	case "text-align":
+		switch v {
+		case "center":
+			comp.SetTextAlign(TextAlignCenter)
+		case "right", "end":
+			comp.SetTextAlign(TextAlignRight)
+		default: // left / start / justify（按左处）
+			comp.SetTextAlign(TextAlignLeft)
+		}
+	case "border-radius":
+		// 仅支持四角统一圆角：取斜杠前（水平半径）第一个长度值；百分比相对短边
+		s := v
+		if i := strings.IndexByte(s, '/'); i >= 0 {
+			s = strings.TrimSpace(s[:i])
+		}
+		if f := strings.Fields(s); len(f) > 0 {
+			s = f[0]
+		}
+		if sz := parseLength(s); sz != nil {
+			comp.SetBorderRadius(sz)
+		}
+		// background-image 等暂未实现，解析容忍、渲染忽略
 	}
 }
 

@@ -4,7 +4,7 @@ import "sort"
 
 // resolveStylesTree 为整棵树计算级联后的最终样式（写入 base.computed）。
 // 优先级：UA 样式表 < 文档样式表（特异度+声明顺序） < 内联 style 属性；
-// color/font-size/font-family/font-weight 沿父链继承。
+// color/font-size/font-family/font-weight/text-align 沿父链继承。
 func resolveStylesTree(e HTMLElement, parentBase *htmlElement, author *Stylesheet) {
 	base := inner(e)
 	if base == nil {
@@ -21,6 +21,7 @@ func resolveStylesTree(e HTMLElement, parentBase *htmlElement, author *Styleshee
 		}
 		comp.SetFontFamily(pc.FontFamily())
 		comp.SetFontWeight(pc.FontWeight())
+		comp.SetTextAlign(pc.TextAlign())
 	} else {
 		comp.SetColor(NewColor(0, 0, 0, 255))
 		comp.SetFontSize(NewSize(SIZE_PIXEL, 14, 0))

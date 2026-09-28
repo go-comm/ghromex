@@ -106,8 +106,9 @@ libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 ## 已支持的 CSS 子集
 
 `display(none/inline/inline-block/block)`、`width/height`、`margin*`、`padding*`、
-`border` 简写与 `border-width/color/style`、`background-color`/`background`、
-`color`、`font-size`、`font-weight(bold)`、`font-family`；
+`border` 简写与 `border-width/color/style`、`border-radius`(四角统一，仅水平半径)、
+`background-color`/`background`、`color`、`font-size`、`font-weight(bold)`、`font-family`、
+`text-align(left/center/right)`；
 选择器支持标签、`.class`、`#id`、类型+class/id 组合链（如 `div.wide`）与特异度排序。
 
 ## 已知限制

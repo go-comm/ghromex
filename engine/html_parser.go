@@ -194,6 +194,10 @@ func parseInto(htmlNode HTMLElement, headEl, bodyEl HTMLElement, src string, doc
 			continue
 		case "head":
 			if doc != nil && headEl != nil {
+				// 标签属性回填到预建 head（同 body：内联 style/id/class 不能丢）
+				for _, kv := range attrs {
+					headEl.SetAttribute(kv[0], decodeEntities(kv[1]))
+				}
 				stack = stack[:1]
 				push(headEl)
 			}
@@ -201,6 +205,10 @@ func parseInto(htmlNode HTMLElement, headEl, bodyEl HTMLElement, src string, doc
 			continue
 		case "body":
 			if doc != nil && bodyEl != nil {
+				// 标签属性回填到预建 body：<body style="…"> 的内联样式此前会被丢弃
+				for _, kv := range attrs {
+					bodyEl.SetAttribute(kv[0], decodeEntities(kv[1]))
+				}
 				stack = stack[:1]
 				push(bodyEl)
 			}

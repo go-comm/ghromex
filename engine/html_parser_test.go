@@ -33,3 +33,13 @@ func TestParseFragment(t *testing.T) {
 		t.Fatal("fragment has no children")
 	}
 }
+
+// 回归测试：<body style="…"> 的属性必须回填到文档预建的 body，
+// 此前内联样式被静默丢弃（<head> 同理）。
+func TestParserBodyInlineStyle(t *testing.T) {
+	src := `<html><body style="background-color:#FFFFFF"><div>x</div></body></html>`
+	buf, _ := openBuffered(t, 40, 30, src)
+	if r, g, b, a := colorAt(t, buf, 2, 2); r != 0xFF || g != 0xFF || b != 0xFF || a != 0xFF {
+		t.Fatalf("body inline bg = %02X%02X%02X%02X, want FFFFFFFF", r, g, b, a)
+	}
+}

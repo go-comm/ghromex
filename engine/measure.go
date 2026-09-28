@@ -69,6 +69,36 @@ func maxInt(a, b int) int {
 	return b
 }
 
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// shiftInlineX 将行内原子盒（inline/inline-block 子树）整体水平平移 dx。
+// 引擎内部坐标为绝对值（内容盒 x 与各文本 run x），逐层平移即可，
+// 渲染与命中测试随之一致。
+func shiftInlineX(e HTMLElement, dx int) {
+	if dx == 0 || e == nil {
+		return
+	}
+	if tn, ok := e.(*textNode); ok {
+		for i := range tn.node.runs {
+			tn.node.runs[i].x += dx
+		}
+		return
+	}
+	base := inner(e)
+	if base == nil {
+		return
+	}
+	base.setX(base.x + dx)
+	for _, c := range base.children {
+		shiftInlineX(c, dx)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 单盒布局
 // ---------------------------------------------------------------------------
@@ -111,7 +141,13 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy int) (retW, r
 	el.setY(cy)
 
 	remainH := outerH - mg[eTop] - mg[eBottom] - bd[eTop] - bd[eBottom] - pd[eTop] - pd[eBottom]
-	flowW, flowH := layoutChildren(g, el, contentW, remainH, cx, cy)
+	// shrink-to-fit 盒的可用宽是收缩前的临时值，按它居中会把文本 run
+	// 推到最终收缩后的盒外；而收缩后单行本就铺满盒宽，强制左对齐等价。
+	align := comp.TextAlign()
+	if shrinkWrap {
+		align = TextAlignLeft
+	}
+	flowW, flowH := layoutChildren(g, el, contentW, remainH, cx, cy, align)
 
 	contentH := resolveLen(comp.Height(), outerH)
 	if contentH < 0 {
@@ -152,6 +188,7 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy int) (retW, r
 
 type lineItem struct {
 	tn    *textNode
+	el    HTMLElement // 行内原子盒（inline/inline-block），文本项为 nil
 	token string
 	x     int
 	y     int
@@ -159,7 +196,7 @@ type lineItem struct {
 	h     int
 }
 
-func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int) (flowW, flowH int) {
+func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int, align TextAlign) (flowW, flowH int) {
 	cursorX := cx
 	cursorY := cy
 	lineH := 0
@@ -176,12 +213,25 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int)
 	}
 
 	flushLine := func() {
+		// text-align：行宽不足内容宽时整体平移（溢出时 dx 钳 0，左对齐语义不变）
+		dx := 0
+		if align != TextAlignLeft && len(curLine) > 0 {
+			if free := contentW - (cursorX - cx); free > 0 {
+				if align == TextAlignCenter {
+					dx = free / 2
+				} else {
+					dx = free
+				}
+			}
+		}
 		for _, it := range curLine {
 			if it.tn != nil {
 				y := it.y + (lineH-it.h)/2
 				it.tn.node.runs = append(it.tn.node.runs, textRun{
-					text: it.token, x: it.x, y: y, w: it.w, h: it.h,
+					text: it.token, x: it.x + dx, y: y, w: it.w, h: it.h,
 				})
+			} else if it.el != nil && dx != 0 {
+				shiftInlineX(it.el, dx)
 			}
 		}
 		if lineH > 0 {
@@ -253,7 +303,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int)
 			flushLine()
 			ow, oh = layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY)
 		}
-		it := lineItem{x: cursorX, y: cursorY, w: maxInt(ow, 1), h: maxInt(oh, 1)}
+		it := lineItem{x: cursorX, y: cursorY, w: maxInt(ow, 1), h: maxInt(oh, 1), el: che}
 		addItem(it)
 	}
 
