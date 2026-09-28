@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+<head>
+	<title>Ghromex Demo</title>
+	<style>
+		body { margin: 0; padding: 24px; background-color: #EDEEF2; }
+		.card { width: 320px; margin: 24px; padding: 20px; background-color: #FFFFFF; border: 1px solid #C8C8C8; }
+		.title { font-size: 20px; font-weight: bold; color: #1F2937; }
+		.row { margin: 12px 0; }
+		.label { width: 64px; }
+		.btn-primary { background-color: #2563EB; color: #FFFFFF; border: 1px solid #2563EB; }
+		#status { color: #6B7280; font-size: 13px; }
+	</style>
+</head>
+<body>
+	<div class="card">
+		<span class="title">Ghromex 登录</span>
+		<div class="row"><span class="label">User:</span><input type="text"></div>
+		<div class="row"><span class="label">Pwd:</span><input type="text"></div>
+		<div class="row">
+			<button class="btn-primary" id="login">登录</button>
+			<button id="reset">重置</button>
+		</div>
+		<span id="status">Ready.</span>
+	</div>
+</body>
+</html>
