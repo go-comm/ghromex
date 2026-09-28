@@ -307,10 +307,13 @@ func cmpSurfaceWH(s uintptr) (int, int) {
 }
 
 // cmpBlendedCoverage 渲染覆盖 surface 并取紧致 w*h 覆盖字节。
-// 实测：白色 blended 也是 32bpp RGBA（pitch≈4w），且非白快速路径假设；
-// 因此用醒目色 (1,2,253) 渲染——无论 SDL_ttf 把透明像素的 RGB 置常量还是
-// 置零，alpha 字节位置都是 4 候选中数值跨度最大者（覆盖连续分布 0..255，
-// RGB 只有 ≤3 个离散值），跨度不足 32 则 fail 而非错位解码。
+// 实测 blended 为 32bpp ARGB8888 surface（白色也不例外）。每像素字节数直接
+// 读 SDL_PixelFormat.BytesPerPixel——BitsPerPixel/BytesPerPixel 是相邻两个
+// uint8（x64: @16/@17，实测把 @16 按 int32 读得 1056=32+4*256 即证），并与
+// BitsPerPixel 互验。不可凭记忆硬编字节序，也不可拿 pitch/w 反推：窄 surface
+// 行末填充会让商超出真实值（"登录" w=52 而 pitch=272=4×68，272/52=5）。
+// 覆盖通道用跨度判：醒目色 (1,2,253) 渲染后，alpha=覆盖连续取 0..255 跨度
+// 最大，RGB 至多 3 个离散值；跨度不足 32 则 fail 而非错位解码。
 func cmpBlendedCoverage(t *testing.T, font uintptr, text string) (int, int, []byte) {
 	t.Helper()
 	b, p := cBytes(text)
@@ -323,9 +326,12 @@ func cmpBlendedCoverage(t *testing.T, font uintptr, text string) (int, int, []by
 	w, h := cmpSurfaceWH(s)
 	pitch := int(*(*int32)(ptrAt(s + 24)))
 	base := *(*uintptr)(ptrAt(s + 32))
-	bpp := pitch / w
-	if w <= 0 || h <= 0 || bpp < 1 || bpp > 4 || (bpp == 1 && pitch > w+3) {
-		t.Fatalf("blended surface 无法推断字节/像素: w=%d h=%d pitch=%d (%s)", w, h, pitch, cmpFormatName(t, s))
+	formatPtr := *(*uintptr)(ptrAt(s + 8))
+	bits := int(*(*uint8)(ptrAt(formatPtr + 16)))
+	bpp := int(*(*uint8)(ptrAt(formatPtr + 17)))
+	if w <= 0 || h <= 0 || bpp < 1 || bpp > 4 || bpp*w > pitch || (bits%8 == 0 && bits/8 != bpp) {
+		t.Fatalf("blended surface 布局假设被打破: w=%d h=%d pitch=%d bits=%d bytes=%d (%s)",
+			w, h, pitch, bits, bpp, cmpFormatName(t, s))
 	}
 	rowAt := func(y int) []byte {
 		return unsafe.Slice((*byte)(ptrAt(base+uintptr(y)*uintptr(pitch))), pitch)
@@ -428,7 +434,8 @@ func cmpRenderLCD(t *testing.T, font uintptr, text string) (int, int, []byte) {
 }
 
 // cmpDecodeSurfaceRGBA 不假设 SDL_PixelFormat 布局的 surface 解码：
-//  1. bpp 由 pitch/w 推断（3=24bit 密排，4=32bit 含 alpha）；
+//  1. bpp 与位深读 SDL_PixelFormat 的两个 uint8（Bits@16 Bytes@17），
+//     再以 bpp*w<=pitch 守卫——与 cmpBlendedCoverage 同源，禁止 pitch/w 反推；
 //  2. 墨体像素（≥3 字节 ≤60，对应 #0f172a=15,23,42）各字节位置取均值，
 //     与三指纹贪心指派 → R/G/B 字节位置；4bpp 余下位置是 alpha（均值高=255
 //     有效，低=X 字节未定义）；
@@ -438,12 +445,11 @@ func cmpDecodeSurfaceRGBA(t *testing.T, s uintptr) (int, int, []byte, string) {
 	w, h := cmpSurfaceWH(s)
 	pitch := int(*(*int32)(ptrAt(s + 24)))
 	base := *(*uintptr)(ptrAt(s + 32))
-	if w <= 0 || h <= 0 || pitch <= 0 {
-		t.Fatalf("surface 尺寸异常: w=%d h=%d pitch=%d", w, h, pitch)
-	}
-	bpp := pitch / w
-	if bpp < 3 || bpp > 4 {
-		t.Fatalf("无法推断每像素字节数: w=%d pitch=%d（LCD 预期 24/32bit）", w, pitch)
+	formatPtr := *(*uintptr)(ptrAt(s + 8))
+	bits := int(*(*uint8)(ptrAt(formatPtr + 16)))
+	bpp := int(*(*uint8)(ptrAt(formatPtr + 17)))
+	if w <= 0 || h <= 0 || pitch <= 0 || bpp < 3 || bpp > 4 || bpp*w > pitch || (bits%8 == 0 && bits/8 != bpp) {
+		t.Fatalf("LCD surface 布局假设被打破: w=%d h=%d pitch=%d bits=%d bytes=%d", w, h, pitch, bits, bpp)
 	}
 	at := func(y, x int) []byte {
 		return unsafe.Slice((*byte)(ptrAt(base+uintptr(y)*uintptr(pitch))), pitch)[x*bpp:][:bpp]

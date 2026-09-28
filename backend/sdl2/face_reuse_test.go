@@ -72,23 +72,8 @@ func sizeTTF(t *testing.T, font uintptr, text string) (int, int) {
 	return int(w), int(h)
 }
 
-// renderPixelsTTF 用 font 渲染探针文本（白色字形 blended），返回灰度像素。
-func renderPixelsTTF(t *testing.T, font uintptr) []byte {
-	t.Helper()
-	var c uint8 = 0xFF
-	color := uintptr(c) | uintptr(c)<<8 | uintptr(c)<<16 | uintptr(255)<<24
-	b, p := cBytes(reuseProbeText)
-	s := ttfRenderUTF8Blended(font, p, color)
-	runtime.KeepAlive(b)
-	if s == 0 {
-		t.Fatalf("RenderUTF8_Blended: %s", lastError())
-	}
-	defer sdlFreeSurface(s)
-	return readSurfacePixels(s)
-}
-
 // TestFaceReuseSwitchSize 验证：open(13)→SetFontSize(26) 与直接 open(26)
-// 的度量、像素完全一致；bold 切换同理。
+// 的度量、覆盖像素完全一致；bold 切换同理。
 func TestFaceReuseSwitchSize(t *testing.T) {
 	initSDLTTF(t)
 	defer ttfQuit()
@@ -107,9 +92,14 @@ func TestFaceReuseSwitchSize(t *testing.T) {
 		t.Fatalf("动态切字号度量不一致: ref=(%d,%d) dyn=(%d,%d)", wRef, hRef, w, h)
 	}
 
-	pRef, pDyn := renderPixelsTTF(t, ref), renderPixelsTTF(t, dyn)
-	if len(pRef) != len(pDyn) {
-		t.Fatalf("surface 尺寸不同 len %d vs %d", len(pRef), len(pDyn))
+	// 用 cmpBlendedCoverage（fontcmp_test.go，32bpp surface 取真覆盖通道）。
+	// 旧 readSurfacePixels 按"blended 是 8bpp"的假设每行只读前 w 字节，
+	// 实测 blended 是 pitch≈4w 的 32bpp surface，旧读法实际只覆盖每行前 1/4
+	// 像素——两侧一致所以对比仍成立，但已丢失后半行信息，不再保留。
+	wr, hr, pRef := cmpBlendedCoverage(t, ref, reuseProbeText)
+	wd, hd, pDyn := cmpBlendedCoverage(t, dyn, reuseProbeText)
+	if wr != wd || hr != hd || len(pRef) != len(pDyn) {
+		t.Fatalf("surface 尺寸不同 (%d,%d) vs (%d,%d)", wr, hr, wd, hd)
 	}
 	diff := 0
 	for i := range pRef {
@@ -195,9 +185,8 @@ func TestSetFontSizePreservesHinting(t *testing.T) {
 	ww, wh, covWant := cmpBlendedCoverage(t, want, cmpProbeText)
 
 	// 复用：13 建 face→设 LIGHT→切 26→切 bold 再切回，覆盖像素应与基准一致。
-	// 用 cmpBlendedCoverage（32bpp surface 取真覆盖通道）而非 renderPixelsTTF：
-	// 后者白色单字节读法对 hinting 差异不敏感；且 LIGHT/NORMAL 连文本宽都不同
-	// （163 vs 165），若切字号重置了 hinting，长度校验第一时间就能抓住。
+	// LIGHT/NORMAL 连文本宽都不同（163 vs 165），若切字号重置了 hinting，
+	// 尺寸校验第一时间就能抓住。
 	dyn := openTTF(t, path, 13)
 	defer ttfCloseFont(dyn)
 	ttfSetFontHinting(dyn, uintptr(hintLight))
@@ -222,21 +211,9 @@ func TestSetFontSizePreservesHinting(t *testing.T) {
 	}
 }
 
-// readSurfacePixels 按 SDL_Surface 内存布局取像素（x64: w@16 h@20 pitch@24 pixels@32）。
-// uintptr→Pointer 一律经 ptrAt 内存重解释，规避 vet 的 unsafeptr 误报（同 goString 手法）。
-func readSurfacePixels(s uintptr) []byte {
-	const surfaceW, surfaceH, surfacePitch, surfacePixels = 16, 20, 24, 32
-	w := *(*int32)(ptrAt(s + surfaceW))
-	h := *(*int32)(ptrAt(s + surfaceH))
-	pitch := *(*int32)(ptrAt(s + surfacePitch))
-	base := *(*uintptr)(ptrAt(s + surfacePixels))
-	out := make([]byte, 0, int(pitch)*int(h))
-	for y := 0; y < int(h); y++ {
-		row := unsafe.Slice((*byte)(ptrAt(base+uintptr(y)*uintptr(pitch))), int(w))
-		out = append(out, row...)
-	}
-	return out
-}
+// readSurfacePixels 已删除：blended 实测是 32bpp（pitch≈4w），旧 8bpp 读法
+// 只读到每行前 1/4 像素；统一用 fontcmp_test.go 的 cmpBlendedCoverage 取真
+// 覆盖通道（含跨度自校准与 stride 行读取）。布局读取手法见 ptrAt。
 
 // ptrAt 把局部 uintptr 变量的位模式按指针值读出（非 uintptr 运算直转，vet 友好）。
 func ptrAt(u uintptr) unsafe.Pointer {
