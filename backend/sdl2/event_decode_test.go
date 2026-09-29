@@ -6,6 +6,44 @@ import "testing"
 
 // 回归测试：decodeEvent 的字段偏移以 .temp/eventprobe 对 SDL 2.28.4
 // （dummy 驱动真实产生的事件）实测为准，防止再次按记忆/文档改错。
+// 键盘/文本事件 dummy 不会产生（需 OS 输入），偏移按 SDL2 头文件
+// SDL_keyboard.h / SDL_events.h 结构定义锁定（ABI 自 2.0.0 未变）。
+// 事件类型值同样经 SDL_events.h 原文核对：SDL_TEXTINPUT=0x303（曾凭
+// 记忆错标 0x400=SDL_MOUSEMOTION，decode 单测与常量共用错值是自闭环、
+// 抓不出来——由 run_events_test.go 端到端注入 + 真机敲字双重兜底）。
+
+func TestDecodeKeyDownEvent(t *testing.T) {
+	var buf [eventBufferSize]byte
+	// SDL_KeyboardEvent: type@0 ts@4 windowID@8 state@12 repeat@13
+	// keysym{scancode@16, sym@20, mod@24}
+	put32(buf[0:], eventKeyDown)
+	put32(buf[4:], 789)
+	put32(buf[8:], 1)
+	buf[12] = 1           // SDL_PRESSED
+	buf[13] = 1           // repeat
+	put32(buf[16:], 42)   // scancode
+	put32(buf[20:], 0x08) // SDLK_BACKSPACE
+	put32(buf[24:], 0)    // mod+unused
+
+	ev := decodeEvent(&buf)
+	if ev.sym != 0x08 {
+		t.Fatalf("sym = 0x%X, want 0x8（读错 keysym.sym 偏移）", ev.sym)
+	}
+}
+
+func TestDecodeTextInputEvent(t *testing.T) {
+	var buf [eventBufferSize]byte
+	// SDL_TextInputEvent: type@0 ts@4 windowID@8 text[32]@12（UTF-8 NUL 结尾）
+	put32(buf[0:], eventTextInput)
+	put32(buf[4:], 999)
+	put32(buf[8:], 1)
+	copy(buf[12:], []byte("A中")) // 9 字节 + NUL
+
+	ev := decodeEvent(&buf)
+	if ev.text != "A中" {
+		t.Fatalf("text = %q, want A中", ev.text)
+	}
+}
 
 func TestDecodeMouseButtonEvent(t *testing.T) {
 	var buf [eventBufferSize]byte

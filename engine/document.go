@@ -58,6 +58,7 @@ type htmlDocument struct {
 	sheet     *Stylesheet
 	head      HTMLHeadElement
 	body      HTMLBodyElement
+	focus     HTMLElement // 当前聚焦的可编辑输入（v1 仅 input），nil 无焦点
 	changed   int64
 	onChanged func()
 }

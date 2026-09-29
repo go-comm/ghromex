@@ -45,10 +45,17 @@ func RenderNode(g Graphics, node HTMLElement) {
 	if g == nil {
 		g = NewFakeGraphics()
 	}
-	renderNode(g, node, nil)
+	var focus HTMLElement
+	if d, ok := node.(*htmlDocument); ok {
+		focus = d.focus
+	}
+	renderNode(g, node, nil, focus)
 }
 
-func renderNode(g Graphics, e HTMLElement, parentPaint Paint) {
+// focusBlue 是 v1 硬编码的聚焦框颜色（演示主题主色）。
+var focusBlue = NewColor(37, 99, 235, 255)
+
+func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement) {
 	if e == nil {
 		return
 	}
@@ -92,6 +99,8 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint) {
 		return
 	}
 
+	focused := focus != nil && inner(focus) == base
+
 	// 元素：背景与边框（外扩到边框盒）
 	if comp != nil {
 		bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
@@ -109,10 +118,44 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint) {
 		if bc := comp.BorderColor(); bc != nil && comp.BorderStyle() != BorderStyleNone && bw > 0 && bh > 0 {
 			strokeRoundedRect(g, bx, by, bw, bh, r, bd, bc)
 		}
+
+		// input：value 文本 + 常亮光标 + 聚焦蓝框（最小输入闭环 v1）。
+		// 文本左对齐、垂直居中；宽度溢出时舍头部保留尾部（光标在尾部，
+		// 所见即正在输入的末尾）。
+		if strings.EqualFold(base.tagName, "input") && bw > 0 && bh > 0 {
+			size := p.Size().Pixel()
+			val := base.GetAttribute("value")
+			tw, th := g.MeasureText(val, size, p.Bold(), p.FontFamily())
+			runes := []rune(val)
+			for tw > base.width-4 && len(runes) > 1 {
+				runes = runes[1:]
+				val = string(runes)
+				tw, th = g.MeasureText(val, size, p.Bold(), p.FontFamily())
+			}
+			tx := base.x
+			ty := base.y
+			if th < base.height {
+				ty += (base.height - th) / 2
+			}
+			if val != "" {
+				g.DrawText(tx, ty, tw, th, p, val)
+			}
+			if focused {
+				// 光标：紧跟文本尾部的 1px 竖线（文本色）
+				cc := p.Color()
+				if cc == nil {
+					cc = NewColor(0, 0, 0, 255)
+				}
+				if th > 2 {
+					g.DrawColor(tx+tw+1, ty, 1, th-2, cc)
+				}
+				strokeRoundedRect(g, bx, by, bw, bh, r, edges{1, 1, 1, 1}, focusBlue)
+			}
+		}
 	}
 
 	for _, child := range base.children {
-		renderNode(g, child, p)
+		renderNode(g, child, p, focus)
 	}
 }
 

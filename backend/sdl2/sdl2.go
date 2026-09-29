@@ -61,6 +61,8 @@ var (
 	sdlSetTextureBlendMode      nativeCall
 	sdlFreeSurface              nativeCall
 	sdlPollEvent                nativeCall
+	sdlPushEvent                nativeCall
+	sdlStartTextInput           nativeCall
 	sdlDelay                    nativeCall
 	sdlGetTicks                 nativeCall
 	sdlQueryTexture             nativeCall
@@ -111,6 +113,8 @@ const (
 
 	eventQuit            = 0x100
 	eventWindow          = 0x200
+	eventKeyDown         = 0x300 // SDL_KEYDOWN
+	eventTextInput       = 0x303 // SDL_TEXTINPUT（0x300 KEYDOWN/0x301 KEYUP/0x302 TEXTEDITING/0x303 TEXTINPUT；0x400 是 SDL_MOUSEMOTION，SDL_events.h 原文核对，勿凭记忆写——曾错标 0x400 致真机收不到文本事件）
 	eventMouseButtonDown = 0x401
 	eventMouseButtonUp   = 0x402
 
@@ -180,6 +184,12 @@ func doLoad() error {
 	sdlSetTextureBlendMode = bindSdl("SDL_SetTextureBlendMode")
 	sdlFreeSurface = bindSdl("SDL_FreeSurface")
 	sdlPollEvent = bindSdl("SDL_PollEvent")
+	// SDL_TEXTINPUT 由驱动在“文本输入激活”时才产生可打印字符事件
+	// （SDL2 wiki SDL_StartTextInput：要收 TextInputEvent 必须显式启用）。
+	// 未启用时症状：聚焦/光标正常、敲字无响应。真机漏调即此 bug。
+	sdlStartTextInput = bindSdl("SDL_StartTextInput")
+	// 测试用：向事件队列注入 SDL 层事件，端到端验证事件消费链路。
+	sdlPushEvent = bindSdl("SDL_PushEvent")
 	sdlDelay = bindSdl("SDL_Delay")
 	sdlGetTicks = bindSdl("SDL_GetTicks")
 	sdlQueryTexture = bindSdl("SDL_QueryTexture")
@@ -331,6 +341,8 @@ type event struct {
 	button      uint8
 	state       uint8
 	x, y        int32
+	sym         int32  // KEYDOWN: keysym.sym
+	text        string // TEXTINPUT: UTF-8 文本（IME 组合完成串走这里）
 }
 
 func pollEvent() (event, bool) {
@@ -360,6 +372,20 @@ func decodeEvent(buf *[eventBufferSize]byte) event {
 		ev.state = buf[17]
 		ev.x = int32(le32(buf[20:24]))
 		ev.y = int32(le32(buf[24:28]))
+	case eventKeyDown:
+		// SDL_KeyboardEvent（SDL_keyboard.h）：state@12 repeat@13，
+		// keysym{scancode@16, sym@20, mod@24}。键盘事件 dummy 驱动不会
+		// 自发产生，无法像 windowEvent 枚举那样真机反推——结构体布局
+		// 以 SDL2 头文件定义为准（ABI 自 2.0.0 稳定）。
+		ev.sym = int32(le32(buf[20:24]))
+	case eventTextInput:
+		// SDL_TextInputEvent：char text[32] 紧接 windowID，偏移 12，
+		// UTF-8 NUL 结尾（SDL 已把 IME 候选确认串组好）。
+		end := 12
+		for end < 44 && buf[end] != 0 {
+			end++
+		}
+		ev.text = string(buf[12:end])
 	}
 	return ev
 }

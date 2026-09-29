@@ -33,6 +33,8 @@ func ElementAt(root HTMLElement, x, y int) HTMLElement {
 func OnDocumentClick(doc HTMLDocument, x, y int) bool {
 	ev := &MouseEvent{Type: EventClick, X: x, Y: y}
 	target := ElementAt(doc, x, y)
+	// 焦点先于 click 处理器更新（聚焦新目标后处理器才能读到正确状态）。
+	updateClickFocus(doc, target)
 	handled := false
 	for e := target; e != nil; e = e.ParentElement() {
 		base := inner(e)

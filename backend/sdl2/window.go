@@ -98,6 +98,9 @@ func NewWindow(w, h int, title string) (*Window, error) {
 		}
 	}
 	sdlSetRenderDrawBlendMode(renderer, blendModeBlend)
+	// 激活 SDL 文本输入：不启用则驱动不会为可打印字符发 SDL_TEXTINPUT
+	//（中文 IME 组合串同样依赖此开关），真机表现为“有光标无法输入”。
+	sdlStartTextInput()
 
 	return &Window{
 		w: w, h: h, title: title,
@@ -230,6 +233,16 @@ func (win *Window) Run() error {
 					// 被覆盖后重新暴露：内容已丢（Win7 无 DWM + GPU 后缓冲），
 					// 布局未变无需重排，强制重绘即可。
 					win.dirty = true
+				}
+			case eventKeyDown:
+				if win.doc != nil {
+					// 控制键（Backspace/Tab）；value/焦点变化经 markChanged
+					// 触发 changed → 下方重排+重绘链路，无需手动置 dirty。
+					engine.OnDocumentKeyDown(win.doc, int(ev.sym))
+				}
+			case eventTextInput:
+				if win.doc != nil && ev.text != "" {
+					engine.OnDocumentTextInput(win.doc, ev.text)
 				}
 			case eventMouseButtonUp:
 				if ev.button == mouseButtonLeft && win.doc != nil {
