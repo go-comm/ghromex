@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/go-comm/ghromex/engine"
@@ -32,8 +33,9 @@ func TestInputFocusAndEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := doc.QuerySelector("#a")
+	b := doc.QuerySelector("#b")
 	c := doc.QuerySelector("#c")
-	if a == nil || c == nil {
+	if a == nil || b == nil || c == nil {
 		t.Fatal("inputs not found")
 	}
 
@@ -65,10 +67,14 @@ func TestInputFocusAndEdit(t *testing.T) {
 		t.Fatalf("value = %q, want hello你", v)
 	}
 
-	// Tab 在可编辑输入间循环：#a → #c（password 不在 v1 编辑集）→ 回绕 #a
+	// Tab 在可编辑输入间循环（password 同在编辑集）：#a → #b → #c → 回绕 #a
 	if !engine.OnDocumentKeyDown(doc, engine.KeyTab) {
 		t.Fatal("Tab must be consumed")
 	}
+	if engine.FocusedElement(doc) != b {
+		t.Fatalf("focus after Tab = %v, want #b(password)", engine.FocusedElement(doc))
+	}
+	engine.OnDocumentKeyDown(doc, engine.KeyTab)
 	if engine.FocusedElement(doc) != c {
 		t.Fatalf("focus after Tab = %v, want #c", engine.FocusedElement(doc))
 	}
@@ -109,5 +115,72 @@ func TestInputValueRendered(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("input value text not drawn, Texts=%v", buf.Texts)
+	}
+}
+
+// password 与 text 同为可编辑输入：可点击聚焦、可键入/删除；绘制与 SVG
+// 导出一律按 ● 掩码、明文不落画（此前 password 不在编辑集，点不进也敲不进）。
+func TestPasswordInputEditableAndMasked(t *testing.T) {
+	vp := engine.NewHeadlessViewport(400, 300)
+	doc, err := engine.OpenDocument(vp, inputPage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := doc.QuerySelector("#b")
+	if b == nil {
+		t.Fatal("password input not found")
+	}
+
+	// 点击密码框 → 聚焦
+	x, y := focusXY(t, doc, "#b")
+	engine.OnDocumentClick(doc, x, y)
+	if engine.FocusedElement(doc) != b {
+		t.Fatalf("focus after click = %v, want #b(password)", engine.FocusedElement(doc))
+	}
+
+	// 键入与删除
+	if !engine.OnDocumentTextInput(doc, "secret") {
+		t.Fatal("TextInput must be consumed while password focused")
+	}
+	if v := b.GetAttribute("value"); v != "secret" {
+		t.Fatalf("value = %q, want secret", v)
+	}
+	if !engine.OnDocumentKeyDown(doc, engine.KeyBackspace) {
+		t.Fatal("Backspace must be consumed")
+	}
+	if v := b.GetAttribute("value"); v != "secre" {
+		t.Fatalf("value after Backspace = %q, want secre", v)
+	}
+
+	// 绘制：6 位掩码（重新输入满 6 位再查）、明文绝不出现
+	if !engine.OnDocumentTextInput(doc, "t") {
+		t.Fatal("TextInput must be consumed")
+	}
+	dots := strings.Repeat("●", 6)
+	buf := engine.NewBufferGraphics(400, 300)
+	engine.RenderNode(buf, doc)
+	gotMask, gotPlain := false, false
+	for _, s := range buf.Texts {
+		if s == dots {
+			gotMask = true
+		}
+		if strings.Contains(s, "secret") {
+			gotPlain = true
+		}
+	}
+	if !gotMask {
+		t.Fatalf("掩码文本未绘制, Texts=%v", buf.Texts)
+	}
+	if gotPlain {
+		t.Fatalf("password 明文被绘制, Texts=%v", buf.Texts)
+	}
+
+	// SVG 导出与渲染同构：含掩码、不含明文
+	svg := doc.DumpSVG()
+	if !strings.Contains(svg, dots) {
+		t.Fatalf("SVG 未含掩码文本: %.200s", svg)
+	}
+	if strings.Contains(svg, "secret") {
+		t.Fatal("SVG 含 password 明文")
 	}
 }

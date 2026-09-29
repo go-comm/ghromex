@@ -9,7 +9,8 @@
 
   一致区（数值对齐 Chrome/Windows 实测）：
   - h2/h3 字号与段距、p 段距（含相邻块 margin 折叠）、label 行内、form 块级
-  - text/password 输入框外盒 177x21（password 值渲染为 ● 掩码）
+  - text/password 输入框外盒 177x21（password 可点击聚焦输入，值渲染为
+    ● 掩码——明文只存于 value 属性，光标/点击定位同掩码宽度）
   - radio/checkbox 13x13 控件（radio 正圆）、点击切换选中（强调色方块 +
     白色对勾 / 圆环 + 实心圆，首项 radio 默认 checked 便于对照）
   - submit/reset 按钮外观，外盒高 25、value 文本居中

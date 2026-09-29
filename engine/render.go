@@ -228,11 +228,9 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 				}
 			default:
 				size := p.Size().Pixel()
-				full := base.GetAttribute("value")
-				if typ == "password" && full != "" {
-					// 密码掩码：每位一个实心圆点（与浏览器一致）
-					full = strings.Repeat("●", len([]rune(full)))
-				}
+				// password 已在此按 ● 掩码（displayValue），下方测量/截断/
+				// 光标前缀宽全部以掩码文本为口径。
+				full := displayValue(base)
 				fullRunes := []rune(full)
 				val, runes := full, fullRunes
 				tw, th := g.MeasureText(val, size, p.Bold(), p.FontFamily())

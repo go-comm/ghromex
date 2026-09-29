@@ -18,8 +18,9 @@ const (
 	KeyUp        = 0x40000052 // SDL_SCANCODE_UP    (82)
 )
 
-// editableInput 判断元素是否为可编辑输入：<input> 的 text 类型
-// （type 未写按 HTML 规范即 text）与 <textarea>。
+// editableInput 判断元素是否为可编辑输入：<input> 的 text/password 类型
+// （type 未写按 HTML 规范即 text）与 <textarea>。password 与 text 同为
+// 可聚焦输入框（编辑语义一致，仅绘制时掩码，见 displayValue）。
 func editableInput(e HTMLElement) bool {
 	base := inner(e)
 	if base == nil {
@@ -30,9 +31,24 @@ func editableInput(e HTMLElement) bool {
 		return true
 	case "input":
 		t := strings.ToLower(base.GetAttribute("type"))
-		return t == "" || t == "text"
+		return t == "" || t == "text" || t == "password"
 	}
 	return false
+}
+
+// displayValue 返回输入的显示文本：password 逐位掩码为 ●（每位一个实心
+// 圆点，与浏览器一致），其余原样。掩码 rune 数与原值一致，光标下标、
+// 行区间在原值与显示文本间可直接互换；但宽度不同（● ≠ 明文字符），
+// 所以一切按显示文本做的测量——controlLayout（点击落光标/Home/End 行
+// 边界）、渲染截断与光标前缀宽、SVG 导出——必须统一走这里，否则光标
+// 会按明文宽度画到错位。
+func displayValue(b *htmlElement) string {
+	v := b.GetAttribute("value")
+	if v == "" || !strings.EqualFold(b.tagName, "input") ||
+		strings.ToLower(b.GetAttribute("type")) != "password" {
+		return v
+	}
+	return strings.Repeat("●", len([]rune(v)))
 }
 
 // FocusedElement 返回文档当前聚焦元素，无则 nil。
@@ -192,7 +208,9 @@ func controlLayout(doc HTMLDocument, b *htmlElement) textareaLayout {
 		return layoutTextarea(g, b)
 	}
 	px, bold, family := fontOf(b.computed)
-	lines := wrapTextarea(g, b.GetAttribute("value"), maxInt(b.width<<10, 1), px, bold, family)
+	// 按显示文本测量：password 走 ● 掩码（宽度与明文不同），点击落光标、
+	// Home/End 行边界的前缀宽必须与绘制的掩码文本同口径。
+	lines := wrapTextarea(g, displayValue(b), maxInt(b.width<<10, 1), px, bold, family)
 	_, lh := g.MeasureText("Mg", px, bold, family)
 	if lh <= 0 {
 		lh = b.height

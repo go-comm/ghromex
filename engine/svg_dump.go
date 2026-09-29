@@ -234,10 +234,7 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 		}
 		return
 	}
-	val := base.GetAttribute("value")
-	if typ == "password" && val != "" {
-		val = strings.Repeat("●", len([]rune(val)))
-	}
+	val := displayValue(base) // password 在此按 ● 掩码，与渲染路径同口径
 	if val == "" {
 		return
 	}

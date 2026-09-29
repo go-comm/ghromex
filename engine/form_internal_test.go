@@ -200,6 +200,53 @@ func TestBoxContainsHitRules(t *testing.T) {
 	}
 }
 
+// password 的光标定位必须按掩码文本测量：controlLayout 的行文本与前缀宽
+// 走 displayValue（●），否则点击落光标/光标 x 会按明文宽度算（● 与汉字
+// 等明文字符宽度不同，光标会错位）。
+func TestPasswordCaretLayoutUsesMaskedText(t *testing.T) {
+	vp := NewHeadlessViewport(400, 300)
+	doc, err := OpenDocument(vp, `<!doctype html><html><body style="margin:0">`+
+		`<input id="p" type="password" value="汉字" style="width:200px"></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	el := doc.QuerySelector("#p")
+	if el == nil {
+		t.Fatal("password input not found")
+	}
+	b := inner(el)
+	if b == nil {
+		t.Fatal("inner(password) = nil")
+	}
+
+	l := controlLayout(doc, b)
+	if len(l.lines) != 1 {
+		t.Fatalf("行数 = %d, want 1: %#v", len(l.lines), l.lines)
+	}
+	if l.lines[0].text != "●●" {
+		t.Fatalf("行文本 = %q, want ●●（controlLayout 未按显示文本测量）", l.lines[0].text)
+	}
+
+	g := vp.Graphics()
+	px, bold, family := fontOf(b.computed)
+	mw, _ := g.MeasureText("●", px, bold, family)
+	cw, _ := g.MeasureText("汉", px, bold, family)
+	if mw >= cw {
+		t.Fatalf("测试前提不成立：掩码宽 %d ≥ 汉字宽 %d", mw, cw)
+	}
+	// 点在第一个字符中点之前：按掩码（● 窄）已过中点 → 光标落 1；
+	// 按明文（汉字宽）未过中点 → 会落 0。断言 1 即证明走的是掩码口径。
+	x := mw / 2
+	if got := l.caretFromPoint(g, l.x+x, l.y+l.lh/2, px, bold, family); got != 1 {
+		t.Fatalf("caretFromPoint(%d) = %d, want 1（按明文宽度定位会得到 0）", l.x+x, got)
+	}
+	// 光标 x =掩码前缀宽，非明文前缀宽
+	cx, _ := l.caretXY(g, 1, px, bold, family)
+	if cx != l.x+mw {
+		t.Fatalf("caretXY(1).x = %d, want %d（= x + 掩码宽 %d）", cx, l.x+mw, mw)
+	}
+}
+
 // findTag 在子树里按标签名找第一个元素（白盒遍历，不依赖查询选择器）。
 func findTag(e HTMLElement, tag string) HTMLElement {
 	if tagIs(e, tag) {
