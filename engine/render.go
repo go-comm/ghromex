@@ -1,6 +1,44 @@
 package engine
 
-import "math"
+import (
+	"math"
+	"strings"
+)
+
+// CanvasBackground 实现 CSS 画布背景传播（canvas background propagation）：
+// 画布底色取根元素（html）的背景，根无背景时退到 body。返回 nil 表示两者
+// 都没有（调用方用默认白底）。真实浏览器正是靠这条规则让 body 的浅色背景
+// 铺满整个窗口，而不是只铺到内容高度。
+func CanvasBackground(doc HTMLDocument) Color {
+	base := inner(doc)
+	if base == nil {
+		return nil
+	}
+	if bg := opaqueBackgroundColor(base); bg != nil {
+		return bg
+	}
+	for _, c := range base.children {
+		if el := inner(c); el != nil && strings.EqualFold(el.TagName(), "body") {
+			return opaqueBackgroundColor(el)
+		}
+	}
+	return nil
+}
+
+// opaqueBackgroundColor 取元素背景色；未设置（nil）或全透明视为无背景。
+func opaqueBackgroundColor(e *htmlElement) Color {
+	if e == nil || e.computed == nil {
+		return nil
+	}
+	bg := e.computed.BackgroundColor()
+	if bg == nil {
+		return nil
+	}
+	if _, _, _, a := bg.RGBA(); a == 0 {
+		return nil
+	}
+	return bg
+}
 
 // RenderNode 从根节点开始绘制整棵树。g 为渲染后端。
 func RenderNode(g Graphics, node HTMLElement) {

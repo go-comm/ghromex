@@ -139,13 +139,23 @@ func (win *Window) SetAutoExit(d time.Duration) {
 	win.hasAutoExit = d > 0
 }
 
+// clearCanvas 清屏：先白底，再用文档的画布背景色（CSS canvas propagation，
+// html/body 背景）铺满整个视口——否则内容高度以下的区域会露出白底，
+// 窗口看起来“铺不满”。
+func (win *Window) clearCanvas() {
+	win.g.Clear(255, 255, 255, 255)
+	if bg := engine.CanvasBackground(win.doc); bg != nil {
+		win.g.DrawColor(0, 0, win.w, win.h, bg)
+	}
+}
+
 // RenderFrame 手动绘制一帧（清屏+渲染+提交），供无头渲染测试/截图使用；
 // 常规用法交给 Run 的帧循环。
 func (win *Window) RenderFrame() {
 	if win.doc == nil {
 		return
 	}
-	win.g.Clear(255, 255, 255, 255)
+	win.clearCanvas()
 	engine.RenderNode(win.g, win.doc)
 	win.g.Present()
 }
@@ -243,7 +253,7 @@ func (win *Window) Run() error {
 				win.dirty = true
 			}
 			if win.dirty {
-				win.g.Clear(255, 255, 255, 255)
+				win.clearCanvas()
 				engine.RenderNode(win.g, doc)
 				win.g.Present()
 				win.dirty = false

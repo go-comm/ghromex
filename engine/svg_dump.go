@@ -15,7 +15,13 @@ func (document *htmlDocument) DumpSVG() string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">`+"\n", w, h, w, h)
-	fmt.Fprintf(&b, `<rect x="0" y="0" width="%d" height="%d" fill="#ffffff"/>`+"\n", w, h)
+	// 画布底色同渲染路径：CSS canvas propagation（html/body 背景），无则白。
+	fill := "#ffffff"
+	if bg := CanvasBackground(document); bg != nil {
+		r, g, bl, _ := bg.RGBA()
+		fill = fmt.Sprintf("#%02x%02x%02x", r, g, bl)
+	}
+	fmt.Fprintf(&b, `<rect x="0" y="0" width="%d" height="%d" fill="%s"/>`+"\n", w, h, fill)
 	dumpSVGNode(&b, document)
 	b.WriteString("</svg>\n")
 	return b.String()
