@@ -104,6 +104,7 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement) {
 					bx+lw/2, by+lw/2, bw-lw, bh-lw, hexColor(r, g, bl), lw, srx)
 			}
 		}
+		dumpInputValue(b, base, comp, bx, by, bw, bh)
 	}
 
 	for _, child := range base.children {
@@ -116,6 +117,78 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement) {
 
 func hexColor(r, g, b uint8) string {
 	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+}
+
+// dumpInputValue 导出 input 的 value 文本（与 render.go 同构的定位逻辑：
+// 垂直居中、按钮型水平居中且不截断、password ● 掩码、文本型溢出舍头保留尾）。
+// input 为空元素无子节点，若不在此补画，SVG 导出会缺所有输入框文字
+// （渲染路径在元素盒绘制时直接读 value 属性，两条路径必须保持同构）。
+func dumpInputValue(b *strings.Builder, base *htmlElement, comp CSSStyleDeclaration, bx, by, bw, bh int) {
+	if !strings.EqualFold(base.tagName, "input") || bw <= 0 || bh <= 0 {
+		return
+	}
+	typ := strings.ToLower(base.GetAttribute("type"))
+	if typ == "radio" || typ == "checkbox" {
+		return // v1 仅控件盒，无 checked 标记
+	}
+	val := base.GetAttribute("value")
+	if typ == "password" && val != "" {
+		val = strings.Repeat("●", len([]rune(val)))
+	}
+	if val == "" {
+		return
+	}
+	fs := 13
+	fill := "#000000"
+	fam := ""
+	if comp != nil {
+		if s := resolveLen(comp.FontSize(), 0); s > 0 {
+			fs = s
+		}
+		if c := comp.Color(); c != nil {
+			r, g, bl, _ := c.RGBA()
+			fill = hexColor(r, g, bl)
+		}
+		fam = comp.FontFamily()
+	}
+	// 度量与渲染路径一致走 Fake 估算口径（dump 无 Graphics 实例）
+	w, h := fakeMeasureText(val, fs)
+	runes := []rune(val)
+	buttonLike := typ == "submit" || typ == "reset" || typ == "button"
+	for !buttonLike && w > base.width-4 && len(runes) > 1 {
+		runes = runes[1:]
+		val = string(runes)
+		w, h = fakeMeasureText(val, fs)
+	}
+	tx := base.x
+	if buttonLike && base.width > w {
+		tx = base.x + (base.width-w)/2
+	}
+	ty := base.y
+	if h < base.height {
+		ty += (base.height - h) / 2
+	}
+	fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d" font-family="%s" fill="%s">%s</text>`+"\n",
+		tx, ty+h, fs, escapeXML(svgFontStack(fam)), fill, escapeXML(val))
+}
+
+// fakeMeasureText 与 FakeGraphics.MeasureText 同口径的文本估算，
+// 供无 Graphics 实例的导出路径使用（布局度量亦出自该口径，坐标自洽）。
+func fakeMeasureText(text string, fontSize int) (w, h int) {
+	if fontSize <= 0 {
+		fontSize = 16
+	}
+	for _, r := range text {
+		if r > 0x2E80 {
+			w += fontSize
+		} else if r == ' ' {
+			w += fontSize / 2
+		} else {
+			w += fontSize * 3 / 5
+		}
+	}
+	h = fontSize * 13 / 10
+	return
 }
 
 // svgFontStack 为导出的 SVG 文本补全字体栈，让浏览器预览与引擎实际落字一致：

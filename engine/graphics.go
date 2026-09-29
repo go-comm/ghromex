@@ -173,6 +173,8 @@ func (r *rect) Bottom() Size {
 }
 
 // Paint 是一次绘制动作的属性集合（类比 Android Paint / Skia Paint）。
+// Background 为文字落点的背景色（沿父链最近实底，可能 nil）：供 LCD
+// 子像素合成使用——子像素渲染必须知道底色才能合成出正确过渡色。
 type Paint interface {
 	Size() Size
 	SetSize(size Size)
@@ -182,6 +184,8 @@ type Paint interface {
 	SetFontFamily(family string)
 	Bold() bool
 	SetBold(bold bool)
+	Background() Color
+	SetBackground(color Color)
 }
 
 func NewPaint() Paint {
@@ -194,6 +198,7 @@ type paint struct {
 	color  Color
 	family string
 	bold   bool
+	bg     Color
 }
 
 func (p *paint) Size() Size {
@@ -230,6 +235,14 @@ func (p *paint) Bold() bool {
 
 func (p *paint) SetBold(bold bool) {
 	p.bold = bold
+}
+
+func (p *paint) Background() Color {
+	return p.bg
+}
+
+func (p *paint) SetBackground(color Color) {
+	p.bg = color
 }
 
 // Graphics 是渲染后端的抽象。布局引擎依赖 MeasureText 获取文本度量，

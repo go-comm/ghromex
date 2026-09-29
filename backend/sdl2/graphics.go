@@ -206,14 +206,26 @@ type fontFace struct {
 	bold   bool
 }
 
+// lcdText 报告 LCD 子像素渲染是否启用（TTF_RenderUTF8_LCD + LIGHT_SUBPIXEL
+// hinting）。默认开启：探针实测横向硬跳变 12→0，竖笔画边缘锐度追平浏览器
+// ClearType；已知代价是彩色背景上会有轻微彩边（与浏览器子像素渲染同性质）。
+// GHROMEX_LCD=0 关闭（回退灰度 AA 纹理）。
+// 惰性函数而非包级变量：hasTTFLCD 在 Load()（DLL 符号解析）后才有值，
+// 包初始化时求值恒为 false。
+func lcdText() bool {
+	return os.Getenv("GHROMEX_LCD") != "0" && hasTTFLCD
+}
+
 type texKey struct {
 	fontPath   string
 	text       string
 	size       int
 	bold       bool
+	lcd        bool
 	r, g, b, a uint8
+	// 落点背景色（LCD 合成用；背景不同必须分别缓存）
+	br, bg, bb uint8
 }
-
 type texInfo struct {
 	tex    uintptr
 	w      int
@@ -288,11 +300,17 @@ func (g *Graphics) face(path string, size int, bold bool) *fontFace {
 		}
 		f = &fontFace{handle: h, size: size, bold: bold}
 		if hasTTFHinting {
-			// LIGHT 替代默认 NORMAL：网格吸附是小字号针齿的主因
-			//（font-render-compare 实测：同一文本纵向硬跳变 161→53，墨色不减）。
-			// hinting 是 face 级状态，建 face 时设一次，SetFontSize/SetFontStyle
-			// 后持续生效（TestSetFontSizePreservesHinting 回归锁定）。
-			ttfSetFontHinting(h, uintptr(hintLight))
+			// LIGHT（LCD 时 LIGHT_SUBPIXEL）替代默认 NORMAL：网格吸附是
+			// 小字号针齿的主因（font-render-compare 实测：同一文本纵向硬跳变
+			// 161→53，墨色不减）。hinting 是 face 级状态，建 face 时设一次，
+			// SetFontSize/SetFontStyle 后持续生效（TestSetFontSizePreservesHinting
+			// 回归锁定）。注意 LIGHT_SUBPIXEL 仅影响后续 LCD 渲染的子像素分解
+			// 路径，非 LCD 的 blended 调用在同一 face 上输出仍是灰度语义。
+			hint := uintptr(hintLight)
+			if lcdText() {
+				hint = uintptr(hintLightSubpixel)
+			}
+			ttfSetFontHinting(h, hint)
 		}
 		g.faces[key] = f
 	}
@@ -386,35 +404,67 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 	}
 
 	cx := x
+	// LCD 子像素渲染需要落点背景色合成：paint.Background() 为沿父链最近
+	// 实底（renderNode 组装）；nil 时（理论上仅测试路径）按白底处理。
+	var br, bg, bb uint8 = 255, 255, 255
+	if bc := paint.Background(); bc != nil {
+		br, bg, bb, _ = bc.RGBA()
+	}
+	lcd := lcdText()
 	for _, seg := range segs {
 		path := g.segFontPath(seg, family)
-		key := texKey{fontPath: path, text: seg.text, size: size, bold: bold, r: cr, g: cg, b: cb, a: ca}
+		key := texKey{fontPath: path, text: seg.text, size: size, bold: bold, lcd: lcd,
+			r: cr, g: cg, b: cb, a: ca, br: br, bg: bg, bb: bb}
 		info, ok := g.textures[key]
 		if !ok {
 			f := g.face(path, size, bold)
 			if f == nil {
 				continue
 			}
-			color := uintptr(cr) | uintptr(cg)<<8 | uintptr(cb)<<16 | uintptr(ca)<<24
-			b, p := cBytes(seg.text)
-			surf := ttfRenderUTF8Blended(f.handle, p, color)
-			runtime.KeepAlive(b)
-			if surf == 0 {
-				continue
-			}
 			asc := int32(0)
 			if ttfFontAscent != nil {
 				asc = int32(ttfFontAscent(f.handle))
 			}
-			tex := sdlCreateTextureFromSurface(g.renderer, surf)
-			sdlFreeSurface(surf)
+			b, p := cBytes(seg.text)
+			var tex uintptr
+			opaque := false
+			if lcd {
+				// LCD 子像素：前景色与落点背景色合成出实色 surface
+				//（TTF_RenderUTF8_LCD 的三通道即子像素分解），纹理按不透明
+				// 直贴（BLENDMODE_NONE）。彩底上竖笔边缘会有轻微彩边
+				//（浏览器子像素渲染同性质，README 已注明）。
+				fgc := uintptr(cr) | uintptr(cg)<<8 | uintptr(cb)<<16 | uintptr(ca)<<24
+				bgc := uintptr(br) | uintptr(bg)<<8 | uintptr(bb)<<16 | uintptr(0xFF)<<24
+				surf := ttfRenderUTF8LCD(f.handle, p, fgc, bgc)
+				runtime.KeepAlive(b)
+				if surf != 0 {
+					tex = sdlCreateTextureFromSurface(g.renderer, surf)
+					sdlFreeSurface(surf)
+					opaque = true
+				}
+			}
+			if tex == 0 {
+				// 回退/默认路径：灰度 AA blended（BLENDMODE_BLEND）
+				color := uintptr(cr) | uintptr(cg)<<8 | uintptr(cb)<<16 | uintptr(ca)<<24
+				surf := ttfRenderUTF8Blended(f.handle, p, color)
+				runtime.KeepAlive(b)
+				if surf == 0 {
+					continue
+				}
+				tex = sdlCreateTextureFromSurface(g.renderer, surf)
+				sdlFreeSurface(surf)
+			}
 			if tex == 0 {
 				continue
 			}
 			var tw, th int32
 			sdlQueryTexture(tex, 0, 0,
 				uintptr(unsafe.Pointer(&tw)), uintptr(unsafe.Pointer(&th)))
-			sdlSetTextureBlendMode(tex, blendModeBlend)
+			mode := blendModeBlend
+			if opaque {
+				mode = blendModeNone
+			}
+			sdlSetTextureBlendMode(tex, uintptr(mode))
 			info = texInfo{tex: tex, w: int(tw), h: int(th), ascent: asc}
 			g.textures[key] = info
 		}

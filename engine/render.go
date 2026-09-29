@@ -142,6 +142,7 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 		p.SetColor(parentPaint.Color())
 		p.SetFontFamily(parentPaint.FontFamily())
 		p.SetBold(parentPaint.Bold())
+		p.SetBackground(parentPaint.Background())
 	}
 	if comp != nil {
 		if c := comp.Color(); c != nil {
@@ -152,6 +153,13 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 		}
 		p.SetFontFamily(comp.FontFamily())
 		p.SetBold(comp.FontWeight() == FontWeightBold)
+		// 背景供文字合成用：自身有实底则覆盖继承值（文字落在本元素背景上）。
+		// 半透明背景不做精确合成（LCD 仍用它近似），v1 取实底即可。
+		if c := comp.BackgroundColor(); c != nil {
+			if _, _, _, a := c.RGBA(); a >= 250 {
+				p.SetBackground(c)
+			}
+		}
 	}
 
 	// 文本节点：绘制布局阶段生成的行片段
@@ -182,37 +190,57 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 			strokeRoundedRect(g, bx, by, bw, bh, r, bd, bc)
 		}
 
-		// input：value 文本 + 常亮光标 + 聚焦蓝框（最小输入闭环 v1）。
-		// 文本左对齐、垂直居中；宽度溢出时舍头部保留尾部（光标在尾部，
-		// 所见即正在输入的末尾）。
+		// input：按 type 分支渲染。text/password 画 value 文本 + 常亮光标 +
+		// 聚焦蓝框（最小输入闭环 v1；文本左对齐、垂直居中，宽度溢出时舍头
+		// 保留尾——光标在尾部，所见即正在输入的末尾）。
+		// submit/reset/button 画按钮（盒体样式已由 UA 默认给出），
+		// value 文本水平+垂直居中。radio/checkbox 仅画控件盒（白底/灰边/
+		// 圆角——radio 全圆，均由上方通用路径按 UA 样式绘制），v1 不含
+		// checked 选中标记与点击切换。
 		if strings.EqualFold(base.tagName, "input") && bw > 0 && bh > 0 {
-			size := p.Size().Pixel()
-			val := base.GetAttribute("value")
-			tw, th := g.MeasureText(val, size, p.Bold(), p.FontFamily())
-			runes := []rune(val)
-			for tw > base.width-4 && len(runes) > 1 {
-				runes = runes[1:]
-				val = string(runes)
-				tw, th = g.MeasureText(val, size, p.Bold(), p.FontFamily())
-			}
-			tx := base.x
-			ty := base.y
-			if th < base.height {
-				ty += (base.height - th) / 2
-			}
-			if val != "" {
-				g.DrawText(tx, ty, tw, th, p, val)
-			}
-			if focused {
-				// 光标：紧跟文本尾部的 1px 竖线（文本色）
-				cc := p.Color()
-				if cc == nil {
-					cc = NewColor(0, 0, 0, 255)
+			typ := strings.ToLower(base.GetAttribute("type"))
+			switch typ {
+			case "radio", "checkbox":
+			default:
+				size := p.Size().Pixel()
+				val := base.GetAttribute("value")
+				if typ == "password" && val != "" {
+					// 密码掩码：每位一个实心圆点（与浏览器一致）
+					val = strings.Repeat("●", len([]rune(val)))
 				}
-				if th > 2 {
-					g.DrawColor(tx+tw+1, ty, 1, th-2, cc)
+				tw, th := g.MeasureText(val, size, p.Bold(), p.FontFamily())
+				runes := []rune(val)
+				// 按钮型不截断：auto 宽已按 value 外盒测量，两侧 padding 即呼吸
+				// 空间（Chrome 同语义）；文本型保留 -4 余量给光标。
+				buttonLike := typ == "submit" || typ == "reset" || typ == "button"
+				for !buttonLike && tw > base.width-4 && len(runes) > 1 {
+					runes = runes[1:]
+					val = string(runes)
+					tw, th = g.MeasureText(val, size, p.Bold(), p.FontFamily())
 				}
-				strokeRoundedRect(g, bx, by, bw, bh, r, edges{1, 1, 1, 1}, focusBlue)
+				tx := base.x
+				if buttonLike && base.width > tw {
+					// 按钮型 value 文本水平居中（对齐 Chrome 按钮文字）
+					tx = base.x + (base.width-tw)/2
+				}
+				ty := base.y
+				if th < base.height {
+					ty += (base.height - th) / 2
+				}
+				if val != "" {
+					g.DrawText(tx, ty, tw, th, p, val)
+				}
+				if focused {
+					// 光标：紧跟文本尾部的 1px 竖线（文本色）
+					cc := p.Color()
+					if cc == nil {
+						cc = NewColor(0, 0, 0, 255)
+					}
+					if th > 2 {
+						g.DrawColor(tx+tw+1, ty, 1, th-2, cc)
+					}
+					strokeRoundedRect(g, bx, by, bw, bh, r, edges{1, 1, 1, 1}, focusBlue)
+				}
 			}
 		}
 	}

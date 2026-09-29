@@ -1,0 +1,63 @@
+<!doctype html>
+<!--
+  Ghromex UA 对照页 · form-ua.html（零作者 CSS）
+  运行：go run ./demo -file demo/form-ua.html
+  对照：同一文件用 Chrome/Edge 直接打开（start demo\form-ua.html）
+
+  本页仅一条作者 CSS：两侧字体统一微软雅黑（见 head 注释），其余全部
+  样式来自 UA 默认样式表，用于检验引擎内置 UA 样式与浏览器原生渲染的一致性。
+
+  一致区（数值对齐 Chrome/Windows 实测）：
+  - h2/h3 字号与段距、p 段距（含相邻块 margin 折叠）、label 行内、form 块级
+  - text/password 输入框外盒 177x21（password 值渲染为 ● 掩码）
+  - radio/checkbox 13x13 控件（radio 正圆）
+  - submit/reset 按钮外观，外盒高 25、value 文本居中
+  - 整页总高：引擎 ≈525 vs 浏览器 ≈519（曾因无 margin 折叠膨胀至 669）
+
+  已知分叉（字体行高度量与 v1 边界，非 UA 规则缺失）：
+  - 行高：引擎按字形高（16px 字号 → 20px 行），浏览器 normal 随字体
+    （雅黑 ≈1.3 倍），故 p/h 的行盒高度有小差
+  - 宽度字面差：button/submit 宽 66/40 vs 浏览器 69/43（引擎 Arial 13px
+    vs 浏览器 Segoe UI 13.33px 字形度量；中文字符两侧同为雅黑已一致）
+  - 灰度 AA vs 浏览器 ClearType 子像素：中文标题锐度差（引擎渲染管线
+    v1 边界，改进方向 LCD 子像素见 fontcmp 探针，非本页 CSS 可解）
+  - body 边距：引擎默认 0（桌面 UI 取向），浏览器 8px
+  - radio/checkbox 的 checked 选中标记与点击切换交互未实现
+  - 父-子穿越 margin 折叠与空块自折叠未实现（本页无相关结构）
+-->
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>UA 原生表单 · 浏览器对照</title>
+	<style>
+		/* 唯一的作者声明：两侧字体统一为微软雅黑（引擎 CJK fallback 即雅黑；
+		   浏览器默认落 Noto Sans SC——细黑体，与雅黑并排观感差异大）。
+		   字号/边距/盒模型全部仍走 UA 默认，对照性质不变。 */
+		body { font-family: "Microsoft YaHei", sans-serif; }
+	</style>
+</head>
+<body>
+	<h2>用户注册</h2>
+	<p>本页无作者 CSS，全部样式来自 UA 默认样式表，用于与浏览器原生渲染对照。</p>
+
+	<form>
+		<p><label>用户名 <input type="text" value="alice"></label></p>
+		<p><label>密码 <input type="password"></label></p>
+		<p><label>邮箱 <input type="text"></label></p>
+
+		<h3>偏好</h3>
+		<p><label><input type="radio" name="notice"> 接收邮件通知</label></p>
+		<p><label><input type="radio" name="notice"> 不接收</label></p>
+		<p><label><input type="checkbox"> 已阅读并同意条款</label></p>
+
+		<h3>提交</h3>
+		<p>
+			<input type="submit" value="提交">
+			<input type="reset" value="重置">
+			<button type="button">普通按钮</button>
+		</p>
+	</form>
+
+	<p><strong>注</strong>：本页与浏览器原生渲染对照，剩余差异（行高、字形宽度）见头部注释。</p>
+</body>
+</html>

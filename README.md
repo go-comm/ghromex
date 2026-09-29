@@ -7,15 +7,17 @@
 ## 特性
 
 - 纯 Go 渲染引擎：HTML 解析、CSS 级联、选择器（标签 / `.class` / `#id` / 简单组合，含特异度）、块级与行内（inline / inline-block）布局、文本按词/按字换行
+- 定位与层叠：`position: relative / absolute / fixed`、`top/right/bottom/left`（含负值）、`z-index`；脱流盒第二遍布局，包含块 = 最近非 static 祖先 padding box / 视口；绘制分常规层 + 定位层（z 升序，同 z 按文档序）
+- 可编辑 `<input>`（text）：点击聚焦（蓝框 + 尾部光标）、键入文字（含中文输入法）、Backspace 删除、Tab 循环切换；其余 type 按 UA 外观区分渲染：radio/checkbox 13x13 控件、submit/reset/button 按钮外观（value 居中）、password ● 掩码
 - DOM 式 API：`QuerySelector` / `GetBoundingClientRect` / `SetText` / `OnClick` 等；内容变化自动触发重排重绘
 - 事件冒泡：命中测试找到最深元素，沿父链依次派发 `click`
 - 可插拔图形后端：`engine.Graphics` 接口（DrawText / DrawColor / DrawImage / MeasureText），内置 `FakeGraphics`（计数）、`BufferGraphics`（软件光栅化到 RGBA 缓冲，可 `SavePNG`）供无显示器测试
 - 元素注册表：`CustomElements().Define(tag, proto)` + `CloneElement` 注册自定义标签，解析时克隆原型生成独立实例
-- 无头运行：`--dump-svg` 导出布局结果；`HeadlessViewport` + `BufferGraphics` 可在 CI 中像素级断言渲染结果
+- 无头运行：`-dump-svg` 导出布局结果；`HeadlessViewport` + `BufferGraphics` 可在 CI 中像素级断言渲染结果
 
 ## 环境要求
 
-- Go 1.25+（无需 CGO）
+- Go 1.20+（go.mod 基线，作库供其他项目引用，1.20 以上工具链均可构建；无需 CGO）
 - 渲染后端目前提供 Windows 实现（`backend/sdl2`，加载 `SDL2.dll` 2.28 与 `SDL2_ttf.dll`）
 - 把 `SDL2.dll`、`SDL2_ttf.dll`（及 `zlib1.dll`）放到工程根目录 `libs/`，或保证系统可搜索到它们
 
@@ -23,16 +25,22 @@
 
 ```powershell
 # 运行内置登录页 demo
-go run ./demo/
+go run ./demo
+
+# 布局能力示例（员工登记表：定位/层叠/盒模型/可输入表单）
+go run ./demo -file demo/form.html
+
+# UA 原生对照页（零作者 CSS，可与浏览器直接打开同一文件比对）
+go run ./demo -file demo/form-ua.html
 
 # 渲染自己的页面
-go run ./demo/ --file page.html
+go run ./demo -file page.html
 
 # 无头导出 SVG（不需要显示器）
-go run ./demo/ --dump-svg out.svg
+go run ./demo -dump-svg out.svg
 ```
 
-窗口交互示例：`demo/index.html` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘。
+窗口交互示例：`demo/index.html` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘；`demo/form.html` 覆盖 11 项布局特性（负 inset 角标、fixed 底条、水印、包含块链锚定、z-index 层序、box-sizing 跨内核一致等），可点击输入框直接键入文字。
 
 ## 代码示例
 
@@ -90,38 +98,53 @@ _ = buf.SavePNG("out.png") // 或直接 buf.ColorAt(x, y) 断言像素
 engine/            渲染引擎（纯 Go，不依赖任何图形后端）
   html_parser.go     HTML 解析 → DOM 树
   css_parser.go      CSS / 内联样式解析
-  style_cascade.go   UA 默认样式 + 选择器匹配 + 特异度级联
-  measure.go         盒模型布局、行盒、换行
-  render.go          绘制指令下发（背景/边框/文本片段）
+  style_cascade.go   选择器匹配 + 特异度级联 + 继承
+  style_ua.go        UA 样式表（默认值对齐 Chrome，含表单控件 border-box）
+  measure.go         盒模型布局、行盒、换行、定位布局（relative/absolute/fixed）
+  render.go          绘制指令下发（背景/边框/文本片段/定位层）
+  text_input.go      input 焦点/编辑/Tab 循环
   event_dispatch.go  命中测试 + click 冒泡派发
   graphics.go        Graphics 接口 / FakeGraphics / BufferGraphics
   svg_dump.go        布局结果导出 SVG
   element_registry.go 标签原型注册表（自定义元素）
 backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓存
 components/        组件工厂（button / input / class 工具）
-demo/              演示应用（含内置登录页）
+demo/              演示应用（登录页 index.html + 布局示例 form.html）
 libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 ```
 
 ## 已支持的 CSS 子集
 
-`display(none/inline/inline-block/block)`、`width/height`、`margin*`、`padding*`、
+`display(none/inline/inline-block/block)`、`width/height`、
+`box-sizing(content-box/border-box，表单控件 UA 默认 border-box 对齐 Chrome)`、
+`margin*`（相邻块级兄弟折叠：取较大者；父-子穿越/空块折叠未实现）、`padding*`、
 `border` 简写与 `border-width/color/style`、`border-radius`(四角统一，仅水平半径)、
 `background-color`/`background`、`color`、`font-size`、`font-weight(bold)`、`font-family`、
-`text-align(left/center/right)`；
+`text-align(left/center/right)`、
+`position(relative/absolute/fixed)`、`top/right/bottom/left`(px 与 %，支持负值；
+absolute/fixed 相对包含块锚定，right/bottom 回推)、`z-index`；
+inline-block 的百分比宽度按包含块内容宽解析（而非行内剩余宽）；
 字体默认语义对齐 Chrome（Windows）并做 UI 取向调整：初始字号 16px；
 standard（未指定 family）默认 sans-serif → Arial（区别于 Chrome 的 Times，更贴桌面 UI）；
 serif → Times New Roman、monospace → Courier New、system-ui → Segoe UI；
 汉字/假名/谚文按字符级脚本分段 fallback 到微软雅黑（中英混排与 Chrome 一致）；
 每个字体文件只开一个 FT_Face，字号/粗体动态切换；
-文字渲染用 TTF LIGHT hinting（较默认 NORMAL 的网格吸附，小字号纵向硬跳变降约 60%，锯齿感明显减弱）；
+文字渲染默认走 LCD 子像素（TTF_RenderUTF8_LCD + LIGHT_SUBPIXEL hinting，
+竖笔画边缘横向锐度与浏览器 ClearType 同级；合成按文字落点背景色进行——
+渲染管线沿父链携带最近实底，深色背景上白字不会带白底块。代价是彩底上
+竖笔边缘有轻微彩边（与浏览器子像素渲染同性质）；`GHROMEX_LCD=0` 回退
+TTF LIGHT hinting 的灰度 AA，后者较默认 NORMAL 网格吸附的小字号纵向
+硬跳变降约 60%）；
 选择器支持标签、`.class`、`#id`、类型+class/id 组合链（如 `div.wide`）与特异度排序。
 
 ## 已知限制
 
-- 布局仅覆盖块级 + 行内/inline-block 流式布局；无 flex/grid、无滚动、无 position 偏移
+- 布局为块级 + 行内/inline-block 流式布局 + 定位子集；无 flex/grid、无滚动
+- position v1 边界：absolute 双锚（left+right 同给）时 auto 宽按内容收缩而非拉伸；未实现嵌套层叠上下文（opacity/transform 成组、负 z-index 压至祖先背景之下）；命中测试未按层叠取最上层元素
+- `<input>` 可编辑仅支持 text 类型；radio/checkbox 无 checked 选中标记与点击切换交互；无方向键移动光标、无选区/复制粘贴
+- 行高按字形高度量（无 line-height 属性），与浏览器 normal（随字体 ≈1.15-1.5 倍）
+  行盒高度存在小差；父-子穿越 margin 折叠与空块自折叠未实现
 - `DrawImage` 尚未实现（接口已预留）
-- `input` 元素仅占位显示，键盘输入/焦点/IME 未接入
 - 边框样式目前按单色实心绘制（dashed/dotted 等不做虚线区分）
 - 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；无 webfont 加载、无斜体渲染
 
@@ -130,6 +153,7 @@ serif → Times New Roman、monospace → Courier New、system-ui → Segoe UI�
 | 变量 | 作用 |
 |---|---|
 | `GHROMEX_DEBUG=1` | 回显绘制失败原因与每次点击的命中/派发结果 |
+| `GHROMEX_LCD=0` | 关闭 LCD 子像素文本渲染（默认开启；回退灰度 AA） |
 | `GHROMEX_SOFTWARE=1` | 强制软件渲染器（默认 GPU 加速，创建失败自动回退软件；用于 GPU 可创建但不出像素的虚拟显示环境） |
 | `GHROMEX_FONT=路径` | 指定 standard 字体（默认 Arial，即 sans-serif） |
 | `GHROMEX_CJK_FONT=路径` | 指定 CJK fallback 字体（默认微软雅黑） |
@@ -144,4 +168,4 @@ go test ./...
 
 - `engine` 包测试全为纯 Go（FakeGraphics / BufferGraphics / SVG 断言），无显示器即可跑
 - `backend/sdl2` 的事件解码回归测试不加载 DLL；事件字段偏移以真实 SDL 产生的事件实测为准（见 `decodeEvent` 注释）
-- demo 退出约定：`go run ./demo/ --exit-after 3s` 可用于冒烟验证
+- demo 退出约定：`go run ./demo -exit-after 3s` 可用于冒烟验证

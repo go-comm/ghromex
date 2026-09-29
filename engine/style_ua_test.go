@@ -16,19 +16,21 @@ func TestUAFormControlsBrowserLike(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// input：宽 = 147 内容 + 2×2 padding + 2×1 border = 153；高 = 16 + 2 + 2 = 20
+	// input：宽 = 171 内容 + 2×2 padding + 2×1 border = 177；高 = 17 + 2 + 2 = 21
+	//（Chrome/Windows 实测 size=20 默认 177x21）
 	ir := doc.QuerySelector("#i").GetBoundingClientRect()
-	if w := ir.Right().Pixel() - ir.Left().Pixel(); w != 153 {
-		t.Fatalf("input 边框盒宽 = %d, want 153（input 的 UA 规则丢失？）", w)
+	if w := ir.Right().Pixel() - ir.Left().Pixel(); w != 177 {
+		t.Fatalf("input 边框盒宽 = %d, want 177（input 的 UA 规则丢失？）", w)
 	}
-	if h := ir.Bottom().Pixel() - ir.Top().Pixel(); h != 20 {
-		t.Fatalf("input 边框盒高 = %d, want 20", h)
+	if h := ir.Bottom().Pixel() - ir.Top().Pixel(); h != 21 {
+		t.Fatalf("input 边框盒高 = %d, want 21", h)
 	}
 
-	// button：shrink-to-fit 包住 13px 文本，高度与 input 视觉等高（≈20）
+	// button：shrink-to-fit 包住 13px 文本，垂直 padding 3px → 外盒高 24
+	//（Chrome 实测 25，1px 差异属字体行高度量）
 	br := doc.QuerySelector("#b").GetBoundingClientRect()
-	if h := br.Bottom().Pixel() - br.Top().Pixel(); h != 20 {
-		t.Fatalf("button 边框盒高 = %d, want 20（button 的 UA 规则丢失？）", h)
+	if h := br.Bottom().Pixel() - br.Top().Pixel(); h != 24 {
+		t.Fatalf("button 边框盒高 = %d, want 24（button 的 UA 规则丢失？）", h)
 	}
 	if w := br.Right().Pixel() - br.Left().Pixel(); w < 20 || w > 40 {
 		t.Fatalf("button 宽 = %d, want 20~40（文本+padding 1px 6px+border）", w)

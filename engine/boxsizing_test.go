@@ -42,8 +42,8 @@ func TestInputUABoxSizing(t *testing.T) {
 		t.Errorf("#i.Width() = %d, want 94（UA border-box 扣减）", w)
 	}
 	d := mustEl(t, doc, "#d")
-	if ow, oh := d.Width()+4+2, d.Height()+2+2; ow != 153 || oh != 20 {
-		t.Errorf("#d 外盒 = %dx%d, want 153x20（UA 默认外盒回归）", ow, oh)
+	if ow, oh := d.Width()+4+2, d.Height()+2+2; ow != 177 || oh != 21 {
+		t.Errorf("#d 外盒 = %dx%d, want 177x21（UA 默认外盒回归）", ow, oh)
 	}
 }
 

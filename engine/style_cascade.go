@@ -28,6 +28,7 @@ func resolveStylesTree(e HTMLElement, parentBase *htmlElement, author *Styleshee
 	}
 
 	applyMatchingRules(comp, userAgentStylesheet(), base, e)
+	applyInputTypeDefaults(comp, base) // input 按 type 的 UA 校正（作者 CSS 可覆盖）
 	applyMatchingRules(comp, author, parentBase, e)
 	for _, d := range base.inline {
 		applyDecl(comp, d.prop, d.value)

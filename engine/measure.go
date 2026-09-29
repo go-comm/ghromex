@@ -1,5 +1,7 @@
 package engine
 
+import "strings"
+
 // MeasureNode 布局入口：对根节点在 (mw, mh) 可用空间内执行一次布局。
 // 若样式尚未级联（computed 为空），先以空样式表级联。
 func MeasureNode(g Graphics, node HTMLElement, mw, mh int) {
@@ -105,6 +107,44 @@ func shiftInlineX(e HTMLElement, dx int) {
 // 单盒布局
 // ---------------------------------------------------------------------------
 
+// outerBoxW 返回元素真实外边距盒宽（内容宽 + padding + border + margin）。
+// layoutBox 对 block 子返回的是"占位空间宽"，不能用作真实宽度
+// （shrink-wrap 统计与 right 锚定回推均需真实值）。
+func outerBoxW(el *htmlElement) int {
+	if el == nil {
+		return 0
+	}
+	if el.computed == nil {
+		return el.width
+	}
+	mg := resolveEdgeRect(el.computed.Margin(), 0, 0)
+	bd := resolveEdgeRect(el.computed.BorderStyleWidth(), 0, 0)
+	pd := resolveEdgeRect(el.computed.Padding(), 0, 0)
+	return el.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight] + mg[eLeft] + mg[eRight]
+}
+
+// inputButtonTextWidth 返回 input[type=submit/reset/button] 的外盒宽
+// （value 文本 + padding + border，与 UA border-box 尺寸同口径；
+// layoutBox 会再扣 padding/border 得内容宽）；其他元素/类型返回 -1。
+func inputButtonTextWidth(g Graphics, el *htmlElement, comp CSSStyleDeclaration) int {
+	if comp == nil || el == nil || !strings.EqualFold(el.tagName, "input") {
+		return -1
+	}
+	switch strings.ToLower(el.GetAttribute("type")) {
+	case "submit", "reset", "button":
+	default:
+		return -1
+	}
+	fontPx := 13
+	if s := resolveLen(comp.FontSize(), 0); s > 0 {
+		fontPx = s
+	}
+	w, _ := g.MeasureText(el.GetAttribute("value"), fontPx, comp.FontWeight() == FontWeightBold, comp.FontFamily())
+	bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
+	pd := resolveEdgeRect(comp.Padding(), 0, 0)
+	return w + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
+}
+
 // layoutBox 布局一个元素盒。
 // outerW/outerH 为该盒在父容器内容区内可用的外边距盒空间；
 // ox/oy 为外边距盒原点；pctW 为百分比解析基数（包含块内容宽，CSS 规定百分比
@@ -138,13 +178,25 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW int) (r
 	}
 	shrinkWrap := false
 	if contentW < 0 { // auto
-		contentW = outerW - mg[eLeft] - mg[eRight] - bd[eLeft] - bd[eRight] - pd[eLeft] - pd[eRight]
-		if contentW < 0 {
-			contentW = 0
-		}
-		// 非块级与脱流盒（absolute/fixed）：auto 宽度按内容收缩
-		if disp != DisplayBlock || comp.Position().isOutFlow() {
-			shrinkWrap = true
+		if w := inputButtonTextWidth(g, el, comp); w >= 0 {
+			// input[submit/reset/button]：auto 宽按 value 文本测量（空元素
+			// 无子节点，常规 shrink-to-fit 拿不到文字宽）。返回的是外盒宽
+			//（文本+padding+border），按 border-box 语义扣减后即为内容宽——
+			// 渲染层溢出截断以 base.width-4 为界，文本+余量才完整。
+			if cw := w - pd[eLeft] - pd[eRight] - bd[eLeft] - bd[eRight]; cw > 0 {
+				contentW = cw
+			} else {
+				contentW = 0
+			}
+		} else {
+			contentW = outerW - mg[eLeft] - mg[eRight] - bd[eLeft] - bd[eRight] - pd[eLeft] - pd[eRight]
+			if contentW < 0 {
+				contentW = 0
+			}
+			// 非块级与脱流盒（absolute/fixed）：auto 宽度按内容收缩
+			if disp != DisplayBlock || comp.Position().isOutFlow() {
+				shrinkWrap = true
+			}
 		}
 	}
 
@@ -379,6 +431,9 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int,
 	lineH := 0
 	var curLine []lineItem
 	maxRight := cx
+	// prevBlockMB：上一个相邻块级子的 margin-bottom；-1 = 尚无
+	//（或中间隔了行内内容/为首个子），此时不折叠。
+	prevBlockMB := -1
 
 	fontPx := 16
 	bold := false
@@ -435,6 +490,9 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int,
 		if cursorX > maxRight {
 			maxRight = cursorX
 		}
+		// 行内内容隔开两侧块盒：CSS 规定 margin 折叠仅发生在真正相邻的
+		// 块盒之间（行盒 / inline-block / 脱流盒不算分隔，但行内容算）。
+		prevBlockMB = -1
 	}
 
 	for _, child := range el.children {
@@ -466,10 +524,22 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int,
 
 		if cdisp == DisplayBlock {
 			flushLine()
+			// 相邻块级兄弟 margin 折叠（CSS 2.1 §8.3.1）：间隙取
+			// max(前兄 margin-bottom, 本子 margin-top) 而非两者之和。
+			// 游标已含前兄 mb（layoutH 含 margin），回退两者较小值即等效。
+			// 仅 px 生效（上下 margin 百分比 v1 不支持，解析基不一致）。
+			// v1 未实现：父-子穿越折叠、空块自折叠。
+			mgc := resolveEdgeRect(che.computed.Margin(), contentW, maxZero(contentH-(cursorY-cy)))
+			if prevBlockMB >= 0 {
+				cursorY -= minInt(prevBlockMB, mgc[eTop])
+			}
 			layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW)
 			cursorY += che.layoutH
-			if cursorX > maxRight {
-				maxRight = cursorX
+			prevBlockMB = mgc[eBottom]
+			// 块子的真实外盒宽计入 shrink-wrap 宽度统计：游标换行后复位到 cx，
+			// 原先漏算块宽（inline-block 容器仅含块子时会收缩到近似 0 宽）。
+			if w := cx + outerBoxW(che); w > maxRight {
+				maxRight = w
 			}
 			continue
 		}
