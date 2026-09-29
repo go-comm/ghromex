@@ -21,6 +21,19 @@ import (
 // nativeCall 是 C 导出函数的统一调用签名（x64 Windows，参数均为指针宽度值）。
 type nativeCall = func(args ...uintptr) uintptr
 
+// dpiAwareOnce 保护 SetProcessDPIAware 的进程级一次性调用。Go 二进制不带
+// manifest 时进程默认 DPI-unaware：Win7 在系统缩放 125%/150% 下由 DWM 把
+// 窗口按 96dpi 位图整窗拉伸，画面"糊成一团"。申报 system-DPI-aware 后
+// SDL 按物理像素建窗（本引擎 1 CSS px = 1 物理 px，正是期望语义）。
+var (
+	dpiAwareOnce           sync.Once
+	procSetProcessDPIAware = windows.NewLazySystemDLL("user32.dll").NewProc("SetProcessDPIAware")
+)
+
+func markProcessDPIAware() {
+	dpiAwareOnce.Do(func() { procSetProcessDPIAware.Call() })
+}
+
 var (
 	loadOnce sync.Once
 	loadErr  error
@@ -101,7 +114,16 @@ const (
 	eventMouseButtonDown = 0x401
 	eventMouseButtonUp   = 0x402
 
-	// SDL_WindowEvent.event 真实取值：CLOSE=0x0E RESIZED=0x05 SIZE_CHANGED=0x06
+	// SDL_WindowEvent.event 真实取值（Win7 真机日志实证：启动 0x01,0x0C,0x0A,
+	// 0x03；移动 0x04 data=(x,y)；关闭 0x0E）：
+	// SHOWN=0x01 HIDDEN=0x02 EXPOSED=0x03 MOVED=0x04 RESIZED=0x05
+	// SIZE_CHANGED=0x06 ENTER=0x0A LEAVE=0x0B FOCUS_GAINED=0x0C
+	// FOCUS_LOST=0x0D CLOSE=0x0E——勿凭记忆改值（曾把 EXPOSED 记成 0x02
+	// 即 HIDDEN，导致覆盖重绘永不触发）。
+	// EXPOSED：窗口被覆盖后重新暴露。Win7 无 DWM（Aero 关闭）时后缓冲内容
+	// 不保留，不处理它会显示别窗残影且永不恢复（软件后端 GDI、Win10+ DWM
+	// 合成环境行为不同，但重绘无害，统一处理）。
+	windowEventExposed     = 0x03
 	windowEventClose       = 0x0E
 	windowEventResized     = 0x05
 	windowEventSizeChanged = 0x06
@@ -120,6 +142,9 @@ func Load() error {
 }
 
 func doLoad() error {
+	// DPI-awareness 必须在任何窗口创建之前申报（进程生命周期内只生效一次）。
+	markProcessDPIAware()
+
 	sdlName := "SDL2.dll"
 	ttfName := "SDL2_ttf.dll"
 

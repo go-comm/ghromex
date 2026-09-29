@@ -23,8 +23,9 @@ type Window struct {
 	autoExit    time.Duration
 	hasAutoExit bool
 
-	// dirty 为 true 才重绘：内容变化/窗口尺寸变化/首帧。空闲时零绘制，
-	// 避免每帧产生的绘制指令垃圾把稳态内存抬高数 MB。
+	// dirty 为 true 才重绘：内容变化/窗口尺寸变化/暴露(EXPOSED)/首帧。
+	// 空闲时零绘制，避免每帧产生的绘制指令垃圾把稳态内存抬高数 MB；
+	// 但 EXPOSED 必须重绘——否则无 DWM 环境下窗口被别窗覆盖后永不可恢复。
 	dirty bool
 }
 
@@ -177,7 +178,7 @@ func (win *Window) Screenshot() ([]byte, uint32, int, int, error) {
 	return buf, format, w, h, nil
 }
 
-// Run 进入事件循环：处理关闭/尺寸变化/点击，并按内容变化重排、逐帧重绘。
+// Run 进入事件循环：处理关闭/尺寸变化/暴露/点击，并按内容变化重排、逐帧重绘。
 func (win *Window) Run() error {
 	if win.doc == nil {
 		return fmt.Errorf("window has no document, call OpenDocument first")
@@ -199,6 +200,12 @@ func (win *Window) Run() error {
 			case eventQuit:
 				running = false
 			case eventWindow:
+				if drawDebug {
+					// 诊断行：SDL2 枚举 EXPOSED=0x03 SHOWN=0x01 MOVED=0x04
+					// RESIZED=0x05 CLOSE=0x0E（完整表见 sdl2.go 常量注释）。
+					// Win7 覆盖异常时据此判断事件是否到达。
+					fmt.Fprintf(os.Stderr, "[ghromex] win-event 0x%02X data=(%d,%d)\n", ev.windowEvent, ev.data1, ev.data2)
+				}
 				switch ev.windowEvent {
 				case windowEventClose:
 					running = false
@@ -209,6 +216,10 @@ func (win *Window) Run() error {
 						win.lastChange = -1 // 强制重排
 						win.dirty = true
 					}
+				case windowEventExposed:
+					// 被覆盖后重新暴露：内容已丢（Win7 无 DWM + GPU 后缓冲），
+					// 布局未变无需重排，强制重绘即可。
+					win.dirty = true
 				}
 			case eventMouseButtonUp:
 				if ev.button == mouseButtonLeft && win.doc != nil {
