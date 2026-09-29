@@ -10,7 +10,8 @@
   一致区（数值对齐 Chrome/Windows 实测）：
   - h2/h3 字号与段距、p 段距（含相邻块 margin 折叠）、label 行内、form 块级
   - text/password 输入框外盒 177x21（password 值渲染为 ● 掩码）
-  - radio/checkbox 13x13 控件（radio 正圆）
+  - radio/checkbox 13x13 控件（radio 正圆）、点击切换选中（强调色方块 +
+    白色对勾 / 圆环 + 实心圆，首项 radio 默认 checked 便于对照）
   - submit/reset 按钮外观，外盒高 25、value 文本居中
   - select 外盒高 21、option 13px + 3px 6px 内边距、a 蓝色 + 下划线
   - 整页总高：引擎 ≈525 vs 浏览器 ≈519（曾因无 margin 折叠膨胀至 669）
@@ -23,7 +24,8 @@
   - 灰度 AA vs 浏览器 ClearType 子像素：中文标题锐度差（引擎渲染管线
     v1 边界，改进方向 LCD 子像素见 fontcmp 探针，非本页 CSS 可解）
   - body 边距：引擎默认 0（桌面 UI 取向），浏览器 8px
-  - radio/checkbox 的 checked 选中标记与点击切换交互未实现
+  - radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate 态
+    （点击切换、checked 标记、label 激活与 radio 分组互斥已实现）
   - select 收起态宽 177px（浏览器按选中项内容收缩）、textarea 高 44px
     （浏览器 rows=2 ≈38px）——v1 固定值，其余内边距/边框与 Chrome 一致
   - 父-子穿越 margin 折叠与空块自折叠未实现（本页无相关结构）
@@ -49,7 +51,7 @@
 		<p><label>邮箱 <input type="text"></label></p>
 
 		<h3>偏好</h3>
-		<p><label><input type="radio" name="notice"> 接收邮件通知</label></p>
+		<p><label><input type="radio" name="notice" checked> 接收邮件通知</label></p>
 		<p><label><input type="radio" name="notice"> 不接收</label></p>
 		<p><label><input type="checkbox"> 已阅读并同意条款</label></p>
 

@@ -62,7 +62,8 @@ func userAgentStylesheet() *Stylesheet {
 // 调用时机在 UA 规则之后、作者规则之前——作者 CSS 仍可覆盖此处全部默认。
 // 数值为 Chrome（Windows）实测：radio/checkbox 13x13；
 // submit/reset/button 外观同 button（外盒高 25，value 文本居中）。
-// v1 边界：checked 选中标记与点击切换交互未实现。
+// checked 选中标记与点击切换/分组互斥见 check.go（radio 盒半径在渲染期
+// 按正圆修正，见 renderNode）。
 func applyInputTypeDefaults(comp CSSStyleDeclaration, base *htmlElement) {
 	if comp == nil || base == nil || !strings.EqualFold(base.tagName, "input") {
 		return

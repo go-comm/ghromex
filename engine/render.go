@@ -194,6 +194,13 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 		bh := base.height + pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom]
 
 		r := resolveRadius(comp, bw, bh)
+		// radio 原生外观恒为正圆：UA 的 7px 半径只适配 13px 默认尺寸，
+		// 作者改写宽高后仍按圆绘制（Chrome 同口径），也与选中标记的圆形几何一致。
+		// 取「半宽向上取整」而非 min/2：13px → 7 与原 UA 值一致（r 略大于半宽
+		// 时圆角盒 SDF 退化为整圆），24/40px 等改写尺寸同样成圆。
+		if checkKind(base) == "radio" {
+			r = (minInt(bw, bh) + 1) / 2
+		}
 
 		if bg := comp.BackgroundColor(); bg != nil {
 			fillRoundedRect(g, bx, by, bw, bh, r, bg)
@@ -203,8 +210,8 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 		}
 
 		// 表单控件：input 按 type 分支（text/password 画 value 文本 + 光标 +
-		// 聚焦蓝框，宽度溢出舍头保尾；按钮型居中不截断；radio/checkbox 仅
-		// 控件盒，v1 不含 checked 标记）；textarea 画折行文本 + 光标；
+		// 聚焦蓝框，宽度溢出舍头保尾；按钮型居中不截断；radio/checkbox 选中
+		// 时补画强调色与勾选标记）；textarea 画折行文本 + 光标；
 		// select 画选中文本 + 右侧下拉箭头。
 		if isFormControl(base) && bw > 0 && bh > 0 {
 			typ := strings.ToLower(base.GetAttribute("type"))
@@ -214,7 +221,11 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 			case strings.EqualFold(base.tagName, "textarea"):
 				renderTextareaValue(g, base, comp, p, bx, by, bw, bh, r, focused)
 			case typ == "radio", typ == "checkbox":
-				// 仅控件盒（背景/边框/圆角已由上方通用路径按 UA 样式绘制）
+				// 控件盒（背景/边框/圆角）已由上方通用路径按 UA 样式绘制；
+				// 选中时补画强调色底与对勾/圆环（Chrome 同构，见 check.go）
+				if hasChecked(base) {
+					renderCheckedMark(g, bx, by, bw, bh, r, typ)
+				}
 			default:
 				size := p.Size().Pixel()
 				full := base.GetAttribute("value")

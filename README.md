@@ -10,8 +10,9 @@
 - 定位与层叠：`position: relative / absolute / fixed`、`top/right/bottom/left`（含负值）、`z-index`；脱流盒第二遍布局，包含块 = 最近非 static 祖先 padding box / 视口；绘制分常规层 + 定位层（z 升序，同 z 按文档序）
 - 可编辑输入：点击聚焦（蓝框 + 按点击位置落光标）、键入文字（含中文输入法）、Backspace 删除、方向键 / Home / End 移动光标、Tab 循环切换；`<textarea>` 多行编辑（折行显示、Enter 换行、超出盒高的行不绘制、纵向滚动跟随光标）；其余 input type 按 UA 外观区分渲染：radio/checkbox 13x13 控件、submit/reset/button 按钮外观（value 居中）、password ● 掩码
 - 表单与链接控件：`<select>`/`<option>` 下拉（点击展开选项浮层，点选项选中并派发 `change`，下方放不下且上方放得下时整组上移，浮层压过流内容与定位层、命中测试同层序）、`<a href>` 链接（UA 蓝色 + 下划线，`SetOnNavigate` 注册导航回调，导航在 click 冒泡之后执行）
-- DOM 式 API：`QuerySelector` / `GetBoundingClientRect` / `SetText` / `OnClick` 等；内容变化自动触发重排重绘
-- 事件冒泡：命中测试找到最深元素，沿父链依次派发 `click` / `change`，随后执行引擎默认动作（select 展开/选中、链接导航）
+- 勾选控件：`<input type=radio|checkbox>` 点击切换选中（`checked` 布尔属性按存在性判定，API `IsChecked` / `SetChecked`）；选中态绘制强调色方块 + 白色对勾、强调色圆环 + 实心圆（Chrome 口径），radio 盒恒为正圆；radio 仅 name 非空且相同的项互斥（实测无 name / `name=""` 各自独立）；点 label（包裹其控件或 `for` 指向）等效点该控件
+- DOM 式 API：`QuerySelector` / `GetBoundingClientRect` / `SetText` / `OnClick` / `IsChecked` / `SetChecked` 等；内容变化自动触发重排重绘
+- 事件冒泡：命中测试找到最深元素，沿父链依次派发 `click` / `change`，随后执行引擎默认动作（select 展开/选中、勾选切换、链接导航）
 - 可插拔图形后端：`engine.Graphics` 接口（DrawText / DrawColor / DrawImage / MeasureText），内置 `FakeGraphics`（计数）、`BufferGraphics`（软件光栅化到 RGBA 缓冲，可 `SavePNG`）供无显示器测试
 - 元素注册表：`CustomElements().Define(tag, proto)` + `CloneElement` 注册自定义标签，解析时克隆原型生成独立实例
 - 无头运行：`-dump-svg` 导出布局结果；`HeadlessViewport` + `BufferGraphics` 可在 CI 中像素级断言渲染结果
@@ -154,7 +155,7 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 
 - 布局为块级 + 行内/inline-block 流式布局 + 定位子集；无 flex/grid、无滚动
 - position v1 边界：absolute 双锚（left+right 同给）时 auto 宽按内容收缩而非拉伸；未实现嵌套层叠上下文（opacity/transform 成组、负 z-index 压至祖先背景之下）；命中测试未按 z-index 取最上层元素（select 选项浮层例外，按浮层层序优先）
-- `<input>` 可编辑仅支持 text 类型；radio/checkbox 无 checked 选中标记与点击切换交互；无选区/复制粘贴
+- `<input>` 可编辑仅支持 text 类型；radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate / 表单重置；无选区/复制粘贴
 - `<select>` 仅鼠标交互（展开/收起/选中），无键盘上下键选择、无 multiple、无 optgroup；选项浮层不随视口裁剪（超出视口的选项画到窗口外）
 - `<textarea>` 无选区/复制粘贴、无按住 Shift 扩展选区；盒外整行不绘制（引擎无裁剪原语），需自备足够 height
 - 行高按字形高度量（无 line-height 属性），与浏览器 normal（随字体 ≈1.15-1.5 倍）

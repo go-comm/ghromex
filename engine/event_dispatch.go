@@ -34,8 +34,8 @@ func ElementAt(root HTMLElement, x, y int) HTMLElement {
 
 // OnDocumentClick 在文档上派发一次点击事件：从最深命中元素向上冒泡，
 // 依次调用各元素注册的 click 处理器；随后执行引擎默认动作
-// （select 展开/收起/选中、<a> 导航），value 变化补发 change。
-// 返回是否有处理器被触发。
+// （select 展开/收起/选中、radio/checkbox 勾选切换、<a> 导航），
+// value/勾选状态变化补发 change。返回是否有处理器被触发。
 func OnDocumentClick(doc HTMLDocument, x, y int) bool {
 	ev := &MouseEvent{Type: EventClick, X: x, Y: y}
 	// 展开的 select 浮层绘制在最上层，命中优先于常规树遍历（见 ElementAt）。
@@ -43,6 +43,8 @@ func OnDocumentClick(doc HTMLDocument, x, y int) bool {
 	// 焦点/光标先于 click 处理器更新（处理器才能读到正确状态）。
 	updateClickFocus(doc, target, x, y)
 	changed := applySelectClick(doc, target)
+	// 勾选切换同样在冒泡之前完成：click 处理器读到的是切换后的状态。
+	toggled, didToggle := applyCheckClick(target)
 	handled := false
 	for e := target; e != nil; e = e.ParentElement() {
 		base := inner(e)
@@ -57,6 +59,9 @@ func OnDocumentClick(doc HTMLDocument, x, y int) bool {
 		if sel := containingSelect(target); sel != nil {
 			dispatchChange(inner(sel))
 		}
+	}
+	if didToggle {
+		dispatchChange(toggled)
 	}
 	navigate(doc, target)
 	return handled

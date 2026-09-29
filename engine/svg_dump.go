@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -117,6 +118,10 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement) {
 		bw := base.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
 		bh := base.height + pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom]
 		br := resolveRadius(comp, bw, bh)
+		// 与渲染路径同口径：radio 盒恒为正圆（见 renderNode）
+		if checkKind(base) == "radio" {
+			br = (minInt(bw, bh) + 1) / 2
+		}
 		rxAttr := ""
 		if br > 0 {
 			rxAttr = fmt.Sprintf(` rx="%d"`, br)
@@ -223,7 +228,11 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 	}
 	typ := strings.ToLower(base.GetAttribute("type"))
 	if typ == "radio" || typ == "checkbox" {
-		return // v1 仅控件盒，无 checked 标记
+		// 控件盒已由通用 rect 路径导出；选中时补画标记（与渲染路径同构）
+		if hasChecked(base) {
+			dumpCheckMark(b, comp, bx, by, bw, bh, typ)
+		}
+		return
 	}
 	val := base.GetAttribute("value")
 	if typ == "password" && val != "" {
@@ -249,6 +258,41 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 		ty += (base.height - h) / 2
 	}
 	emitText(tx, ty+h, val)
+}
+
+// dumpCheckMark 导出 radio/checkbox 的选中标记（与 renderCheckedMark 同构：
+// checkbox = 强调色圆角方块 + 白色对勾折线；radio = 强调色外圆环 + 实心内圆，
+// 留白由环内缘与内圆半径之差自然形成）。
+func dumpCheckMark(b *strings.Builder, comp CSSStyleDeclaration,
+	bx, by, bw, bh int, typ string) {
+	if bw <= 0 || bh <= 0 {
+		return
+	}
+	acc := hexColor(37, 99, 235) // focusBlue / checkAccent
+	if typ == "checkbox" {
+		rxAttr := ""
+		if r := resolveRadius(comp, bw, bh); r > 0 {
+			rxAttr = fmt.Sprintf(` rx="%d"`, r)
+		}
+		fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"%s/>`+"\n",
+			bx, by, bw, bh, acc, rxAttr)
+		sx := float64(bw) / 13
+		sy := float64(bh) / 13
+		pt := func(p [2]float64) string {
+			return fmt.Sprintf("%.1f %.1f", float64(bx)+p[0]*sx, float64(by)+p[1]*sy)
+		}
+		fmt.Fprintf(b, `<path d="M %s L %s L %s" fill="none" stroke="#ffffff" stroke-width="1"/>`+"\n",
+			pt(checkPoints[0]), pt(checkPoints[1]), pt(checkPoints[2]))
+		return
+	}
+	cx := float64(bx) + float64(bw)/2
+	cy := float64(by) + float64(bh)/2
+	rOut := math.Min(float64(bw), float64(bh)) / 2
+	// 环：[0.69r, r] → 描边宽 0.31r，中心线 0.845r；内圆 0.54r（与 fillRadioMark 同口径）
+	fmt.Fprintf(b, `<circle cx="%.1f" cy="%.1f" r="%.1f" fill="none" stroke="%s" stroke-width="%.1f"/>`+"\n",
+		cx, cy, rOut*0.845, acc, rOut*0.31)
+	fmt.Fprintf(b, `<circle cx="%.1f" cy="%.1f" r="%.1f" fill="%s"/>`+"\n",
+		cx, cy, rOut*0.54, acc)
 }
 
 // fakeMeasureText 与 FakeGraphics.MeasureText 同口径的文本估算，
