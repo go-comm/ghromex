@@ -298,7 +298,14 @@ func (g *Graphics) face(path string, size int, bold bool) *fontFace {
 		if h == 0 {
 			return nil
 		}
-		f = &fontFace{handle: h, size: size, bold: bold}
+		// f.bold 记 handle 的**实际**样式而非请求值：TTF_OpenFont 初始恒为
+		// regular，先记 false，下方统一样式切换才会把首个 bold 请求真正落到
+		// handle 上。若记请求值 bold=true，会因 "f.bold == bold" 跳过
+		// TTF_SetFontStyle——首个请求即 bold 时（页面首段文字是粗体标题很
+		// 常见，如 form-ua 的 h2）handle 一直按 regular 度量与绘制，直到某次
+		// 非 bold 请求翻转标记、再来一次 bold 请求才纠正；那次翻转通常发生在
+		// 首次点击触发的重排，表现为"点一下标题位移/变粗"的首帧不一致。
+		f = &fontFace{handle: h, size: size, bold: false}
 		if hasTTFHinting {
 			// LIGHT（LCD 时 LIGHT_SUBPIXEL）替代默认 NORMAL：网格吸附是
 			// 小字号针齿的主因（font-render-compare 实测：同一文本纵向硬跳变
