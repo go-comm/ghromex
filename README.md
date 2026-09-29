@@ -140,7 +140,14 @@ serif → Times New Roman、monospace → Courier New、system-ui → Segoe UI�
 渲染管线沿父链携带最近实底，深色背景上白字不会带白底块。代价是彩底上
 竖笔边缘有轻微彩边（与浏览器子像素渲染同性质）；`GHROMEX_LCD=0` 回退
 TTF LIGHT hinting 的灰度 AA，后者较默认 NORMAL 网格吸附的小字号纵向
-硬跳变降约 60%）；
+硬跳变降约 60%）。灰度 AA 的取舍已定量确认为固有性质、非管线失真：
+探针 `backend/sdl2/gray_text_test.go` 以同 face 同 hinting 直出 blended
+surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐像素
+比对，双渲染器偏差均值 <1.3、最大 3（超差 >4 为 0%），即绘制链路无
+失真；观感偏软仅源于 ① LIGHT hinting 用消锯齿换取的纵向柔和
+（13px 中文纵向硬跳变 161→53——锯齿与模糊是同一参数的两端）与
+② 灰度 AA 没有横向子像素分解的物理极限。故灰度路径维持现状不改，
+需要横向锐度请走默认 LCD 路径；
 选择器支持标签、`.class`、`#id`、类型+class/id 组合链（如 `div.wide`）与特异度排序。
 
 ## 已知限制
@@ -155,13 +162,15 @@ TTF LIGHT hinting 的灰度 AA，后者较默认 NORMAL 网格吸附的小字号
 - `DrawImage` 尚未实现（接口已预留）
 - 边框样式目前按单色实心绘制（dashed/dotted 等不做虚线区分）
 - 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；无 webfont 加载、无斜体渲染
+- `GHROMEX_LCD=0` 灰度 AA 的字缘较 LCD 偏软：LIGHT hinting 消锯齿与灰度无横向子像素分解所致，
+  属取舍而非缺陷（保真度探针 `backend/sdl2/gray_text_test.go` 证实管线忠实，见上文渲染段）
 
 ## 调试环境变量
 
 | 变量 | 作用 |
 |---|---|
 | `GHROMEX_DEBUG=1` | 回显绘制失败原因与每次点击的命中/派发结果 |
-| `GHROMEX_LCD=0` | 关闭 LCD 子像素文本渲染（默认开启；回退灰度 AA） |
+| `GHROMEX_LCD=0` | 关闭 LCD 子像素文本渲染（默认开启；回退灰度 AA，字缘较软属固有取舍，见「已知限制」） |
 | `GHROMEX_SOFTWARE=1` | 强制软件渲染器（默认 GPU 加速，创建失败自动回退软件；用于 GPU 可创建但不出像素的虚拟显示环境） |
 | `GHROMEX_FONT=路径` | 指定 standard 字体（默认 Arial，即 sans-serif） |
 | `GHROMEX_CJK_FONT=路径` | 指定 CJK fallback 字体（默认微软雅黑） |
@@ -177,3 +186,7 @@ go test ./...
 - `engine` 包测试全为纯 Go（FakeGraphics / BufferGraphics / SVG 断言），无显示器即可跑
 - `backend/sdl2` 的事件解码回归测试不加载 DLL；事件字段偏移以真实 SDL 产生的事件实测为准（见 `decodeEvent` 注释）
 - demo 退出约定：`go run ./demo -exit-after 3s` 可用于冒烟验证
+- 灰度文字保真度探针：`go test ./backend/sdl2 -run TestGrayscalePipelineFidelity`（默认 dummy 驱动软件渲染器，
+  `GHROMEX_REAL=1` 走真机 GPU）——同源直出面与落屏截图逐像素比对，供回归「灰度管线忠实」结论
+- 文字锐度/字体对比条：`GHROMEX_CMP=1 go test ./backend/sdl2 -run 'TestFontCompareStrip|TestHintingValueScan'`
+  输出 `.temp/fontcmp.png`（NORMAL/LIGHT/NONE/SS2x/LCD 五行并排，肉眼与量化均可比对）
