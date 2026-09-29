@@ -8,7 +8,7 @@ import (
 
 	_ "embed"
 
-	"github.com/go-comm/ghromex/backend/sdl2"
+	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
 )
 
@@ -46,7 +46,7 @@ func main() {
 		return
 	}
 
-	win, err := sdl2.NewWindow(1024, 720, "Ghromex — HTML/CSS 原生 GUI")
+	win, err := browser.New(1024, 720, "Ghromex — HTML/CSS 原生 GUI")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "启动失败:", err)
 		os.Exit(1)
