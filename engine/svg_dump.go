@@ -23,6 +23,10 @@ func (document *htmlDocument) DumpSVG() string {
 	}
 	fmt.Fprintf(&b, `<rect x="0" y="0" width="%d" height="%d" fill="%s"/>`+"\n", w, h, fill)
 	dumpSVGNode(&b, document)
+	// 定位层：与 RenderNode 同一层叠模型（主 pass 已跳过 positioned 子树）。
+	for _, pb := range collectPositioned(document) {
+		dumpSVGNode(&b, pb.e)
+	}
 	b.WriteString("</svg>\n")
 	return b.String()
 }
@@ -103,6 +107,9 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement) {
 	}
 
 	for _, child := range base.children {
+		if isPositioned(child) {
+			continue // 由 DumpSVG 的定位层统一追加
+		}
 		dumpSVGNode(b, child)
 	}
 }

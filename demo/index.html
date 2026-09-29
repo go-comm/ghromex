@@ -31,21 +31,27 @@
 		.ftext { font-size: 13px; color: #CBD5E1; }
 		.hero-ver { font-size: 12px; color: #475569; margin-top: 120px; }
 
-		.card { display: inline-block; width: 452px; padding: 36px;
+		.card { display: inline-block; width: 452px; padding: 36px; position: relative;
 		        background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; }
+		/* 角标：absolute 锚定到卡片（relative 父）右上角之外，验证脱流+负 inset+层叠 */
+		.badge { position: absolute; right: -14px; top: -10px; padding: 4px 10px;
+		         background-color: #DC2626; color: #FFFFFF; font-size: 12px; font-weight: bold;
+		         border-radius: 8px; }
 		.eyebrow { font-size: 12px; font-weight: bold; color: #2563EB; margin: 0 0 10px 0; }
 		.card-title { font-size: 22px; font-weight: bold; color: #0F172A; margin: 0; }
 		.card-sub { font-size: 13px; color: #64748B; margin: 10px 0 24px 0; }
 
 		.lbl { font-size: 12px; font-weight: bold; color: #475569; margin: 0 0 8px 0; }
-		.input { display: inline-block; width: 426px; font-size: 14px; padding: 10px 12px; margin: 0 0 18px 0;
+		/* height/box-sizing 显式声明：引擎 v1 不为空元素（input）自动撑行盒；
+		   显式 box-sizing 不依赖 UA 默认，跨内核（新/旧 Chrome）渲染一致 */
+		.input { box-sizing: border-box; display: inline-block; width: 426px; font-size: 14px; padding: 10px 12px; height: 38px; margin: 0 0 18px 0;
 		         background-color: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 6px; }
 
 		.actions { margin: 6px 0 0 0; text-align: center; }
-		.btn-primary { display: inline-block; font-size: 14px; padding: 8px 16px;
+		.btn-primary { box-sizing: border-box; display: inline-block; font-size: 14px; padding: 8px 16px; height: 34px;
 		               background-color: #2563EB; color: #FFFFFF;
 		               border: 1px solid #2563EB; border-radius: 6px; font-weight: bold; }
-		.btn-plain { display: inline-block; font-size: 14px; padding: 8px 16px;
+		.btn-plain { box-sizing: border-box; display: inline-block; font-size: 14px; padding: 8px 16px; height: 34px;
 		             background-color: #FFFFFF; color: #475569;
 		             border: 1px solid #94A3B8; border-radius: 6px; margin-left: 10px; }
 
@@ -74,6 +80,7 @@
 		</div>
 
 		<div class="card">
+			<span class="badge">99+</span>
 			<div class="eyebrow">WELCOME BACK</div>
 			<div class="card-title">登录工作台</div>
 			<div class="card-sub">继续使用 Ghromex 本地引擎渲染的界面。</div>

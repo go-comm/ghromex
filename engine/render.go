@@ -2,6 +2,7 @@ package engine
 
 import (
 	"math"
+	"sort"
 	"strings"
 )
 
@@ -40,7 +41,64 @@ func opaqueBackgroundColor(e *htmlElement) Color {
 	return bg
 }
 
+// positionedBox 是定位层（第二层）的收集项：非 static 元素及其层序信息。
+type positionedBox struct {
+	e     HTMLElement
+	z     int
+	order int
+}
+
+// isPositioned 判断已级联元素是否进入定位层（position != static）。
+func isPositioned(e HTMLElement) bool {
+	b := inner(e)
+	return b != nil && b.computed != nil && b.computed.Position() != PositionStatic
+}
+
+// collectPositioned 按文档序收集全部非 static 后代，再按
+// (z-index 升序，文档序稳定) 排序——渲染与 SVG 导出共用同一层叠模型。
+// display:none 子树整体跳过（其内定位元素也不参与层叠）。
+func collectPositioned(root HTMLElement) []positionedBox {
+	var out []positionedBox
+	order := 0
+	var walk func(e HTMLElement)
+	walk = func(e HTMLElement) {
+		b := inner(e)
+		if b == nil {
+			return
+		}
+		for _, c := range b.children {
+			cb := inner(c)
+			if cb == nil || cb.computed == nil {
+				continue
+			}
+			if cb.computed.Display() == DisplayNone {
+				continue
+			}
+			if isPositioned(c) {
+				out = append(out, positionedBox{e: c, z: cb.computed.ZIndex(), order: order})
+				order++
+			}
+			walk(c)
+		}
+	}
+	walk(root)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].z != out[j].z {
+			return out[i].z < out[j].z
+		}
+		return out[i].order < out[j].order
+	})
+	return out
+}
+
 // RenderNode 从根节点开始绘制整棵树。g 为渲染后端。
+//
+// 层叠简化模型（对齐浏览器主案例）：常规流内容按文档序先绘；
+// 所有非 static 元素（relative/absolute/fixed，含默认 z:auto）整体盖在
+// 静态内容之上，按 collectPositioned 的 (z-index，文档序) 逐个绘制。
+// 定位子树统一由本 pass 绘制：主 pass 递归遇到 positioned 子节点直接跳过。
+// 未实现嵌套层叠上下文（opacity/transform 成组、负 z 压到背景下等细节），
+// 需要时再扩展。
 func RenderNode(g Graphics, node HTMLElement) {
 	if g == nil {
 		g = NewFakeGraphics()
@@ -50,6 +108,11 @@ func RenderNode(g Graphics, node HTMLElement) {
 		focus = d.focus
 	}
 	renderNode(g, node, nil, focus)
+	for _, pb := range collectPositioned(node) {
+		// paint 传 nil 无损：继承字段（color/font/text-align）在级联时已
+		// 下推到每个元素的 computed，renderNode 内部会用自身 comp 组装。
+		renderNode(g, pb.e, nil, focus)
+	}
 }
 
 // focusBlue 是 v1 硬编码的聚焦框颜色（演示主题主色）。
@@ -155,6 +218,9 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 	}
 
 	for _, child := range base.children {
+		if isPositioned(child) {
+			continue // 定位子树由 RenderNode 的层叠 pass 统一绘制
+		}
 		renderNode(g, child, p, focus)
 	}
 }

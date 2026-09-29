@@ -304,6 +304,37 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		case "block":
 			comp.SetDisplay(DisplayBlock)
 		}
+	case "position":
+		switch v {
+		case "relative":
+			comp.SetPosition(PositionRelative)
+		case "absolute":
+			comp.SetPosition(PositionAbsolute)
+		case "fixed":
+			comp.SetPosition(PositionFixed)
+		default: // static / 非法值回退文档流
+			comp.SetPosition(PositionStatic)
+		}
+	case "box-sizing":
+		// 仅两种合法值；非法回退 CSS 默认 content-box
+		if v == "border-box" {
+			comp.SetBoxSizing(BoxSizingBorderBox)
+		} else {
+			comp.SetBoxSizing(BoxSizingContentBox)
+		}
+	case "top":
+		comp.SetInset(edgeRect(comp.Inset(), edgeTop, parseLength(v)))
+	case "right":
+		comp.SetInset(edgeRect(comp.Inset(), edgeRight, parseLength(v)))
+	case "bottom":
+		comp.SetInset(edgeRect(comp.Inset(), edgeBottom, parseLength(v)))
+	case "left":
+		comp.SetInset(edgeRect(comp.Inset(), edgeLeft, parseLength(v)))
+	case "z-index":
+		// auto 及非法值按 0（定位层内与 z-index:0 同序，文档序决胜）
+		if n, err := strconv.Atoi(v); err == nil {
+			comp.SetZIndex(n)
+		}
 	case "width":
 		if s := parseLength(v); s != nil {
 			comp.SetWidth(s)

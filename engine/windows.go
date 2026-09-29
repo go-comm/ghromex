@@ -35,7 +35,8 @@ func LayoutDocument(doc HTMLDocument) {
 		g = NewFakeGraphics()
 	}
 	resolveStylesTree(doc, nil, doc.Stylesheet())
-	layoutBox(g, base, v.ViewportWidth(), v.ViewportHeight(), 0, 0)
+	layoutBox(g, base, v.ViewportWidth(), v.ViewportHeight(), 0, 0, v.ViewportWidth())
+	layoutPositioned(g, base, v.ViewportWidth(), v.ViewportHeight())
 }
 
 // HeadlessViewport 提供无显示环境下的测试视口（FakeGraphics）。

@@ -16,6 +16,20 @@ const (
 	DisplayBlock
 )
 
+type Position uint8
+
+const (
+	PositionStatic Position = iota
+	PositionRelative
+	PositionAbsolute
+	PositionFixed
+)
+
+// isOutFlow 判断脱流定位（absolute/fixed 不参与常规流，二次 pass 布局）。
+func (p Position) isOutFlow() bool {
+	return p == PositionAbsolute || p == PositionFixed
+}
+
 type FontWeight uint8
 
 const (
@@ -29,6 +43,13 @@ const (
 	TextAlignLeft TextAlign = iota // 默认（等同 CSS start）
 	TextAlignCenter
 	TextAlignRight
+)
+
+type BoxSizing uint8
+
+const (
+	BoxSizingContentBox BoxSizing = iota // width/height 仅为内容盒（CSS 默认）
+	BoxSizingBorderBox                   // width/height 含 padding+border（不含 margin）
 )
 
 type OnCSSStyleDeclarationChanged interface {
@@ -72,6 +93,18 @@ type CSSStyleDeclaration interface {
 	SetTextAlign(align TextAlign) CSSStyleDeclaration
 	BorderRadius() Size
 	SetBorderRadius(radius Size) CSSStyleDeclaration
+	Position() Position
+	SetPosition(pos Position) CSSStyleDeclaration
+	// Inset 是 top/right/bottom/left 四边偏移（默认全 auto）：
+	// relative 为偏移量，absolute/fixed 为相对包含块的锚距。
+	Inset() Rect
+	SetInset(r Rect) CSSStyleDeclaration
+	ZIndex() int
+	SetZIndex(z int) CSSStyleDeclaration
+	// BoxSizing 决定 width/height 是否含 padding+border。Chrome UA 样式表将
+	// 表单控件默认置为 border-box（见 style_ua.go），引擎按此对齐。
+	BoxSizing() BoxSizing
+	SetBoxSizing(b BoxSizing) CSSStyleDeclaration
 }
 
 func newStyle() CSSStyleDeclaration {
@@ -84,7 +117,14 @@ func newStyle() CSSStyleDeclaration {
 	style.borderW = NewZeroRect()
 	style.borderStyle = BorderStyleSolid
 	style.borderRadius = NewZeroSize()
+	style.inset = newAutoRect()
 	return style
+}
+
+// newAutoRect 构造四边均为 auto 的 Rect（inset 初始值）。
+func newAutoRect() Rect {
+	a := NewAutoSize()
+	return NewRect(a, a, a, a)
 }
 
 type cssStyleDeclaration struct {
@@ -106,6 +146,10 @@ type cssStyleDeclaration struct {
 	fontWeight      FontWeight
 	textAlign       TextAlign
 	borderRadius    Size
+	position        Position
+	inset           Rect
+	zindex          int
+	boxSizing       BoxSizing
 }
 
 // copyStyle 复制样式值（不含继承字段之外的引用语义差异）。
@@ -127,6 +171,10 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetFontWeight(s.FontWeight())
 	c.SetTextAlign(s.TextAlign())
 	c.SetBorderRadius(s.BorderRadius())
+	c.SetPosition(s.Position())
+	c.SetInset(s.Inset())
+	c.SetZIndex(s.ZIndex())
+	c.SetBoxSizing(s.BoxSizing())
 	return c
 }
 
@@ -293,5 +341,43 @@ func (style *cssStyleDeclaration) SetBorderRadius(radius Size) CSSStyleDeclarati
 	if radius != nil {
 		style.borderRadius = radius
 	}
+	return style
+}
+
+func (style *cssStyleDeclaration) Position() Position {
+	return style.position
+}
+
+func (style *cssStyleDeclaration) SetPosition(pos Position) CSSStyleDeclaration {
+	style.position = pos
+	return style
+}
+
+func (style *cssStyleDeclaration) Inset() Rect {
+	return style.inset
+}
+
+func (style *cssStyleDeclaration) SetInset(r Rect) CSSStyleDeclaration {
+	if r != nil {
+		style.inset = r
+	}
+	return style
+}
+
+func (style *cssStyleDeclaration) ZIndex() int {
+	return style.zindex
+}
+
+func (style *cssStyleDeclaration) SetZIndex(z int) CSSStyleDeclaration {
+	style.zindex = z
+	return style
+}
+
+func (style *cssStyleDeclaration) BoxSizing() BoxSizing {
+	return style.boxSizing
+}
+
+func (style *cssStyleDeclaration) SetBoxSizing(b BoxSizing) CSSStyleDeclaration {
+	style.boxSizing = b
 	return style
 }

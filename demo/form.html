@@ -1,0 +1,168 @@
+<!doctype html>
+<!--
+  Ghromex 布局能力示例 · HTML 表单（员工登记表）
+  运行：go run ./demo -file examples/form.html
+  无头导出：SDL_VIDEO_DRIVER=dummy go run ./demo -file examples/form.html -dump-svg out.svg
+
+  本页覆盖并演示的布局特性（均为引擎当前支持子集）：
+   1. 块级纵向堆叠 + 盒模型（margin/padding/border/width/height，px 与 %）
+   2. inline-block 并排两列（列间必须紧邻无空白，% 宽自适应）
+   3. shrink-to-fit（inline-block/absolute 的 auto 宽度按内容收缩）
+   4. text-align: center（按钮行整行居中）
+   5. position: relative —— 伪选择框的 caret 以自身为包含块绝对锚定
+   6. position: absolute —— 卡片角标负 inset 越界锚定（right/top 为负）
+   7. 包含块链 —— 校验提示浮层锚定最近的 relative 字段行而非卡片
+   8. position: fixed —— 底部提示条锚定视口（bottom:0 + width:100% + border-box）
+   9. z-index —— 水印(1) < 角标(2) < 必填提示(3)；定位层盖常规流
+  10. 可编辑 input —— 点击聚焦蓝框、键入文字、Backspace、Tab 切换
+  11. box-sizing: border-box —— 表单控件显式声明，不依赖 UA 默认（跨内核一致）
+-->
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>员工登记表 · 布局示例</title>
+	<style>
+		/* ── 基础：body 画布传播背景 + 底部留白避开 fixed 条 ── */
+		body { margin: 0; padding-bottom: 72px; background-color: #EEF1F7;
+		       color: #334155; font-size: 14px; }
+
+		/* ── 顶部标题栏：全宽块级 ── */
+		.topbar { background-color: #0F172A; padding: 8px 32px; }
+		.topbar-title { font-size: 18px; font-weight: bold; color: #F8FAFC; }
+		.topbar-sub { font-size: 12px; color: #64748B; margin-top: 4px; }
+
+		/* ── 主卡片：盒模型全家福（margin+border+padding+radius） ── */
+		.card { position: relative; margin: 14px 40px 0 40px; padding: 20px 32px;
+		        background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 10px; }
+		.form-title { font-size: 24px; font-weight: bold; color: #0F172A; margin: 0 0 2px 0; }
+		.form-sub { font-size: 13px; color: #64748B; margin: 0 0 14px 0; }
+
+		/* 角标：absolute 负 inset 越界锚定到卡片右上角之外 */
+		.badge { position: absolute; right: -14px; top: -12px; z-index: 2;
+		         padding: 5px 10px 6px 10px; background-color: #DC2626;
+		         color: #FFFFFF; font-size: 13px; font-weight: bold; border-radius: 12px;
+		         border: 2px solid #FFFFFF; }
+
+		/* 水印：右下锚定（right/bottom 回推路径），z:1 压卡片内容但低于角标/提示 */
+		.watermark { position: absolute; right: 28px; bottom: 76px; z-index: 1;
+		             font-size: 40px; font-weight: bold; color: #EEF2F8; }
+
+		/* ── 字段通用：label 块级 + 输入控件 ── */
+		.lbl { font-size: 12px; font-weight: bold; color: #475569; margin: 0 0 4px 0; }
+		.lbl .req { color: #DC2626; }
+		.fld { position: relative; margin: 0 0 9px 0; } /* relative：浮层锚定容器 */
+		/* height/box-sizing 显式声明：引擎 v1 不为空元素（input）自动撑行盒；
+		   显式 box-sizing 不依赖 UA 默认——现代 Chrome UA 默认 border-box，
+		   旧内核默认 content-box，作者声明后两侧渲染一致（总盒=height 值） */
+		.in { box-sizing: border-box; width: 100%; font-size: 14px; padding: 7px 12px; height: 32px;
+		      background-color: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 6px; }
+
+		/* ── 两列并排：inline-block 紧邻（中间不可有空白文本） ── */
+		.cols { margin: 0 0 9px 0; }
+		.col { display: inline-block; width: 49%; }
+		.col .in { width: 100%; }
+		.col-b { margin-left: 2%; }
+
+		/* ── 手机 + 获取验证码：输入框 % 宽与按钮 inline-block 同行并排 ── */
+		.in-code { width: 74%; }
+		.btn-code { box-sizing: border-box; display: inline-block; font-size: 13px; padding: 7px 14px; height: 32px; margin-left: 2%;
+		            background-color: #FFFFFF; color: #2563EB; font-weight: bold;
+		            border: 1px solid #93B4F5; border-radius: 6px; }
+
+		/* ── 性别：装饰小块（inline-block 圆点）+ 短文本原子盒同行 ── */
+		.rd { display: inline-block; width: 12px; height: 12px; margin: 3px 6px 0 0;
+		      background-color: #FFFFFF; border: 1px solid #94A3B8; border-radius: 6px; }
+		.rd-on { background-color: #2563EB; border-color: #2563EB; }
+		.rt { font-size: 14px; color: #334155; margin: 0 22px 0 0; }
+		.gap-l { margin-left: 18px; }
+
+		/* ── 伪选择框：relative 自身 + caret 绝对锚定右侧（含 % 与 px 混合） ── */
+		.selbox { position: relative; padding: 7px 34px 7px 12px;
+		          background-color: #F8FAFC; border: 1px solid #CBD5E1; border-radius: 6px;
+		          color: #64748B; }
+		.caret { position: absolute; right: 12px; top: 8px; font-size: 14px; color: #64748B; }
+
+		/* 校验提示浮层：锚定 .fld(relative)，z-index 最高盖住一切 */
+		.tip { position: absolute; left: 268px; top: -14px; z-index: 3;
+		       padding: 3px 10px; background-color: #FEF2F2; color: #B91C1C;
+		       font-size: 12px; font-weight: bold;
+		       border: 1px solid #FCA5A5; border-radius: 6px; }
+
+		/* ── 备注：固定高度块级盒 ── */
+		.note { height: 44px; padding: 7px 12px; background-color: #F8FAFC;
+		        border: 1px solid #CBD5E1; border-radius: 6px;
+		        color: #94A3B8; font-size: 13px; }
+
+		/* ── 按钮行：text-align 整行居中 + shrink-to-fit 按钮宽度随文字 ── */
+		.actions { text-align: center; margin: 16px 0 0 0; }
+		.btn-primary { box-sizing: border-box; display: inline-block; font-size: 14px; font-weight: bold;
+		               padding: 8px 34px; height: 34px; background-color: #2563EB; color: #FFFFFF;
+		               border: 1px solid #2563EB; border-radius: 6px; }
+		.btn-plain { box-sizing: border-box; display: inline-block; font-size: 14px; padding: 8px 34px; height: 34px; margin-left: 12px;
+		             background-color: #FFFFFF; color: #475569;
+		             border: 1px solid #94A3B8; border-radius: 6px; }
+
+		/* ── fixed 底部条：锚定视口底边，与滚动内容无关 ──
+		   border-box 下 width:100% 叠加水平 padding 不再溢出视口 */
+		.footbar { box-sizing: border-box; position: fixed; left: 0; bottom: 0; width: 100%;
+		           padding: 11px 32px; background-color: #0F172A;
+		           color: #94A3B8; font-size: 14px; }
+		.foot-dot { display: inline-block; width: 8px; height: 8px; margin: 3px 8px 0 0; 
+		            background-color: #34D399; border-radius: 4px; }
+	</style>
+</head>
+<body>
+	<div class="topbar">
+		<div class="topbar-title">员工登记表</div>
+		<div class="topbar-sub">ghromex 布局能力示例 —— 本页演示：块级堆叠 / 盒模型 / inline-block 并排 / shrink-to-fit / text-align / relative·absolute·fixed / 包含块链 / z-index / 可输入表单</div>
+	</div>
+
+	<div class="card">
+		<span class="badge">3</span>
+		<div class="watermark">DRAFT</div>
+
+		<div class="form-title">基本信息</div>
+		<div class="form-sub">带 <span class="req">*</span> 的为必填项 · Tab 键可在输入框间切换</div>
+
+		<!-- 两列并排：两个 inline-block 紧邻，% 宽自适应视口 -->
+		<div class="cols">
+			<div class="col"><div class="lbl">姓 <span class="req">*</span></div><input class="in" type="text"></div><div class="col col-b"><div class="lbl">名 <span class="req">*</span></div><input class="in" type="text"></div>
+		</div>
+
+		<div class="fld">
+			<div class="lbl">邮箱 <span class="req">*</span></div>
+			<input class="in" type="text">
+		</div>
+
+		<!-- 输入框与按钮同行：% 宽 + inline-block 原子盒混排 -->
+		<div class="fld">
+			<div class="lbl">手机号 · 验证码</div>
+			<input class="in in-code" type="text"><button class="btn-code">获取验证码</button>
+		</div>
+
+		<div class="fld">
+			<div class="lbl">性别</div>
+			<span class="rd rd-on"></span><span class="rt">男</span><span class="rd gap-l"></span><span class="rt">女</span><span class="rd gap-l"></span><span class="rt">保密</span>
+		</div>
+
+		<!-- relative 容器 + absolute caret：伪下拉框 -->
+		<div class="fld">
+			<div class="lbl">部门 <span class="req">*</span></div>
+			<div class="selbox">请选择所属部门<span class="caret">▼</span></div>
+			<!-- 提示浮层锚定本 fld（relative），而非外层卡片 -->
+			<span class="tip">该字段为必填项</span>
+		</div>
+
+		<div class="fld">
+			<div class="lbl">备注</div>
+			<div class="note">如：技能证书、项目经验（选填，固定高度盒）</div>
+		</div>
+
+		<div class="actions">
+			<button class="btn-primary" id="submit">提交登记</button><button class="btn-plain" id="clear">重 置</button>
+		</div>
+	</div>
+
+	<div class="footbar"><span class="foot-dot"></span>position: fixed —— 本提示条锚定视口底部，内容再长也固定不动 · 本页由 ghromex 原生 HTML/CSS 引擎渲染</div>
+</body>
+</html>
