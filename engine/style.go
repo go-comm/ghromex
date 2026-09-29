@@ -52,6 +52,16 @@ const (
 	BoxSizingBorderBox                   // width/height 含 padding+border（不含 margin）
 )
 
+// TextDecoration 文本装饰（下划线/删除线）。CSS 该属性沿父链继承，
+// <a> 的 UA 下划线正是靠继承落到其文本子节点上。
+type TextDecoration uint8
+
+const (
+	TextDecorationNone TextDecoration = iota
+	TextDecorationUnderline
+	TextDecorationLineThrough
+)
+
 type OnCSSStyleDeclarationChanged interface {
 	OnChanged()
 }
@@ -105,6 +115,9 @@ type CSSStyleDeclaration interface {
 	// 表单控件默认置为 border-box（见 style_ua.go），引擎按此对齐。
 	BoxSizing() BoxSizing
 	SetBoxSizing(b BoxSizing) CSSStyleDeclaration
+	// TextDecoration 为文本装饰（underline/line-through/none），随父链继承。
+	TextDecoration() TextDecoration
+	SetTextDecoration(d TextDecoration) CSSStyleDeclaration
 }
 
 func newStyle() CSSStyleDeclaration {
@@ -150,6 +163,7 @@ type cssStyleDeclaration struct {
 	inset           Rect
 	zindex          int
 	boxSizing       BoxSizing
+	textDecoration  TextDecoration
 }
 
 // copyStyle 复制样式值（不含继承字段之外的引用语义差异）。
@@ -175,6 +189,7 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetInset(s.Inset())
 	c.SetZIndex(s.ZIndex())
 	c.SetBoxSizing(s.BoxSizing())
+	c.SetTextDecoration(s.TextDecoration())
 	return c
 }
 
@@ -379,5 +394,14 @@ func (style *cssStyleDeclaration) BoxSizing() BoxSizing {
 
 func (style *cssStyleDeclaration) SetBoxSizing(b BoxSizing) CSSStyleDeclaration {
 	style.boxSizing = b
+	return style
+}
+
+func (style *cssStyleDeclaration) TextDecoration() TextDecoration {
+	return style.textDecoration
+}
+
+func (style *cssStyleDeclaration) SetTextDecoration(d TextDecoration) CSSStyleDeclaration {
+	style.textDecoration = d
 	return style
 }

@@ -113,6 +113,11 @@ func RenderNode(g Graphics, node HTMLElement) {
 		// 下推到每个元素的 computed，renderNode 内部会用自身 comp 组装。
 		renderNode(g, pb.e, nil, focus)
 	}
+	// select 选项浮层最后绘制：它覆盖其后的流内容与定位层，
+	// 与命中测试（ElementAt 优先查展开 option）保持同一层序语义。
+	for _, sel := range collectOpenSelects(node) {
+		renderSelectPopup(g, sel, focus)
+	}
 }
 
 // focusBlue 是 v1 硬编码的聚焦框颜色（演示主题主色）。
@@ -162,10 +167,17 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 		}
 	}
 
-	// 文本节点：绘制布局阶段生成的行片段
+	// 文本节点：绘制布局阶段生成的行片段 + 文本装饰（下划线/删除线）
 	if tn, ok := e.(*textNode); ok {
+		dec := TextDecorationNone
+		if comp != nil {
+			dec = comp.TextDecoration()
+		}
 		for _, run := range tn.node.runs {
 			g.DrawText(run.x, run.y, run.w, run.h, p, run.text)
+			if dec != TextDecorationNone && run.w > 0 && run.h > 0 {
+				drawDecoration(g, dec, run.x, run.y, run.w, run.h, p.Size().Pixel(), p)
+			}
 		}
 		return
 	}
@@ -190,26 +202,29 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 			strokeRoundedRect(g, bx, by, bw, bh, r, bd, bc)
 		}
 
-		// input：按 type 分支渲染。text/password 画 value 文本 + 常亮光标 +
-		// 聚焦蓝框（最小输入闭环 v1；文本左对齐、垂直居中，宽度溢出时舍头
-		// 保留尾——光标在尾部，所见即正在输入的末尾）。
-		// submit/reset/button 画按钮（盒体样式已由 UA 默认给出），
-		// value 文本水平+垂直居中。radio/checkbox 仅画控件盒（白底/灰边/
-		// 圆角——radio 全圆，均由上方通用路径按 UA 样式绘制），v1 不含
-		// checked 选中标记与点击切换。
-		if strings.EqualFold(base.tagName, "input") && bw > 0 && bh > 0 {
+		// 表单控件：input 按 type 分支（text/password 画 value 文本 + 光标 +
+		// 聚焦蓝框，宽度溢出舍头保尾；按钮型居中不截断；radio/checkbox 仅
+		// 控件盒，v1 不含 checked 标记）；textarea 画折行文本 + 光标；
+		// select 画选中文本 + 右侧下拉箭头。
+		if isFormControl(base) && bw > 0 && bh > 0 {
 			typ := strings.ToLower(base.GetAttribute("type"))
-			switch typ {
-			case "radio", "checkbox":
+			switch {
+			case strings.EqualFold(base.tagName, "select"):
+				renderSelectValue(g, base, comp, p, bx, by, bw, bh, r)
+			case strings.EqualFold(base.tagName, "textarea"):
+				renderTextareaValue(g, base, comp, p, bx, by, bw, bh, r, focused)
+			case typ == "radio", typ == "checkbox":
+				// 仅控件盒（背景/边框/圆角已由上方通用路径按 UA 样式绘制）
 			default:
 				size := p.Size().Pixel()
-				val := base.GetAttribute("value")
-				if typ == "password" && val != "" {
+				full := base.GetAttribute("value")
+				if typ == "password" && full != "" {
 					// 密码掩码：每位一个实心圆点（与浏览器一致）
-					val = strings.Repeat("●", len([]rune(val)))
+					full = strings.Repeat("●", len([]rune(full)))
 				}
+				fullRunes := []rune(full)
+				val, runes := full, fullRunes
 				tw, th := g.MeasureText(val, size, p.Bold(), p.FontFamily())
-				runes := []rune(val)
 				// 按钮型不截断：auto 宽已按 value 外盒测量，两侧 padding 即呼吸
 				// 空间（Chrome 同语义）；文本型保留 -4 余量给光标。
 				buttonLike := typ == "submit" || typ == "reset" || typ == "button"
@@ -218,6 +233,7 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 					val = string(runes)
 					tw, th = g.MeasureText(val, size, p.Bold(), p.FontFamily())
 				}
+				cut := len(fullRunes) - len(runes) // 舍去的前缀 rune 数
 				tx := base.x
 				if buttonLike && base.width > tw {
 					// 按钮型 value 文本水平居中（对齐 Chrome 按钮文字）
@@ -231,13 +247,23 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 					g.DrawText(tx, ty, tw, th, p, val)
 				}
 				if focused {
-					// 光标：紧跟文本尾部的 1px 竖线（文本色）
+					// 光标：1px 竖线（文本色）。默认在值末尾；点击中部后按
+					// 可见前缀宽度定位，落在被裁前缀里则贴左缘。
 					cc := p.Color()
 					if cc == nil {
 						cc = NewColor(0, 0, 0, 255)
 					}
+					cx := tx + tw
+					if c := base.caret; c >= 0 && c < len(fullRunes) {
+						if c > cut {
+							pw, _ := g.MeasureText(string(fullRunes[cut:c]), size, p.Bold(), p.FontFamily())
+							cx = tx + pw
+						} else {
+							cx = tx
+						}
+					}
 					if th > 2 {
-						g.DrawColor(tx+tw+1, ty, 1, th-2, cc)
+						g.DrawColor(cx, ty, 1, th-2, cc)
 					}
 					strokeRoundedRect(g, bx, by, bw, bh, r, edges{1, 1, 1, 1}, focusBlue)
 				}
@@ -248,6 +274,9 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 	for _, child := range base.children {
 		if isPositioned(child) {
 			continue // 定位子树由 RenderNode 的层叠 pass 统一绘制
+		}
+		if isFormControl(base) {
+			continue // 控件内容由专用绘制负责（select 选项另走浮层 pass）
 		}
 		renderNode(g, child, p, focus)
 	}
@@ -381,6 +410,41 @@ func paintCoverage(g Graphics, y, x0, x1 int, c Color, cov func(x int) float64) 
 	if runStart >= 0 {
 		g.DrawColor(runStart, y, x1+1-runStart, 1, c)
 	}
+}
+
+// drawDecoration 绘制文本装饰（下划线/删除线）：以文本色画一条实线。
+// 位置基于行片段盒（引擎不度量基线），厚度随字号缩放并夹在盒内。
+func drawDecoration(g Graphics, d TextDecoration, x, y, w, h, fontSize int, p Paint) {
+	if d == TextDecorationNone || w <= 0 || h <= 0 {
+		return
+	}
+	if fontSize <= 0 {
+		fontSize = 16
+	}
+	th := fontSize/14 + 1
+	var dy int
+	switch d {
+	case TextDecorationUnderline:
+		dy = h - th - 1
+	case TextDecorationLineThrough:
+		dy = h/2 - th/2
+	default:
+		return
+	}
+	if dy < 0 {
+		dy = 0
+	}
+	if dy+th > h {
+		dy = h - th
+	}
+	if dy < 0 {
+		return
+	}
+	c := NewColor(0, 0, 0, 255)
+	if p != nil && p.Color() != nil {
+		c = p.Color()
+	}
+	g.DrawColor(x, y+dy, w, th, c)
 }
 
 // strokeRoundedRect 绘制圆角边框环（外圆角 r、内圆角 r-边框宽，带 AA）；

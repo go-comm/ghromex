@@ -418,6 +418,27 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		default: // left / start / justify（按左处）
 			comp.SetTextAlign(TextAlignLeft)
 		}
+	case "text-decoration":
+		// 取列表中第一个可识别关键字（underline / line-through / none）；
+		// 其余装饰（overline 等）暂不绘制，容忍忽略。
+		recognized := false
+		d := TextDecorationNone
+		for _, part := range strings.Fields(v) {
+			switch part {
+			case "underline":
+				d, recognized = TextDecorationUnderline, true
+			case "line-through":
+				d, recognized = TextDecorationLineThrough, true
+			case "none":
+				d, recognized = TextDecorationNone, true
+			}
+			if recognized {
+				break
+			}
+		}
+		if recognized {
+			comp.SetTextDecoration(d)
+		}
 	case "border-radius":
 		// 仅支持四角统一圆角：取斜杠前（水平半径）第一个长度值；百分比相对短边
 		s := v

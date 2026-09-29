@@ -236,8 +236,8 @@ func (win *Window) Run() error {
 				}
 			case eventKeyDown:
 				if win.doc != nil {
-					// 控制键（Backspace/Tab）；value/焦点变化经 markChanged
-					// 触发 changed → 下方重排+重绘链路，无需手动置 dirty。
+					// 控制键（Backspace/Tab/Enter/方向键/Home/End）；value/焦点变化经
+					// markChanged 触发 changed → 下方重排+重绘链路，无需手动置 dirty。
 					engine.OnDocumentKeyDown(win.doc, int(ev.sym))
 				}
 			case eventTextInput:

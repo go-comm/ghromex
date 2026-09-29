@@ -12,6 +12,7 @@
   - text/password 输入框外盒 177x21（password 值渲染为 ● 掩码）
   - radio/checkbox 13x13 控件（radio 正圆）
   - submit/reset 按钮外观，外盒高 25、value 文本居中
+  - select 外盒高 21、option 13px + 3px 6px 内边距、a 蓝色 + 下划线
   - 整页总高：引擎 ≈525 vs 浏览器 ≈519（曾因无 margin 折叠膨胀至 669）
 
   已知分叉（字体行高度量与 v1 边界，非 UA 规则缺失）：
@@ -23,6 +24,8 @@
     v1 边界，改进方向 LCD 子像素见 fontcmp 探针，非本页 CSS 可解）
   - body 边距：引擎默认 0（桌面 UI 取向），浏览器 8px
   - radio/checkbox 的 checked 选中标记与点击切换交互未实现
+  - select 收起态宽 177px（浏览器按选中项内容收缩）、textarea 高 44px
+    （浏览器 rows=2 ≈38px）——v1 固定值，其余内边距/边框与 Chrome 一致
   - 父-子穿越 margin 折叠与空块自折叠未实现（本页无相关结构）
 -->
 <html>
@@ -49,6 +52,16 @@
 		<p><label><input type="radio" name="notice"> 接收邮件通知</label></p>
 		<p><label><input type="radio" name="notice"> 不接收</label></p>
 		<p><label><input type="checkbox"> 已阅读并同意条款</label></p>
+
+		<h3>详细资料</h3>
+		<p><label>城市 <select>
+			<option value="bj">北京</option>
+			<option value="sh" selected>上海</option>
+			<option value="gz">广州</option>
+		</select></label></p>
+		<p><label>备注 <textarea>多行文本框：折行、光标定位、Enter 换行，
+超出框高的行不绘制，需自行给足 height。</textarea></label></p>
+		<p>参考：<a href="https://example.com/docs">使用说明</a>、<a href="#top">返回顶部</a></p>
 
 		<h3>提交</h3>
 		<p>

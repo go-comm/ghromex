@@ -171,6 +171,40 @@ func parseInto(htmlNode HTMLElement, headEl, bodyEl HTMLElement, src string, doc
 				}
 			}
 			continue
+		case "textarea":
+			// textarea 是原始文本元素：其初始内容即 value，按 HTML 规范
+			// 不建成文本子节点（引擎按属性渲染/编辑），仅解码实体；
+			// 紧跟开标签的首个换行按规范忽略。
+			close := strings.Index(strings.ToLower(src[after:]), "</textarea")
+			var text string
+			if close < 0 {
+				text = src[after:]
+				i = len(src)
+			} else {
+				text = src[after : after+close]
+				i = after + close
+				if end := strings.IndexByte(src[i:], '>'); end >= 0 {
+					i += end + 1
+				}
+			}
+			text = strings.TrimPrefix(text, "\r\n")
+			text = strings.TrimPrefix(text, "\n")
+			// 元素创建/属性回填在下方「普通元素」段，此处提前建一次
+			// （textarea 无子节点，跳过那段不会影响结构）。
+			var ta HTMLElement
+			if doc != nil {
+				ta = doc.CreateElement(tag)
+			} else {
+				ta = newElement(tag)
+			}
+			for _, kv := range attrs {
+				ta.SetAttribute(kv[0], decodeEntities(kv[1]))
+			}
+			ta.SetAttribute("value", decodeEntities(text))
+			if target := ensureInsertTarget(); target != nil {
+				target.AppendChild(ta)
+			}
+			continue
 		}
 
 		// 普通元素

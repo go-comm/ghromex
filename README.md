@@ -8,9 +8,10 @@
 
 - 纯 Go 渲染引擎：HTML 解析、CSS 级联、选择器（标签 / `.class` / `#id` / 简单组合，含特异度）、块级与行内（inline / inline-block）布局、文本按词/按字换行
 - 定位与层叠：`position: relative / absolute / fixed`、`top/right/bottom/left`（含负值）、`z-index`；脱流盒第二遍布局，包含块 = 最近非 static 祖先 padding box / 视口；绘制分常规层 + 定位层（z 升序，同 z 按文档序）
-- 可编辑 `<input>`（text）：点击聚焦（蓝框 + 尾部光标）、键入文字（含中文输入法）、Backspace 删除、Tab 循环切换；其余 type 按 UA 外观区分渲染：radio/checkbox 13x13 控件、submit/reset/button 按钮外观（value 居中）、password ● 掩码
+- 可编辑输入：点击聚焦（蓝框 + 按点击位置落光标）、键入文字（含中文输入法）、Backspace 删除、方向键 / Home / End 移动光标、Tab 循环切换；`<textarea>` 多行编辑（折行显示、Enter 换行、超出盒高的行不绘制、纵向滚动跟随光标）；其余 input type 按 UA 外观区分渲染：radio/checkbox 13x13 控件、submit/reset/button 按钮外观（value 居中）、password ● 掩码
+- 表单与链接控件：`<select>`/`<option>` 下拉（点击展开选项浮层，点选项选中并派发 `change`，下方放不下且上方放得下时整组上移，浮层压过流内容与定位层、命中测试同层序）、`<a href>` 链接（UA 蓝色 + 下划线，`SetOnNavigate` 注册导航回调，导航在 click 冒泡之后执行）
 - DOM 式 API：`QuerySelector` / `GetBoundingClientRect` / `SetText` / `OnClick` 等；内容变化自动触发重排重绘
-- 事件冒泡：命中测试找到最深元素，沿父链依次派发 `click`
+- 事件冒泡：命中测试找到最深元素，沿父链依次派发 `click` / `change`，随后执行引擎默认动作（select 展开/选中、链接导航）
 - 可插拔图形后端：`engine.Graphics` 接口（DrawText / DrawColor / DrawImage / MeasureText），内置 `FakeGraphics`（计数）、`BufferGraphics`（软件光栅化到 RGBA 缓冲，可 `SavePNG`）供无显示器测试
 - 元素注册表：`CustomElements().Define(tag, proto)` + `CloneElement` 注册自定义标签，解析时克隆原型生成独立实例
 - 无头运行：`-dump-svg` 导出布局结果；`HeadlessViewport` + `BufferGraphics` 可在 CI 中像素级断言渲染结果
@@ -101,9 +102,14 @@ engine/            渲染引擎（纯 Go，不依赖任何图形后端）
   style_cascade.go   选择器匹配 + 特异度级联 + 继承
   style_ua.go        UA 样式表（默认值对齐 Chrome，含表单控件 border-box）
   measure.go         盒模型布局、行盒、换行、定位布局（relative/absolute/fixed）
-  render.go          绘制指令下发（背景/边框/文本片段/定位层）
-  text_input.go      input 焦点/编辑/Tab 循环
-  event_dispatch.go  命中测试 + click 冒泡派发
+  render.go          绘制指令下发（背景/边框/文本片段/文本装饰/定位层）
+  text_input.go      可编辑输入焦点/光标/编辑/Tab 循环
+  select.go          select 展开态、选项浮层布局、取值与点击默认动作
+  textarea.go        textarea 折行、光标↔坐标映射、纵向滚动
+  anchor.go          `<a href>` 导航默认动作
+  form.go            表单控件取值（GetValue/SetValue）与字体度量辅助
+  form_render.go     input/textarea/select 专用绘制（含选项浮层）
+  event_dispatch.go  命中测试 + click/change 冒泡派发
   graphics.go        Graphics 接口 / FakeGraphics / BufferGraphics
   svg_dump.go        布局结果导出 SVG
   element_registry.go 标签原型注册表（自定义元素）
@@ -120,7 +126,7 @@ libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 `margin*`（相邻块级兄弟折叠：取较大者；父-子穿越/空块折叠未实现）、`padding*`、
 `border` 简写与 `border-width/color/style`、`border-radius`(四角统一，仅水平半径)、
 `background-color`/`background`、`color`、`font-size`、`font-weight(bold)`、`font-family`、
-`text-align(left/center/right)`、
+`text-align(left/center/right)`、`text-decoration(underline/line-through/none，随父链继承)`、
 `position(relative/absolute/fixed)`、`top/right/bottom/left`(px 与 %，支持负值；
 absolute/fixed 相对包含块锚定，right/bottom 回推)、`z-index`；
 inline-block 的百分比宽度按包含块内容宽解析（而非行内剩余宽）；
@@ -140,8 +146,10 @@ TTF LIGHT hinting 的灰度 AA，后者较默认 NORMAL 网格吸附的小字号
 ## 已知限制
 
 - 布局为块级 + 行内/inline-block 流式布局 + 定位子集；无 flex/grid、无滚动
-- position v1 边界：absolute 双锚（left+right 同给）时 auto 宽按内容收缩而非拉伸；未实现嵌套层叠上下文（opacity/transform 成组、负 z-index 压至祖先背景之下）；命中测试未按层叠取最上层元素
-- `<input>` 可编辑仅支持 text 类型；radio/checkbox 无 checked 选中标记与点击切换交互；无方向键移动光标、无选区/复制粘贴
+- position v1 边界：absolute 双锚（left+right 同给）时 auto 宽按内容收缩而非拉伸；未实现嵌套层叠上下文（opacity/transform 成组、负 z-index 压至祖先背景之下）；命中测试未按 z-index 取最上层元素（select 选项浮层例外，按浮层层序优先）
+- `<input>` 可编辑仅支持 text 类型；radio/checkbox 无 checked 选中标记与点击切换交互；无选区/复制粘贴
+- `<select>` 仅鼠标交互（展开/收起/选中），无键盘上下键选择、无 multiple、无 optgroup；选项浮层不随视口裁剪（超出视口的选项画到窗口外）
+- `<textarea>` 无选区/复制粘贴、无按住 Shift 扩展选区；盒外整行不绘制（引擎无裁剪原语），需自备足够 height
 - 行高按字形高度量（无 line-height 属性），与浏览器 normal（随字体 ≈1.15-1.5 倍）
   行盒高度存在小差；父-子穿越 margin 折叠与空块自折叠未实现
 - `DrawImage` 尚未实现（接口已预留）

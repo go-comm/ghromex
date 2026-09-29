@@ -27,8 +27,38 @@ func (document *htmlDocument) DumpSVG() string {
 	for _, pb := range collectPositioned(document) {
 		dumpSVGNode(&b, pb.e)
 	}
+	// select 选项浮层最后导出（与渲染层序一致：覆盖流内容与定位层）
+	for _, sel := range collectOpenSelects(document) {
+		dumpSelectPopup(&b, sel)
+	}
 	b.WriteString("</svg>\n")
 	return b.String()
+}
+
+// dumpSelectPopup 导出展开的 select 浮层：容器底/边框 + 选中项高亮 + 各 option。
+func dumpSelectPopup(b *strings.Builder, sel *htmlElement) {
+	opts := selectOptions(sel.self)
+	if len(opts) == 0 {
+		return
+	}
+	x0, y0, x1, y1, ok := selectPopupBounds(sel)
+	if !ok || x1 <= x0 || y1 <= y0 {
+		return
+	}
+	// 底 → 选中项高亮 → 描边（描边必须在高亮之后，否则被高亮盖掉）
+	fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="#ffffff"/>`+"\n",
+		x0, y0, x1-x0, y1-y0)
+	if s := selectedOptionBase(sel); s != nil {
+		if sx, sy, sw, sh := borderBoxRect(s); sw > 0 && sh > 0 {
+			fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`+"\n",
+				sx, sy, sw, sh, hexColor(0xCF, 0xE2, 0xFF))
+		}
+	}
+	fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="#767676" stroke-width="1"/>`+"\n",
+		x0, y0, x1-x0, y1-y0)
+	for _, o := range opts {
+		dumpSVGNode(b, o)
+	}
 }
 
 func dumpSVGNode(b *strings.Builder, e HTMLElement) {
@@ -63,9 +93,18 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement) {
 			fam = base.computed.FontFamily()
 		}
 		ff := fmt.Sprintf(` font-family="%s"`, escapeXML(svgFontStack(fam)))
+		decAttr := ""
+		if base.computed != nil {
+			switch base.computed.TextDecoration() {
+			case TextDecorationUnderline:
+				decAttr = ` text-decoration="underline"`
+			case TextDecorationLineThrough:
+				decAttr = ` text-decoration="line-through"`
+			}
+		}
 		for _, run := range tn.node.runs {
-			fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d"%s%s fill="%s">%s</text>`+"\n",
-				run.x, run.y+run.h, fs, ff, fw, fill, escapeXML(run.text))
+			fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d"%s%s%s fill="%s">%s</text>`+"\n",
+				run.x, run.y+run.h, fs, ff, fw, decAttr, fill, escapeXML(run.text))
 		}
 		return
 	}
@@ -104,12 +143,15 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement) {
 					bx+lw/2, by+lw/2, bw-lw, bh-lw, hexColor(r, g, bl), lw, srx)
 			}
 		}
-		dumpInputValue(b, base, comp, bx, by, bw, bh)
+		dumpControlText(b, base, comp, bx, by, bw, bh)
 	}
 
 	for _, child := range base.children {
 		if isPositioned(child) {
 			continue // 由 DumpSVG 的定位层统一追加
+		}
+		if isFormControl(base) {
+			continue // 控件文本已由 dumpControlText 输出（select 浮层另走一层）
 		}
 		dumpSVGNode(b, child)
 	}
@@ -119,23 +161,16 @@ func hexColor(r, g, b uint8) string {
 	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
 }
 
-// dumpInputValue 导出 input 的 value 文本（与 render.go 同构的定位逻辑：
-// 垂直居中、按钮型水平居中且不截断、password ● 掩码、文本型溢出舍头保留尾）。
-// input 为空元素无子节点，若不在此补画，SVG 导出会缺所有输入框文字
+// dumpControlText 导出表单控件的文本（与 render.go 同构的定位逻辑：
+//   - input：垂直居中、按钮型水平居中且不截断、password ● 掩码、
+//     文本型溢出舍头保留尾；
+//   - textarea：折行后的逐行文本（盒外整行不导出）；
+//   - select：选中文本左对齐垂直居中（下拉箭头属装饰，不导出）。
+//
+// 这些控件没有文本子节点，若不在此补画，SVG 导出会缺所有控件文字
 // （渲染路径在元素盒绘制时直接读 value 属性，两条路径必须保持同构）。
-func dumpInputValue(b *strings.Builder, base *htmlElement, comp CSSStyleDeclaration, bx, by, bw, bh int) {
-	if !strings.EqualFold(base.tagName, "input") || bw <= 0 || bh <= 0 {
-		return
-	}
-	typ := strings.ToLower(base.GetAttribute("type"))
-	if typ == "radio" || typ == "checkbox" {
-		return // v1 仅控件盒，无 checked 标记
-	}
-	val := base.GetAttribute("value")
-	if typ == "password" && val != "" {
-		val = strings.Repeat("●", len([]rune(val)))
-	}
-	if val == "" {
+func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclaration, bx, by, bw, bh int) {
+	if bw <= 0 || bh <= 0 {
 		return
 	}
 	fs := 13
@@ -152,6 +187,51 @@ func dumpInputValue(b *strings.Builder, base *htmlElement, comp CSSStyleDeclarat
 		fam = comp.FontFamily()
 	}
 	// 度量与渲染路径一致走 Fake 估算口径（dump 无 Graphics 实例）
+	emitText := func(x, y int, text string) {
+		fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d" font-family="%s" fill="%s">%s</text>`+"\n",
+			x, y, fs, escapeXML(svgFontStack(fam)), fill, escapeXML(text))
+	}
+
+	if strings.EqualFold(base.tagName, "select") {
+		val := selectDisplayText(base)
+		if val == "" {
+			return
+		}
+		_, h := fakeMeasureText(val, fs)
+		tx, ty := base.x, base.y
+		if h < base.height {
+			ty += (base.height - h) / 2
+		}
+		emitText(tx, ty+h, val)
+		return
+	}
+
+	if strings.EqualFold(base.tagName, "textarea") {
+		l := layoutTextarea(NewFakeGraphics(), base)
+		for i, ln := range l.lines {
+			y := l.y + i*l.lh
+			if y < base.y || y+l.lh > base.y+base.height || ln.text == "" {
+				continue // 盒外整行不导出（渲染路径同样丢弃）
+			}
+			emitText(l.x, y+l.lh, ln.text)
+		}
+		return
+	}
+
+	if !strings.EqualFold(base.tagName, "input") {
+		return
+	}
+	typ := strings.ToLower(base.GetAttribute("type"))
+	if typ == "radio" || typ == "checkbox" {
+		return // v1 仅控件盒，无 checked 标记
+	}
+	val := base.GetAttribute("value")
+	if typ == "password" && val != "" {
+		val = strings.Repeat("●", len([]rune(val)))
+	}
+	if val == "" {
+		return
+	}
 	w, h := fakeMeasureText(val, fs)
 	runes := []rune(val)
 	buttonLike := typ == "submit" || typ == "reset" || typ == "button"
@@ -168,8 +248,7 @@ func dumpInputValue(b *strings.Builder, base *htmlElement, comp CSSStyleDeclarat
 	if h < base.height {
 		ty += (base.height - h) / 2
 	}
-	fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d" font-family="%s" fill="%s">%s</text>`+"\n",
-		tx, ty+h, fs, escapeXML(svgFontStack(fam)), fill, escapeXML(val))
+	emitText(tx, ty+h, val)
 }
 
 // fakeMeasureText 与 FakeGraphics.MeasureText 同口径的文本估算，

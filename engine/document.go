@@ -28,6 +28,9 @@ type HTMLDocument interface {
 
 	// SetOnChanged 注册文档内容变化回调（布局失效通知，供后端重排）。
 	SetOnChanged(f func())
+	// SetOnNavigate 注册链接导航回调：点击带 href 的 <a> 时以 href 调用。
+	// 引擎不内置多文档/外跳，跳转策略由应用决定；f 为 nil 时移除。
+	SetOnNavigate(f func(href string))
 	// ChangeCount 返回内容变化计数，后端据此判断是否需要重排。
 	ChangeCount() int64
 
@@ -54,13 +57,14 @@ func NewDocument() HTMLDocument {
 type htmlDocument struct {
 	HTMLElement
 
-	viewport  Viewport
-	sheet     *Stylesheet
-	head      HTMLHeadElement
-	body      HTMLBodyElement
-	focus     HTMLElement // 当前聚焦的可编辑输入（v1 仅 input），nil 无焦点
-	changed   int64
-	onChanged func()
+	viewport   Viewport
+	sheet      *Stylesheet
+	head       HTMLHeadElement
+	body       HTMLBodyElement
+	focus      HTMLElement // 当前聚焦的可编辑输入（v1 仅 input/textarea），nil 无焦点
+	changed    int64
+	onChanged  func()
+	onNavigate func(href string)
 }
 
 func (document *htmlDocument) setPaintBase(p Paint) {
@@ -166,6 +170,10 @@ func (document *htmlDocument) Refresh() {
 
 func (document *htmlDocument) SetOnChanged(f func()) {
 	document.onChanged = f
+}
+
+func (document *htmlDocument) SetOnNavigate(f func(href string)) {
+	document.onNavigate = f
 }
 
 func (document *htmlDocument) ChangeCount() int64 {

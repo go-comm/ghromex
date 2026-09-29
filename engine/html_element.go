@@ -8,7 +8,8 @@ import (
 
 // 事件类型常量
 const (
-	EventClick = "click"
+	EventClick  = "click"
+	EventChange = "change"
 )
 
 // MouseEvent 描述一次鼠标事件，坐标为文档视口坐标。
@@ -69,6 +70,8 @@ type HTMLElement interface {
 
 	// OnClick 注册点击事件处理器，f 为 nil 时移除。
 	OnClick(f func(ev *MouseEvent))
+	// OnChange 注册值变更事件处理器（select 选中项变化等），f 为 nil 时移除。
+	OnChange(f func(ev *MouseEvent))
 
 	getPaint() Paint
 	setPaint(p Paint)
@@ -108,6 +111,12 @@ type htmlElement struct {
 	transformX    Size
 	transformY    Size
 	paint         Paint
+	// open 为 select 的展开态（下拉浮层是否显示）。
+	open bool
+	// caret 为聚焦可编辑控件的插入点，单位是 value 的 rune 下标。
+	caret int
+	// scrollTop 为 textarea 的纵向滚动偏移（像素，v1 仅内部使用）。
+	scrollTop int
 }
 
 func (element *htmlElement) TagName() string {
@@ -310,6 +319,18 @@ func (element *htmlElement) OnClick(f func(ev *MouseEvent)) {
 	element.handlers[EventClick] = f
 }
 
+// OnChange 注册/移除值变更处理器（当前用于 select 选中项变化）。
+func (element *htmlElement) OnChange(f func(ev *MouseEvent)) {
+	if f == nil {
+		delete(element.handlers, EventChange)
+		return
+	}
+	if element.handlers == nil {
+		element.handlers = make(map[string]func(*MouseEvent))
+	}
+	element.handlers[EventChange] = f
+}
+
 func (element *htmlElement) dispatch(typ string, ev *MouseEvent) bool {
 	if f, ok := element.handlers[typ]; ok && f != nil {
 		ev.Element = element.self
@@ -365,6 +386,9 @@ func (element *htmlElement) Clone() HTMLElement {
 	c.handlers = nil
 	c.inline = nil
 	c.paint = element.paint
+	c.open = false
+	c.caret = 0
+	c.scrollTop = 0
 	c.self = &c
 	return &c
 }

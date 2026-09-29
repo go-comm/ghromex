@@ -21,7 +21,7 @@ span { display: inline; }
 label { display: inline; }
 strong { font-weight: bold; } /* Chrome UA: bolder(700) */
 b { font-weight: bold; }
-a { display: inline; color: #2563EB; }
+a { display: inline; color: #2563EB; text-decoration: underline; }
 /* 表单控件默认值对齐 Chrome（Windows）UA 样式：
    button: buttonface=#EFEFEF、文字色 buttontext=#000（不继承）、居中文本、
            边框灰 #767676、字号 13px（≈浏览器 13.33px Arial）。
@@ -37,6 +37,12 @@ button { display: inline-block; box-sizing: border-box; font-family: system-ui; 
    故显式给 height 让外盒=21px。type 间的尺寸/外观差异见 applyInputTypeDefaults
    （选择器不支持属性选择器，无法用 input[type=...] 表达）。 */
 input { display: inline-block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; width: 177px; height: 21px; }
+/* select/textarea 同 input 口径：border-box + 13px system-ui + 177px 宽。
+   select 高 21px（外盒），展开的选项浮层由 layoutSelectPopups 单独定位，
+   option 为 block 以免进入常规流参与行盒排布；textarea 两行高。 */
+select { display: inline-block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; width: 177px; height: 21px; }
+option { display: block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; padding: 3px 6px; }
+textarea { display: inline-block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 2px 4px; width: 177px; height: 44px; }
 `
 
 var (

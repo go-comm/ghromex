@@ -17,6 +17,7 @@ func MeasureNode(g Graphics, node HTMLElement, mw, mh int) {
 	}
 	layoutBox(g, base, mw, mh, 0, 0, mw)
 	layoutPositioned(g, base, mw, mh)
+	layoutSelectPopups(g, node, mw, mh)
 }
 
 // MeasureDocumentWithStylesheet 完整流水线入口：级联 + 布局，不依赖 Viewport。
@@ -32,6 +33,7 @@ func MeasureDocumentWithStylesheet(g Graphics, doc HTMLDocument, mw, mh int) {
 	resolveStylesTree(doc, nil, sheet)
 	layoutBox(g, base, mw, mh, 0, 0, mw)
 	layoutPositioned(g, base, mw, mh)
+	layoutSelectPopups(g, doc, mw, mh)
 }
 
 // ---------------------------------------------------------------------------
@@ -123,15 +125,25 @@ func outerBoxW(el *htmlElement) int {
 	return el.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight] + mg[eLeft] + mg[eRight]
 }
 
-// inputButtonTextWidth 返回 input[type=submit/reset/button] 的外盒宽
-// （value 文本 + padding + border，与 UA border-box 尺寸同口径；
-// layoutBox 会再扣 padding/border 得内容宽）；其他元素/类型返回 -1。
+// inputButtonTextWidth 返回表单控件「内容随文本收缩」时的外盒宽
+// （文本 + padding + border，与 UA border-box 尺寸同口径；
+// layoutBox 会再扣 padding/border 得内容宽）；不适用返回 -1。
 func inputButtonTextWidth(g Graphics, el *htmlElement, comp CSSStyleDeclaration) int {
-	if comp == nil || el == nil || !strings.EqualFold(el.tagName, "input") {
+	if comp == nil || el == nil {
 		return -1
 	}
-	switch strings.ToLower(el.GetAttribute("type")) {
-	case "submit", "reset", "button":
+	var text string
+	switch {
+	case strings.EqualFold(el.tagName, "input"):
+		switch strings.ToLower(el.GetAttribute("type")) {
+		case "submit", "reset", "button":
+		default:
+			return -1
+		}
+		text = el.GetAttribute("value")
+	case strings.EqualFold(el.tagName, "select"):
+		// select 的 auto 宽按显示文本 + 右侧下拉箭头位（16px）收缩
+		text = selectDisplayText(el) + "  "
 	default:
 		return -1
 	}
@@ -139,10 +151,33 @@ func inputButtonTextWidth(g Graphics, el *htmlElement, comp CSSStyleDeclaration)
 	if s := resolveLen(comp.FontSize(), 0); s > 0 {
 		fontPx = s
 	}
-	w, _ := g.MeasureText(el.GetAttribute("value"), fontPx, comp.FontWeight() == FontWeightBold, comp.FontFamily())
+	w, _ := g.MeasureText(text, fontPx, comp.FontWeight() == FontWeightBold, comp.FontFamily())
 	bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
 	pd := resolveEdgeRect(comp.Padding(), 0, 0)
 	return w + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
+}
+
+// defaultFormControlHeight 为 height:auto 的原子表单控件给出内容盒兜底高度
+// （字体行高 + padding + border），避免空控件塌缩成 0 高。
+func defaultFormControlHeight(g Graphics, comp CSSStyleDeclaration) int {
+	if g == nil || comp == nil {
+		return 21
+	}
+	fontPx := 13
+	if s := resolveLen(comp.FontSize(), 0); s > 0 {
+		fontPx = s
+	}
+	_, h := g.MeasureText("Mg", fontPx, comp.FontWeight() == FontWeightBold, comp.FontFamily())
+	if h <= 0 {
+		h = fontPx
+	}
+	pd := resolveEdgeRect(comp.Padding(), 0, 0)
+	bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
+	h += pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom]
+	if h <= 0 {
+		h = 21
+	}
+	return h
 }
 
 // layoutBox 布局一个元素盒。
@@ -212,11 +247,23 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW int) (r
 	if shrinkWrap {
 		align = TextAlignLeft
 	}
-	flowW, flowH := layoutChildren(g, el, contentW, remainH, cx, cy, align)
+	var flowW, flowH int
+	if isAtomicFormControl(el) {
+		// select/textarea 是原子盒：option 由第三遍布局（layoutSelectPopups）
+		// 定位，textarea 的内容是 value 属性而非子节点，均不进常规流。
+		flowW, flowH = 0, 0
+	} else {
+		flowW, flowH = layoutChildren(g, el, contentW, remainH, cx, cy, align)
+	}
 
 	contentH := resolveLen(comp.Height(), outerH)
 	if contentH < 0 {
 		contentH = flowH
+		if contentH <= 0 && isAtomicFormControl(el) {
+			// UA 未给高度（作者 height:auto）时按字体行高撑开，
+			// 否则空控件会塌缩成 0 高不可见。
+			contentH = defaultFormControlHeight(g, comp)
+		}
 	} else if borderBox {
 		if ch := contentH - pd[eTop] - pd[eBottom] - bd[eTop] - bd[eBottom]; ch > 0 {
 			contentH = ch
