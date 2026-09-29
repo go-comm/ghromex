@@ -46,6 +46,9 @@ var (
 	sdlQuit                     nativeCall
 	sdlGetError                 nativeCall
 	sdlCreateWindow             nativeCall
+	sdlShowWindow               nativeCall
+	sdlRaiseWindow              nativeCall
+	sdlGetWindowFlags           nativeCall
 	sdlSetWindowTitle           nativeCall
 	sdlDestroyWindow            nativeCall
 	sdlCreateRenderer           nativeCall
@@ -88,8 +91,11 @@ var (
 
 // SDL 常量
 const (
-	initVideo          = 0x00000020
-	windowShown        = 0x00000004
+	initVideo   = 0x00000020
+	windowShown = 0x00000004
+	// SDL_WINDOW_HIDDEN：SDL2 建窗默认可见（漏传时 CreateWindow 会自动
+	// 补 SHOWN，实测 flags=0x24），要“首帧后再显示”必须显式隐藏。
+	windowHidden       = 0x00000008
 	windowResizable    = 0x00000020
 	windowPosCenteredX = 0x2FFF0000
 
@@ -169,6 +175,13 @@ func doLoad() error {
 	sdlQuit = bindSdl("SDL_Quit")
 	sdlGetError = bindSdl("SDL_GetError")
 	sdlCreateWindow = bindSdl("SDL_CreateWindow")
+	// 隐藏建窗、首帧 Present 后再显示（见 window.go 的 present）：
+	// SDL_ShowWindow/SW_SHOW 补齐被隐藏期间的激活路径，SDL_RaiseWindow
+	// 保证显示出的窗口拿到前台/焦点（等价于建窗即可见时的初始焦点）。
+	sdlShowWindow = bindSdl("SDL_ShowWindow")
+	sdlRaiseWindow = bindSdl("SDL_RaiseWindow")
+	// 测试用：核对“建窗即隐藏、首帧后才显示”的窗口标志。
+	sdlGetWindowFlags = bindSdl("SDL_GetWindowFlags")
 	sdlSetWindowTitle = bindSdl("SDL_SetWindowTitle")
 	sdlDestroyWindow = bindSdl("SDL_DestroyWindow")
 	sdlCreateRenderer = bindSdl("SDL_CreateRenderer")

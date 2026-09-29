@@ -27,6 +27,10 @@ type Window struct {
 	// 空闲时零绘制，避免每帧产生的绘制指令垃圾把稳态内存抬高数 MB；
 	// 但 EXPOSED 必须重绘——否则无 DWM 环境下窗口被别窗覆盖后永不可恢复。
 	dirty bool
+
+	// shown 记录窗口是否已显示。首帧 Present 之前保持隐藏（建窗带
+	// windowHidden），首帧提交后才 ShowWindow + RaiseWindow——见 present。
+	shown bool
 }
 
 // NewWindow 创建带渲染器的窗口。坐标体系 1:1（1 CSS px = 1 物理像素）。
@@ -51,9 +55,14 @@ func NewWindow(w, h int, title string) (*Window, error) {
 		return nil, fmt.Errorf("TTF_Init: %s", lastError())
 	}
 
+	// windowHidden：窗口先隐藏，首帧 Present 之后才显示（见 present）。
+	// SDL2 建窗默认可见（漏传 HIDDEN 即带 SHOWN，实测 flags=0x24），而交换链
+	// 在首次 Present 前不含任何有效画面——窗口若建窗即可见，从建窗到解析/
+	// 级联/布局/首绘（含首次字体加载，可达数百毫秒）会一直显示黑底，表现为
+	// “先黑一下再闪出页面”。
 	b, p := cBytes(title)
 	hwnd := sdlCreateWindow(p, windowPosCenteredX, windowPosCenteredX,
-		uintptr(w), uintptr(h), windowShown|windowResizable)
+		uintptr(w), uintptr(h), windowHidden|windowResizable)
 	runtime.KeepAlive(b)
 	if hwnd == 0 {
 		return nil, fmt.Errorf("SDL_CreateWindow: %s", lastError())
@@ -152,6 +161,22 @@ func (win *Window) clearCanvas() {
 	}
 }
 
+// present 提交当前帧；首帧提交后才真正显示窗口。
+//
+// 时序原因见 NewWindow 中 windowHidden 的注释：黑底出现在“建窗可见”与
+// “首帧就绪”之间的空窗期，因此建窗隐藏，等这一帧内容进了交换链
+// （Present 已返回）再 ShowWindow——窗口一出现就是完整页面，没有黑闪。
+// RaiseWindow 复原建窗即可见时的初始前台/焦点（否则可能落在别的窗口后面）。
+func (win *Window) present() {
+	win.g.Present()
+	if win.shown {
+		return
+	}
+	win.shown = true
+	sdlShowWindow(win.win)
+	sdlRaiseWindow(win.win)
+}
+
 // RenderFrame 手动绘制一帧（清屏+渲染+提交），供无头渲染测试/截图使用；
 // 常规用法交给 Run 的帧循环。
 func (win *Window) RenderFrame() {
@@ -160,7 +185,7 @@ func (win *Window) RenderFrame() {
 	}
 	win.clearCanvas()
 	engine.RenderNode(win.g, win.doc)
-	win.g.Present()
+	win.present()
 }
 
 // Screenshot 回读渲染目标当前内容（32bpp 原生字节，行主序）及其像素格式与尺寸。
@@ -268,7 +293,7 @@ func (win *Window) Run() error {
 			if win.dirty {
 				win.clearCanvas()
 				engine.RenderNode(win.g, doc)
-				win.g.Present()
+				win.present()
 				win.dirty = false
 			}
 		}
