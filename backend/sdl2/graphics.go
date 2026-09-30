@@ -192,7 +192,14 @@ type Graphics struct {
 	// reuseFaces 为 false 时（旧版 SDL2_ttf 无 TTF_SetFontSize），
 	// faceKey 带上 size/bold，行为退化为每组合一个 face（与历史版本一致）。
 	reuseFaces bool
+
+	// clips 是裁剪矩形栈（与 engine.Clipper 的 Push/Pop 严格配对），栈顶
+	// 即当前生效裁剪区；空栈 = 无裁剪。与 SDL viewport 同坐标系。
+	clips []sdlRect
 }
+
+// 编译期断言：SDL 后端必须实现 engine.Clipper，否则 overflow 裁剪会静默失效。
+var _ engine.Clipper = (*Graphics)(nil)
 
 type faceKey struct {
 	path string
@@ -515,10 +522,65 @@ func (g *Graphics) DrawColor(x, y, w, h int, color engine.Color) {
 func (g *Graphics) DrawImage(x, y, w, h int, image engine.Image) {
 }
 
-// Clear 清屏。
+// Clear 清屏。同时把裁剪栈清空并关闭 SDL 裁剪（SDL_RenderClear 本身无视
+// 裁剪区，这里仅为让 Go 侧栈与 SDL 实际状态保持一致，防上一帧配对失衡）。
 func (g *Graphics) Clear(r, gr, b, a uint8) {
+	g.clips = g.clips[:0]
+	checkDraw("SDL_RenderSetClipRect", sdlRenderSetClipRect(g.renderer, 0))
 	checkDraw("SDL_SetRenderDrawColor", sdlSetRenderDrawColor(g.renderer, uintptr(r), uintptr(gr), uintptr(b), uintptr(a)))
 	checkDraw("SDL_RenderClear", sdlRenderClear(g.renderer))
+}
+
+// PushClip 实现 engine.Clipper：与当前裁剪区求交后下推并应用。
+// 裁剪区由引擎在 padding 盒/滚动容器上给出，坐标即渲染坐标。
+func (g *Graphics) PushClip(x, y, w, h int) {
+	r := sdlRect{int32(x), int32(y), int32(w), int32(h)}
+	if n := len(g.clips); n > 0 {
+		r = intersectSdlRect(g.clips[n-1], r)
+	}
+	g.clips = append(g.clips, r)
+	g.applyClip()
+}
+
+// PopClip 实现 engine.Clipper：弹出栈顶并应用剩余栈顶（空栈=关闭裁剪）。
+func (g *Graphics) PopClip() {
+	if n := len(g.clips); n > 0 {
+		g.clips = g.clips[:n-1]
+	}
+	g.applyClip()
+}
+
+// applyClip 把栈顶同步给 SDL；栈空传 NULL 关闭裁剪。
+func (g *Graphics) applyClip() {
+	if n := len(g.clips); n > 0 {
+		r := g.clips[n-1]
+		checkDraw("SDL_RenderSetClipRect", sdlRenderSetClipRect(g.renderer, uintptr(unsafe.Pointer(&r))))
+		return
+	}
+	checkDraw("SDL_RenderSetClipRect", sdlRenderSetClipRect(g.renderer, 0))
+}
+
+// intersectSdlRect 求两矩形交集；不相交返回位于左上、宽高为 0 的空矩形
+// （SDL 按空裁剪区处理 = 什么都不画）。
+func intersectSdlRect(a, b sdlRect) sdlRect {
+	x0, y0 := a.x, a.y
+	if b.x > x0 {
+		x0 = b.x
+	}
+	if b.y > y0 {
+		y0 = b.y
+	}
+	x1, y1 := a.x+a.w, a.y+a.h
+	if b.x+b.w < x1 {
+		x1 = b.x + b.w
+	}
+	if b.y+b.h < y1 {
+		y1 = b.y + b.h
+	}
+	if x1-x0 <= 0 || y1-y0 <= 0 {
+		return sdlRect{x0, y0, 0, 0}
+	}
+	return sdlRect{x0, y0, x1 - x0, y1 - y0}
 }
 
 // Present 提交帧。

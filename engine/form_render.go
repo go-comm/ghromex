@@ -57,22 +57,29 @@ func renderSelectValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p P
 }
 
 // renderTextareaValue 绘制 textarea 的折行文本与光标。
-// 盒外的行不画（引擎没有裁剪原语，画出去会溢出到相邻内容）。
+// 盒外的行不画；后端支持裁剪（Clipper）时半截行也画，交由 overflow 裁剪
+// 截断（滚动时行随 scrollTop 平移，必然出现半截行），否则退化为整行丢弃，
+// 保持"不画出盒外"的历史行为。
 func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p Paint,
 	bx, by, bw, bh, r int, focused bool) {
 	px, bold, family := fontOf(comp)
 	l := layoutTextarea(g, b)
+	_, clipOK := g.(Clipper)
 	dec := TextDecorationNone
 	if comp != nil {
 		dec = comp.TextDecoration()
 	}
 	for i, ln := range l.lines {
 		y := l.y + i*l.lh
-		if y < b.y || y+l.lh > b.y+b.height {
-			continue // 盒外整行丢弃
-		}
 		if ln.text == "" {
 			continue
+		}
+		if clipOK {
+			if y+l.lh <= b.y || y >= b.y+b.height {
+				continue // 与盒子完全不相交才丢弃
+			}
+		} else if y < b.y || y+l.lh > b.y+b.height {
+			continue // 无裁剪原语：盒外整行丢弃，避免溢出到相邻内容
 		}
 		g.DrawText(l.x, y, ln.w, l.lh, p, ln.text)
 		if dec != TextDecorationNone {
@@ -82,9 +89,15 @@ func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p
 	if !focused {
 		return
 	}
-	// 光标：1px 竖线（文本色），仅当整行落在盒内时绘制
+	// 光标：1px 竖线（文本色），与盒子相交即绘制（裁剪后端会截断）
 	cx, cy := l.caretXY(g, b.caret, px, bold, family)
-	if cx >= b.x && cx <= b.x+b.width && cy >= b.y && cy+l.lh <= b.y+b.height {
+	visible := cx >= b.x && cx <= b.x+b.width &&
+		cy >= b.y && cy+l.lh <= b.y+b.height
+	if clipOK {
+		visible = cx >= b.x && cx <= b.x+b.width &&
+			cy+l.lh > b.y && cy < b.y+b.height
+	}
+	if visible {
 		cc := p.Color()
 		if cc == nil {
 			cc = NewColor(0, 0, 0, 255)

@@ -17,6 +17,7 @@ func MeasureNode(g Graphics, node HTMLElement, mw, mh int) {
 	}
 	layoutBox(g, base, mw, mh, 0, 0, mw)
 	layoutPositioned(g, base, mw, mh)
+	applyScrollOffsets(g, node, mw, mh)
 	layoutSelectPopups(g, node, mw, mh)
 }
 
@@ -33,6 +34,7 @@ func MeasureDocumentWithStylesheet(g Graphics, doc HTMLDocument, mw, mh int) {
 	resolveStylesTree(doc, nil, sheet)
 	layoutBox(g, base, mw, mh, 0, 0, mw)
 	layoutPositioned(g, base, mw, mh)
+	applyScrollOffsets(g, doc, mw, mh)
 	layoutSelectPopups(g, doc, mw, mh)
 }
 
@@ -194,6 +196,7 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW int) (r
 	disp := comp.Display()
 	if disp == DisplayNone {
 		el.layoutH = 0
+		el.contentW, el.contentH = 0, 0
 		return 0, 0
 	}
 
@@ -251,10 +254,14 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW int) (r
 	if isAtomicFormControl(el) {
 		// select/textarea 是原子盒：option 由第三遍布局（layoutSelectPopups）
 		// 定位，textarea 的内容是 value 属性而非子节点，均不进常规流。
+		// 其滚动量度不在此（textarea 走 layoutTextarea 的行数×行高）。
 		flowW, flowH = 0, 0
 	} else {
 		flowW, flowH = layoutChildren(g, el, contentW, remainH, cx, cy, align)
 	}
+	// 未裁剪内容尺寸：overflow 滚动的夹紧依据（每轮布局重算，滚动偏移
+	// 由 applyScrollOffsets 按它 clamp）。
+	el.contentW, el.contentH = flowW, flowH
 
 	contentH := resolveLen(comp.Height(), outerH)
 	if contentH < 0 {
@@ -585,7 +592,16 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int,
 			prevBlockMB = mgc[eBottom]
 			// 块子的真实外盒宽计入 shrink-wrap 宽度统计：游标换行后复位到 cx，
 			// 原先漏算块宽（inline-block 容器仅含块子时会收缩到近似 0 宽）。
-			if w := cx + outerBoxW(che); w > maxRight {
+			// 非裁剪盒（overflow:visible）另按「未裁剪内容宽」参与 maxRight：
+			// 祖先的 contentW 链式传播到根元素，是文档级横向滚动（宽块溢出
+			// 视口）的依据；overflow 非 visible 的盒自身即裁剪边界，内容不外传。
+			w := cx + outerBoxW(che)
+			if !isClippingBox(che) {
+				if ext := che.contentW + (outerBoxW(che) - che.width); ext > w-cx {
+					w = cx + ext
+				}
+			}
+			if w > maxRight {
 				maxRight = w
 			}
 			continue

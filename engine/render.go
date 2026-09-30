@@ -111,12 +111,44 @@ func RenderNode(g Graphics, node HTMLElement) {
 	for _, pb := range collectPositioned(node) {
 		// paint 传 nil 无损：继承字段（color/font/text-align）在级联时已
 		// 下推到每个元素的 computed，renderNode 内部会用自身 comp 组装。
+		// 定位子树不在主 pass 递归里，祖先的 overflow 裁剪必须按父链
+		// 重新压栈，否则滚动容器里的脱流内容会画到盒外。
+		n := pushAncestorClips(g, pb.e)
 		renderNode(g, pb.e, nil, focus)
+		popClips(g, n)
 	}
 	// select 选项浮层最后绘制：它覆盖其后的流内容与定位层，
 	// 与命中测试（ElementAt 优先查展开 option）保持同一层序语义。
+	// 浮层豁免裁剪（对齐浏览器原生下拉：可画到滚动容器/视口之外）。
 	for _, sel := range collectOpenSelects(node) {
 		renderSelectPopup(g, sel, focus)
+	}
+}
+
+// pushAncestorClips 沿父链为定位元素压入全部 overflow 裁剪盒，
+// 返回实际压栈层数（调用方画完后用 popClips 逐层出栈，保证严格配对）。
+func pushAncestorClips(g Graphics, e HTMLElement) int {
+	var chain []*htmlElement
+	for p := e.ParentElement(); p != nil; p = p.ParentElement() {
+		if b := inner(p); b != nil && isClippingBox(b) {
+			chain = append(chain, b)
+		}
+	}
+	n := 0
+	for i := len(chain) - 1; i >= 0; i-- {
+		b := chain[i]
+		pd := resolveEdgeRect(b.computed.Padding(), 0, 0)
+		if pushClip(g, b.x-pd[eLeft], b.y-pd[eTop],
+			b.width+pd[eLeft]+pd[eRight], b.height+pd[eTop]+pd[eBottom]) {
+			n++
+		}
+	}
+	return n
+}
+
+func popClips(g Graphics, n int) {
+	for i := 0; i < n; i++ {
+		popClip(g)
 	}
 }
 
@@ -184,6 +216,10 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 
 	focused := focus != nil && inner(focus) == base
 
+	// overflow 裁剪盒在背景/边框之后压栈：边框沿 padding 盒外侧绘制，
+	// 属于盒子自身外观，不应被裁掉；真正要裁的是控件内容与子树。
+	clipped := false
+
 	// 元素：背景与边框（外扩到边框盒）
 	if comp != nil {
 		bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
@@ -207,6 +243,14 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 		}
 		if bc := comp.BorderColor(); bc != nil && comp.BorderStyle() != BorderStyleNone && bw > 0 && bh > 0 {
 			strokeRoundedRect(g, bx, by, bw, bh, r, bd, bc)
+		}
+
+		// overflow 非 visible：裁剪区为 padding 盒（CSS 语义），包住下方
+		// 的控件内容与全部子元素；非 Clipper 后端或退化盒（w/h ≤ 0）此处
+		// 不压栈，clipped 保持 false 与 popClip 严格配对。
+		if isClippingBox(base) {
+			clipped = pushClip(g, bx+bd[eLeft], by+bd[eTop],
+				bw-bd[eLeft]-bd[eRight], bh-bd[eTop]-bd[eBottom])
 		}
 
 		// 表单控件：input 按 type 分支（text/password 画 value 文本 + 光标 +
@@ -288,6 +332,9 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 			continue // 控件内容由专用绘制负责（select 选项另走浮层 pass）
 		}
 		renderNode(g, child, p, focus)
+	}
+	if clipped {
+		popClip(g)
 	}
 }
 

@@ -23,21 +23,65 @@ func (document *htmlDocument) DumpSVG() string {
 		fill = fmt.Sprintf("#%02x%02x%02x", r, g, bl)
 	}
 	fmt.Fprintf(&b, `<rect x="0" y="0" width="%d" height="%d" fill="%s"/>`+"\n", w, h, fill)
-	dumpSVGNode(&b, document)
-	// 定位层：与 RenderNode 同一层叠模型（主 pass 已跳过 positioned 子树）。
+	ctr := 0
+	dumpSVGNode(&b, document, nil, &ctr)
+	// 定位层：与 RenderNode 同一层叠模型（主 pass 已跳过 positioned 子树）；
+	// 祖先的 overflow 裁剪按父链补上（与渲染路径 pushAncestorClips 同构）。
 	for _, pb := range collectPositioned(document) {
-		dumpSVGNode(&b, pb.e)
+		dumpSVGNode(&b, pb.e, ancestorSVGClips(pb.e, &ctr), &ctr)
 	}
 	// select 选项浮层最后导出（与渲染层序一致：覆盖流内容与定位层）
 	for _, sel := range collectOpenSelects(document) {
-		dumpSelectPopup(&b, sel)
+		dumpSelectPopup(&b, sel, &ctr)
 	}
 	b.WriteString("</svg>\n")
 	return b.String()
 }
 
+// svgClip 是一个已注册的裁剪引用（clipPath id + 区域）。
+type svgClip struct {
+	id string
+	r  clipRect
+}
+
+// ancestorSVGClips 沿父链收集 overflow 裁剪盒，逐个注册 clipPath（id 递增）。
+func ancestorSVGClips(e HTMLElement, ctr *int) []svgClip {
+	var chain []*htmlElement
+	for p := e.ParentElement(); p != nil; p = p.ParentElement() {
+		if b := inner(p); b != nil && isClippingBox(b) {
+			chain = append(chain, b)
+		}
+	}
+	out := make([]svgClip, 0, len(chain))
+	for i := len(chain) - 1; i >= 0; i-- {
+		out = append(out, makeSVGClip(chain[i], ctr))
+	}
+	return out
+}
+
+// makeSVGClip 为元素的 padding 盒注册一个 clipPath 并返回引用。
+func makeSVGClip(base *htmlElement, ctr *int) svgClip {
+	pd := resolveEdgeRect(base.computed.Padding(), 0, 0)
+	r := clipRect{
+		x: base.x - pd[eLeft], y: base.y - pd[eTop],
+		w: base.width + pd[eLeft] + pd[eRight],
+		h: base.height + pd[eTop] + pd[eBottom],
+	}
+	id := fmt.Sprintf("clip%d", *ctr)
+	*ctr++
+	return svgClip{id: id, r: r}
+}
+
+// openSVGClip 输出 clipPath 定义 + 开标签，返回追加后的裁剪链。
+func openSVGClip(b *strings.Builder, clips []svgClip, c svgClip) []svgClip {
+	fmt.Fprintf(b, `<clipPath id="%s"><rect x="%d" y="%d" width="%d" height="%d"/></clipPath>`+"\n",
+		c.id, c.r.x, c.r.y, c.r.w, c.r.h)
+	fmt.Fprintf(b, `<g clip-path="url(#%s)">`+"\n", c.id)
+	return append(append([]svgClip{}, clips...), c)
+}
+
 // dumpSelectPopup 导出展开的 select 浮层：容器底/边框 + 选中项高亮 + 各 option。
-func dumpSelectPopup(b *strings.Builder, sel *htmlElement) {
+func dumpSelectPopup(b *strings.Builder, sel *htmlElement, ctr *int) {
 	opts := selectOptions(sel.self)
 	if len(opts) == 0 {
 		return
@@ -58,11 +102,11 @@ func dumpSelectPopup(b *strings.Builder, sel *htmlElement) {
 	fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="#767676" stroke-width="1"/>`+"\n",
 		x0, y0, x1-x0, y1-y0)
 	for _, o := range opts {
-		dumpSVGNode(b, o)
+		dumpSVGNode(b, o, nil, ctr)
 	}
 }
 
-func dumpSVGNode(b *strings.Builder, e HTMLElement) {
+func dumpSVGNode(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *int) {
 	if e == nil {
 		return
 	}
@@ -148,7 +192,22 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement) {
 					bx+lw/2, by+lw/2, bw-lw, bh-lw, hexColor(r, g, bl), lw, srx)
 			}
 		}
-		dumpControlText(b, base, comp, bx, by, bw, bh)
+	}
+
+	// overflow 非 visible：控件文本与子树包进 clip-path（与渲染路径同构）。
+	// 边框在裁剪外，已在上方输出；clipPath 定义就地内联（不渲染）。
+	clipped := isClippingBox(base)
+	if clipped {
+		clips = openSVGClip(b, clips, makeSVGClip(base, ctr))
+	}
+
+	if comp != nil && isFormControl(base) {
+		bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
+		pd := resolveEdgeRect(comp.Padding(), 0, 0)
+		dumpControlText(b, base, comp,
+			base.x-pd[eLeft]-bd[eLeft], base.y-pd[eTop]-bd[eTop],
+			base.width+pd[eLeft]+pd[eRight]+bd[eLeft]+bd[eRight],
+			base.height+pd[eTop]+pd[eBottom]+bd[eTop]+bd[eBottom])
 	}
 
 	for _, child := range base.children {
@@ -158,7 +217,10 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement) {
 		if isFormControl(base) {
 			continue // 控件文本已由 dumpControlText 输出（select 浮层另走一层）
 		}
-		dumpSVGNode(b, child)
+		dumpSVGNode(b, child, clips, ctr)
+	}
+	if clipped {
+		b.WriteString("</g>\n")
 	}
 }
 
@@ -213,9 +275,19 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 
 	if strings.EqualFold(base.tagName, "textarea") {
 		l := layoutTextarea(NewFakeGraphics(), base)
+		// 与渲染路径同口径：有裁剪盒（overflow 非 visible）时只丢与盒子
+		// 不相交的行，半截行交给 clip-path 截断；否则整行丢弃。
+		clipOK := isClippingBox(base)
 		for i, ln := range l.lines {
 			y := l.y + i*l.lh
-			if y < base.y || y+l.lh > base.y+base.height || ln.text == "" {
+			if ln.text == "" {
+				continue
+			}
+			if clipOK {
+				if y+l.lh <= base.y || y >= base.y+base.height {
+					continue
+				}
+			} else if y < base.y || y+l.lh > base.y+base.height {
 				continue // 盒外整行不导出（渲染路径同样丢弃）
 			}
 			emitText(l.x, y+l.lh, ln.text)

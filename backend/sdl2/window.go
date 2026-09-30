@@ -281,6 +281,18 @@ func (win *Window) Run() error {
 						fmt.Fprintf(os.Stderr, "[ghromex] click(%d,%d) hit=%s handled=%v\n", ev.x, ev.y, tag, handled)
 					}
 				}
+			case eventMouseWheel:
+				// 坐标符号：OnDocumentWheel 要求 dy>0 = 向下滚（scrollTop 增）、
+				// dx>0 = 向右滚；SDL y 正=滚轮向上、x 正=向右 → dy 取反。
+				if win.doc != nil {
+					dx := int(ev.wheelX) * wheelStepPx
+					dy := -int(ev.wheelY) * wheelStepPx
+					if dx == 0 && dy != 0 && sdlGetModState()&kmodShift != 0 {
+						// Shift+滚轮：竖轮转横滚（浏览器同语义）。
+						dx, dy = dy, 0
+					}
+					engine.OnDocumentWheel(win.doc, int(ev.x), int(ev.y), dx, dy)
+				}
 			}
 		}
 

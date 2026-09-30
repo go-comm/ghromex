@@ -10,13 +10,18 @@ import (
 const (
 	EventClick  = "click"
 	EventChange = "change"
+	EventWheel  = "wheel"
 )
 
 // MouseEvent 描述一次鼠标事件，坐标为文档视口坐标。
+// DeltaX/DeltaY 仅在 wheel 事件上有意义（像素位移，正向 = 内容向左/向上滚，
+// 即视口向下/向右移，与浏览器 WheelEvent.deltaX/Y 同号）。
 type MouseEvent struct {
 	Type    string
 	X       int
 	Y       int
+	DeltaX  int
+	DeltaY  int
 	Element HTMLElement
 }
 
@@ -72,6 +77,8 @@ type HTMLElement interface {
 	OnClick(f func(ev *MouseEvent))
 	// OnChange 注册值变更事件处理器（select 选中项变化等），f 为 nil 时移除。
 	OnChange(f func(ev *MouseEvent))
+	// OnWheel 注册滚轮事件处理器（先于滚动发生派发），f 为 nil 时移除。
+	OnWheel(f func(ev *MouseEvent))
 
 	getPaint() Paint
 	setPaint(p Paint)
@@ -115,8 +122,16 @@ type htmlElement struct {
 	open bool
 	// caret 为聚焦可编辑控件的插入点，单位是 value 的 rune 下标。
 	caret int
-	// scrollTop 为 textarea 的纵向滚动偏移（像素，v1 仅内部使用）。
+	// scrollTop 为纵向滚动偏移（像素）。textarea 由光标跟随/滚轮驱动，
+	// overflow 滚动容器与根元素（文档级滚动）由 applyScrollOffsets 施加。
 	scrollTop int
+	// scrollLeft 为横向滚动偏移（像素），语义同 scrollTop。
+	scrollLeft int
+	// contentW/contentH 为最近一次布局测得的未裁剪内容尺寸（常规流子
+	// 的外盒延伸量），是滚动偏移夹紧的依据；textarea 等原子控件为 0
+	//（其内容量度走各自专用路径）。
+	contentW int
+	contentH int
 }
 
 func (element *htmlElement) TagName() string {
@@ -331,6 +346,18 @@ func (element *htmlElement) OnChange(f func(ev *MouseEvent)) {
 	element.handlers[EventChange] = f
 }
 
+// OnWheel 注册/移除滚轮事件处理器（OnDocumentWheel 在滚动前冒泡派发）。
+func (element *htmlElement) OnWheel(f func(ev *MouseEvent)) {
+	if f == nil {
+		delete(element.handlers, EventWheel)
+		return
+	}
+	if element.handlers == nil {
+		element.handlers = make(map[string]func(*MouseEvent))
+	}
+	element.handlers[EventWheel] = f
+}
+
 func (element *htmlElement) dispatch(typ string, ev *MouseEvent) bool {
 	if f, ok := element.handlers[typ]; ok && f != nil {
 		ev.Element = element.self
@@ -389,6 +416,9 @@ func (element *htmlElement) Clone() HTMLElement {
 	c.open = false
 	c.caret = 0
 	c.scrollTop = 0
+	c.scrollLeft = 0
+	c.contentW = 0
+	c.contentH = 0
 	c.self = &c
 	return &c
 }

@@ -77,6 +77,13 @@ func main() {
 		}
 	}
 
+	// 滚轮事件演示（demo/scroll.html 的 #banner）：显示最近一次 wheel 位移
+	if banner := doc.QuerySelector("#banner"); banner != nil {
+		banner.OnWheel(func(ev *engine.MouseEvent) {
+			banner.SetText(fmt.Sprintf("wheel 位移 dx=%d dy=%d @(%d,%d)", ev.DeltaX, ev.DeltaY, ev.X, ev.Y))
+		})
+	}
+
 	if *exitAfter > 0 {
 		win.SetAutoExit(time.Duration(*exitAfter))
 	}

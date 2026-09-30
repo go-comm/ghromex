@@ -10,6 +10,7 @@ package sdl2
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -58,6 +59,9 @@ var (
 	sdlRenderClear              nativeCall
 	sdlRenderPresent            nativeCall
 	sdlRenderFillRect           nativeCall
+	// SDL_RenderSetClipRect（SDL_render.h 2.0.0 起）：rect 传 NULL 关闭
+	// 裁剪，返回 0 成功/负值失败；每层裁剪由 Graphics 维护交集栈后下推。
+	sdlRenderSetClipRect        nativeCall
 	sdlRenderCopy               nativeCall
 	sdlCreateTextureFromSurface nativeCall
 	sdlDestroyTexture           nativeCall
@@ -68,6 +72,7 @@ var (
 	sdlStartTextInput           nativeCall
 	sdlDelay                    nativeCall
 	sdlGetTicks                 nativeCall
+	sdlGetModState              nativeCall
 	sdlQueryTexture             nativeCall
 	sdlRenderReadPixels         nativeCall
 	sdlGetRenderOutputFormat    nativeCall
@@ -123,6 +128,21 @@ const (
 	eventTextInput       = 0x303 // SDL_TEXTINPUT（0x300 KEYDOWN/0x301 KEYUP/0x302 TEXTEDITING/0x303 TEXTINPUT；0x400 是 SDL_MOUSEMOTION，SDL_events.h 原文核对，勿凭记忆写——曾错标 0x400 致真机收不到文本事件）
 	eventMouseButtonDown = 0x401
 	eventMouseButtonUp   = 0x402
+	// SDL_MOUSEWHEEL：事件类型值取自 SDL_events.h 的 SDL_EventType 枚举
+	//（MOUSEMOTION=0x400 起依次 BUTTONDOWN/BUTTONUP/MOUSEWHEEL，原文核对）。
+	eventMouseWheel = 0x403
+
+	// SDL_MouseWheelDirection（SDL_mouse.h）：NORMAL=0 FLIPPED=1——
+	// FLIPPED（"自然滚动"）时 x/y 取反即还原。
+	wheelDirectionFlipped = 1
+
+	// KMOD_SHIFT = KMOD_LSHIFT(0x0001) | KMOD_RSHIFT(0x0002)（SDL_keycode.h
+	// SDL_Keymod 枚举原文），Shift+滚轮 换算横向滚动用。
+	kmodShift = 0x0003
+
+	// wheelStepPx 是每档滚轮位移的像素数（40px/notch，与计划取值一致；
+	// SDL 整数 x/y 通常为 ±1/档，自由滚轮一次多档时按倍数放大）。
+	wheelStepPx = 40
 
 	// SDL_WindowEvent.event 真实取值（Win7 真机日志实证：启动 0x01,0x0C,0x0A,
 	// 0x03；移动 0x04 data=(x,y)；关闭 0x0E）：
@@ -191,6 +211,7 @@ func doLoad() error {
 	sdlRenderClear = bindSdl("SDL_RenderClear")
 	sdlRenderPresent = bindSdl("SDL_RenderPresent")
 	sdlRenderFillRect = bindSdl("SDL_RenderFillRect")
+	sdlRenderSetClipRect = bindSdl("SDL_RenderSetClipRect")
 	sdlRenderCopy = bindSdl("SDL_RenderCopy")
 	sdlCreateTextureFromSurface = bindSdl("SDL_CreateTextureFromSurface")
 	sdlDestroyTexture = bindSdl("SDL_DestroyTexture")
@@ -205,6 +226,9 @@ func doLoad() error {
 	sdlPushEvent = bindSdl("SDL_PushEvent")
 	sdlDelay = bindSdl("SDL_Delay")
 	sdlGetTicks = bindSdl("SDL_GetTicks")
+	// Shift 键态（Shift+滚轮 → 横向滚动）：SDL_GetModState 返回当前修饰键
+	// 位掩码，按事件逐次查询，无需自行跟踪 KEYDOWN/KEYUP。
+	sdlGetModState = bindSdl("SDL_GetModState")
 	sdlQueryTexture = bindSdl("SDL_QueryTexture")
 	sdlRenderReadPixels = bindProcOpt(dllSDL, "SDL_RenderReadPixels")
 	sdlGetRenderOutputFormat = bindProcOpt(dllSDL, "SDL_GetRenderOutputFormat")
@@ -354,8 +378,11 @@ type event struct {
 	button      uint8
 	state       uint8
 	x, y        int32
-	sym         int32  // KEYDOWN: keysym.sym
-	text        string // TEXTINPUT: UTF-8 文本（IME 组合完成串走这里）
+	// wheelX/wheelY 是滚轮位移（档位计数，x 正=向右、y 正=滚轮向上/远离用户，
+	// FLIPPED 已在 decodeEvent 内翻转还原）；x/y 在 wheel 事件里存鼠标位置。
+	wheelX, wheelY int32
+	sym            int32  // KEYDOWN: keysym.sym
+	text           string // TEXTINPUT: UTF-8 文本（IME 组合完成串走这里）
 }
 
 func pollEvent() (event, bool) {
@@ -372,6 +399,8 @@ func pollEvent() (event, bool) {
 //   - 窗口事件：windowID@8 event@12 data1@16 data2@20
 //   - 鼠标移动：windowID@8 which@12(Uint32) state@16 x@20 y@24
 //   - 鼠标按键：windowID@8 which@12 button@16(Uint8) state@17 clicks@18 padding@19 x@20 y@24
+//   - 滚轮：windowID@8 which@12 x@16 y@20 direction@24 preciseX@28 preciseY@32
+//     mouseX@36 mouseY@40（SDL_events.h 结构体定义，ABI 自 2.0.0/2.26 稳定）
 //     （SDL2 从未把 timestamp 移到偏移 8，那是 SDL3 的布局，勿混淆）
 func decodeEvent(buf *[eventBufferSize]byte) event {
 	ev := event{typ: le32(buf[0:4])}
@@ -385,6 +414,30 @@ func decodeEvent(buf *[eventBufferSize]byte) event {
 		ev.state = buf[17]
 		ev.x = int32(le32(buf[20:24]))
 		ev.y = int32(le32(buf[24:28]))
+	case eventMouseWheel:
+		// SDL_MouseWheelEvent（SDL_events.h，44 字节 ≤ eventBufferSize=56）：
+		//   type@0 timestamp@4 windowID@8 which@12 x@16 y@20 direction@24
+		//   preciseX@28 preciseY@32 mouseX@36 mouseY@40
+		// x/y 声明为 Uint32 但语义是 Sint32（负=反向）：x 正=向右、
+		// y 正=远离用户（滚轮向上）；preciseX/Y 是亚档位高精度 float。
+		// 鼠标坐标 mouseX/Y 需 SDL ≥2.26（DLL 2.28.5 ✓），与按键事件同坐标系。
+		wx := int32(le32(buf[16:20]))
+		wy := int32(le32(buf[20:24]))
+		if wx == 0 && wy == 0 {
+			// 触控板等平滑滚动源可能只给 precise（整数档位为 0），此时回退取整。
+			if px := int32(math.Round(float64(math.Float32frombits(le32(buf[28:32]))))); px != 0 {
+				wx = px
+			}
+			if py := int32(math.Round(float64(math.Float32frombits(le32(buf[32:36]))))); py != 0 {
+				wy = py
+			}
+		}
+		if le32(buf[24:28]) == wheelDirectionFlipped {
+			wx, wy = -wx, -wy
+		}
+		ev.wheelX, ev.wheelY = wx, wy
+		ev.x = int32(le32(buf[36:40]))
+		ev.y = int32(le32(buf[40:44]))
 	case eventKeyDown:
 		// SDL_KeyboardEvent（SDL_keyboard.h）：state@12 repeat@13，
 		// keysym{scancode@16, sym@20, mod@24}。键盘事件 dummy 驱动不会

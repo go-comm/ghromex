@@ -289,6 +289,20 @@ func parseColor(v string) Color {
 	return nil
 }
 
+// parseOverflow 解析 overflow 关键字，非法值回退 visible（CSS 默认）。
+func parseOverflow(v string) Overflow {
+	switch v {
+	case "hidden", "clip":
+		return OverflowHidden
+	case "scroll":
+		return OverflowScroll
+	case "auto":
+		return OverflowAuto
+	default: // visible / 非法值
+		return OverflowVisible
+	}
+}
+
 // applyDecl 将单条声明写入样式对象。未识别的属性被忽略。
 func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 	v := strings.ToLower(strings.TrimSpace(value))
@@ -322,6 +336,23 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		} else {
 			comp.SetBoxSizing(BoxSizingContentBox)
 		}
+	case "overflow":
+		// 单值作用两轴；两值为 overflow-x overflow-y。非法值回退 visible。
+		fields := strings.Fields(v)
+		if len(fields) == 0 {
+			return
+		}
+		ox := parseOverflow(fields[0])
+		comp.SetOverflowX(ox)
+		if len(fields) > 1 {
+			comp.SetOverflowY(parseOverflow(fields[1]))
+		} else {
+			comp.SetOverflowY(ox)
+		}
+	case "overflow-x":
+		comp.SetOverflowX(parseOverflow(v))
+	case "overflow-y":
+		comp.SetOverflowY(parseOverflow(v))
 	case "top":
 		comp.SetInset(edgeRect(comp.Inset(), edgeTop, parseLength(v)))
 	case "right":

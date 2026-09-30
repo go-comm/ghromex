@@ -42,7 +42,11 @@ input { display: inline-block; box-sizing: border-box; font-family: system-ui; f
    option 为 block 以免进入常规流参与行盒排布；textarea 两行高。 */
 select { display: inline-block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; width: 177px; height: 21px; }
 option { display: block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; padding: 3px 6px; }
-textarea { display: inline-block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 2px 4px; width: 177px; height: 44px; }
+textarea { display: inline-block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 2px 4px; width: 177px; height: 44px; overflow: hidden; }
+/* textarea 的 overflow 走 hidden 而非浏览器的 auto：折行内容的滚动由
+   textarea 自身 scrollTop 机制驱动（光标跟随 + 滚轮，见 scroll.go），
+   通用 overflow 滚动对原子控件不生效（scrollMax 对原子控件恒 0），
+   hidden 已提供绘制所需的裁剪盒——半截行由此被截断而非整行丢弃。 */
 `
 
 var (

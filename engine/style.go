@@ -52,6 +52,17 @@ const (
 	BoxSizingBorderBox                   // width/height 含 padding+border（不含 margin）
 )
 
+// Overflow 控制盒子内容溢出时的处理。visible 不裁剪；hidden 裁剪但不可滚；
+// scroll/auto 裁剪且可滚（auto 仅在内容确实溢出时才可滚）。
+type Overflow uint8
+
+const (
+	OverflowVisible Overflow = iota // 默认：溢出可见（不裁剪不滚动）
+	OverflowHidden                  // 裁剪，不可滚
+	OverflowScroll                  // 裁剪，恒可滚（滚动条与否不影响滚轮）
+	OverflowAuto                    // 裁剪，溢出时可滚
+)
+
 // TextDecoration 文本装饰（下划线/删除线）。CSS 该属性沿父链继承，
 // <a> 的 UA 下划线正是靠继承落到其文本子节点上。
 type TextDecoration uint8
@@ -118,6 +129,12 @@ type CSSStyleDeclaration interface {
 	// TextDecoration 为文本装饰（underline/line-through/none），随父链继承。
 	TextDecoration() TextDecoration
 	SetTextDecoration(d TextDecoration) CSSStyleDeclaration
+	// OverflowX/OverflowY 为水平/纵向溢出处理（overflow-x / overflow-y，
+	// 简写 overflow 两值同写）。默认 visible。
+	OverflowX() Overflow
+	SetOverflowX(o Overflow) CSSStyleDeclaration
+	OverflowY() Overflow
+	SetOverflowY(o Overflow) CSSStyleDeclaration
 }
 
 func newStyle() CSSStyleDeclaration {
@@ -164,6 +181,8 @@ type cssStyleDeclaration struct {
 	zindex          int
 	boxSizing       BoxSizing
 	textDecoration  TextDecoration
+	overflowX       Overflow
+	overflowY       Overflow
 }
 
 // copyStyle 复制样式值（不含继承字段之外的引用语义差异）。
@@ -190,6 +209,8 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetZIndex(s.ZIndex())
 	c.SetBoxSizing(s.BoxSizing())
 	c.SetTextDecoration(s.TextDecoration())
+	c.SetOverflowX(s.OverflowX())
+	c.SetOverflowY(s.OverflowY())
 	return c
 }
 
@@ -403,5 +424,23 @@ func (style *cssStyleDeclaration) TextDecoration() TextDecoration {
 
 func (style *cssStyleDeclaration) SetTextDecoration(d TextDecoration) CSSStyleDeclaration {
 	style.textDecoration = d
+	return style
+}
+
+func (style *cssStyleDeclaration) OverflowX() Overflow {
+	return style.overflowX
+}
+
+func (style *cssStyleDeclaration) SetOverflowX(o Overflow) CSSStyleDeclaration {
+	style.overflowX = o
+	return style
+}
+
+func (style *cssStyleDeclaration) OverflowY() Overflow {
+	return style.overflowY
+}
+
+func (style *cssStyleDeclaration) SetOverflowY(o Overflow) CSSStyleDeclaration {
+	style.overflowY = o
 	return style
 }

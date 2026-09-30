@@ -257,6 +257,37 @@ type Graphics interface {
 	MeasureText(text string, fontSize int, bold bool, family string) (w, h int)
 }
 
+// Clipper 是 Graphics 的可选扩展：矩形裁剪栈。overflow 非 visible 的
+// 元素绘制其内容前 PushClip、画完 PopClip，超出裁剪区的像素不落笔。
+// 实现方可自行选择不支持（不实现本接口时渲染层退化为不裁剪，内容
+// 可能画出盒外——README 已知限制）。栈语义：每层与上一层求交集。
+type Clipper interface {
+	PushClip(x, y, w, h int)
+	PopClip()
+}
+
+// pushClip 对支持裁剪的后端压栈，返回是否真的压了栈——调用方必须据此
+// 配对 popClip，否则非 Clipper 后端/退化矩形（w 或 h ≤ 0）漏压却出栈会
+// 弹掉外层的裁剪，破坏栈平衡。其余后端静默跳过。
+func pushClip(g Graphics, x, y, w, h int) bool {
+	if c, ok := g.(Clipper); ok && w > 0 && h > 0 {
+		c.PushClip(x, y, w, h)
+		return true
+	}
+	return false
+}
+
+func popClip(g Graphics) {
+	if c, ok := g.(Clipper); ok {
+		c.PopClip()
+	}
+}
+
+var (
+	_ Clipper = (*FakeGraphics)(nil)
+	_ Clipper = (*BufferGraphics)(nil)
+)
+
 // FakeGraphics 供测试与无显卡环境使用的空后端。
 type FakeGraphics struct {
 	DrawCalls int
@@ -298,6 +329,11 @@ func (g *FakeGraphics) MeasureText(text string, fontSize int, bold bool, family 
 	return
 }
 
+// PushClip/PopClip 实现 Clipper（空后端无需真裁剪，但保持接口一致，
+// 让"后端是否支持裁剪"不因测试替身而改变）。
+func (g *FakeGraphics) PushClip(x, y, w, h int) {}
+func (g *FakeGraphics) PopClip()                {}
+
 // ---------- BufferGraphics ----------
 
 // BufferGraphics 把绘制指令落在一块二维 RGBA 缓冲区上：
@@ -311,9 +347,25 @@ type BufferGraphics struct {
 	W, H int
 	pix  []uint8 // RGBA 行主序，len = W*H*4
 
+	// clips 为裁剪矩形栈（每层与上一层求交集），空栈 = 不裁剪。
+	clips []clipRect
+
 	DrawCalls int
 	TextCalls int
 	Texts     []string // 按绘制顺序记录的文本内容
+}
+
+// clipRect 是一个闭区间裁剪矩形（左上含、右下不含）。
+type clipRect struct{ x, y, w, h int }
+
+func intersectClip(a, b clipRect) clipRect {
+	x0, y0 := maxInt(a.x, b.x), maxInt(a.y, b.y)
+	x1 := minInt(a.x+a.w, b.x+b.w)
+	y1 := minInt(a.y+a.h, b.y+b.h)
+	if x1 <= x0 || y1 <= y0 {
+		return clipRect{x: x0, y: y0, w: 0, h: 0}
+	}
+	return clipRect{x: x0, y: y0, w: x1 - x0, h: y1 - y0}
 }
 
 func NewBufferGraphics(w, h int) *BufferGraphics {
@@ -335,10 +387,45 @@ func (g *BufferGraphics) ColorAt(x, y int) (r, gg, b, a uint8, ok bool) {
 	return g.pix[i], g.pix[i+1], g.pix[i+2], g.pix[i+3], true
 }
 
-// FillRect 填充一个整数矩形（自动裁剪到缓冲区内）。
+// PushClip 实现 Clipper：压入一个与当前栈顶求交集的裁剪矩形。
+func (g *BufferGraphics) PushClip(x, y, w, h int) {
+	c := clipRect{x: x, y: y, w: w, h: h}
+	if n := len(g.clips); n > 0 {
+		c = intersectClip(g.clips[n-1], c)
+	}
+	g.clips = append(g.clips, c)
+}
+
+// PopClip 实现 Clipper：弹出栈顶；栈空时为无害的多余调用。
+func (g *BufferGraphics) PopClip() {
+	if n := len(g.clips); n > 0 {
+		g.clips = g.clips[:n-1]
+	}
+}
+
+// clipBounds 返回当前裁剪栈顶（空栈 = 整个缓冲区）。
+func (g *BufferGraphics) clipBounds() clipRect {
+	if n := len(g.clips); n > 0 {
+		return g.clips[n-1]
+	}
+	return clipRect{x: 0, y: 0, w: g.W, h: g.H}
+}
+
+// FillRect 填充一个整数矩形（自动裁剪到缓冲区与当前裁剪栈）。
 func (g *BufferGraphics) FillRect(x, y, w, h int, r, gg, b, a uint8) {
 	if w <= 0 || h <= 0 || a == 0 {
 		return
+	}
+	if cl := g.clipBounds(); len(g.clips) > 0 {
+		if cl.w <= 0 || cl.h <= 0 {
+			return
+		}
+		x0, y0 := maxInt(x, cl.x), maxInt(y, cl.y)
+		x1, y1 := minInt(x+w, cl.x+cl.w), minInt(y+h, cl.y+cl.h)
+		if x1 <= x0 || y1 <= y0 {
+			return
+		}
+		x, y, w, h = x0, y0, x1-x0, y1-y0
 	}
 	if x < 0 {
 		w += x
