@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -182,6 +183,13 @@ func TestSetSelectValueAndSVGPopup(t *testing.T) {
 			t.Errorf("SVG 缺选项文字 %s", want)
 		}
 	}
+	// 选中项（本测试已赋值 c→Charlie）白字、未选中项黑字，与渲染路径同构
+	if !strings.Contains(svg, `fill="#ffffff">Charlie</text>`) {
+		t.Error("SVG 选中项（Charlie）文字应为白字")
+	}
+	if !strings.Contains(svg, `fill="#000000">Bravo</text>`) {
+		t.Error("SVG 未选中项（Bravo）文字应为黑字")
+	}
 	// 收起态导出不应再含选项文字
 	engine.OnDocumentClick(doc, 300, 250)
 	engine.LayoutDocument(doc)
@@ -213,15 +221,49 @@ func TestSelectPopupPixels(t *testing.T) {
 	check(117, 9, 0xFF, 0xFF, 0xFF, "箭头右侧应为空白")
 	check(119, 8, 0x76, 0x76, 0x76, "select 右边框不被箭头覆盖")
 
-	// 展开浮层：容器底（Alpha 行）→ 选中项高亮（Bravo 行）→ 描边压在高亮上
+	// 展开浮层：容器底（Alpha 行）→ 选中项高亮（Bravo 行）→ 描边压在高亮上。
+	// 高亮 #1967D2 为 Chrome 实测选中行底色（实心蓝）。
 	engine.OnDocumentClick(doc, 60, 10)
 	engine.LayoutDocument(doc)
 	engine.RenderNode(buf, doc)
 	check(110, 30, 0xFF, 0xFF, 0xFF, "浮层容器底")
-	check(110, 50, 0xCF, 0xE2, 0xFF, "选中项高亮")
+	check(110, 50, 0x19, 0x67, 0xD2, "选中项高亮")
 	check(0, 50, 0x76, 0x76, 0x76, "浮层左边框（压在高亮之上）")
 	check(119, 50, 0x76, 0x76, 0x76, "浮层右边框")
 	check(0, 20, 0x76, 0x76, 0x76, "浮层上边框")
+
+	// 文字色分道扬镳：选中项（Bravo）蓝底白字且无黑字残留，未选中项
+	// （Alpha）白底黑字——按各自 option 盒逐像素扫描，防止只改高亮不改字。
+	countPix := func(o engine.HTMLElement, match func(r, g, b uint8) bool) int {
+		rc := o.GetBoundingClientRect()
+		x0, y0 := int(rc.Left().Pixel()), int(rc.Top().Pixel())
+		x1, y1 := int(rc.Right().Pixel()), int(rc.Bottom().Pixel())
+		n := 0
+		for y := y0 + 1; y < y1-1; y++ {
+			for x := x0 + 1; x < x1-1; x++ {
+				pr, pg, pb, _, ok := buf.ColorAt(x, y)
+				if ok && match(pr, pg, pb) {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	isWhite := func(r, g, b uint8) bool { return r == 0xFF && g == 0xFF && b == 0xFF }
+	isBlack := func(r, g, b uint8) bool { return r == 0 && g == 0 && b == 0 }
+	opts := doc.QuerySelectorAll("option")
+	if len(opts) != 3 {
+		t.Fatalf("option 数 = %d, want 3", len(opts))
+	}
+	if n := countPix(opts[1], isWhite); n == 0 {
+		t.Error("选中项（Bravo）文字应为白")
+	}
+	if n := countPix(opts[1], isBlack); n != 0 {
+		t.Errorf("选中项残留黑字像素 %d 个", n)
+	}
+	if n := countPix(opts[0], isBlack); n == 0 {
+		t.Error("未选中项（Alpha）应保持黑字")
+	}
 }
 
 // 显示文本取选中项的文本内容，value 取 value 属性，两者可不同。
@@ -249,5 +291,63 @@ func TestSelectDisplayTextIsOptionText(t *testing.T) {
 	engine.RenderNode(buf, doc)
 	if joined := strings.Join(buf.Texts, "|"); !strings.Contains(joined, "Charlie") {
 		t.Errorf("换值后应显示 Charlie, texts=%q", joined)
+	}
+}
+
+// paintRecorder 只记录 DrawText 的文字与 Paint 颜色，不落像素——用于断言
+// 浮层选中项文字 Paint 是否同时携带白字与蓝底（LCD 后端的合成前提）。
+type paintRecorder struct{ draws []recDraw }
+
+type recDraw struct{ text, color, bg string }
+
+func recHex(c engine.Color) string {
+	if c == nil {
+		return "<nil>"
+	}
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+}
+
+func (r *paintRecorder) DrawText(x, y, w, h int, p engine.Paint, s string) {
+	d := recDraw{text: s, color: "<nil>", bg: "<nil>"}
+	if p != nil {
+		d.color, d.bg = recHex(p.Color()), recHex(p.Background())
+	}
+	r.draws = append(r.draws, d)
+}
+func (r *paintRecorder) DrawColor(x, y, w, h int, c engine.Color)   {}
+func (r *paintRecorder) DrawImage(x, y, w, h int, img engine.Image) {}
+func (r *paintRecorder) MeasureText(s string, fs int, bold bool, fam string) (int, int) {
+	return len([]rune(s)) * fs * 2 / 3, fs
+}
+
+// 选中项文字 Paint 必须是白字+蓝底：LCD 后端按 paint.Background() 与落点
+// 底色合成、Background=nil 时按白底——白字配白底会渲成实心白块（用户
+// 实测反馈"文字区域都变成了白的，看不到是什么字"）。
+func TestSelectPopupTextPaintCarriesBlue(t *testing.T) {
+	doc := openDoc(t, 400, 300, selectPage)
+	engine.OnDocumentClick(doc, 60, 10)
+	engine.LayoutDocument(doc)
+	rec := &paintRecorder{}
+	engine.RenderNode(rec, doc)
+
+	var popupWhite, alphaBlack bool
+	for _, d := range rec.draws {
+		switch d.text {
+		case "Bravo":
+			if d.color == "#ffffff" && d.bg == "#1967d2" {
+				popupWhite = true
+			}
+		case "Alpha":
+			if d.color == "#000000" {
+				alphaBlack = true
+			}
+		}
+	}
+	if !popupWhite {
+		t.Error("浮层选中项（Bravo）文字 DrawText 应携带 白字#ffffff+蓝底#1967d2")
+	}
+	if !alphaBlack {
+		t.Error("未选中项（Alpha）文字应为黑字#000000")
 	}
 }

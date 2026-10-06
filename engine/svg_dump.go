@@ -93,20 +93,32 @@ func dumpSelectPopup(b *strings.Builder, sel *htmlElement, ctr *int) {
 	// 底 → 选中项高亮 → 描边（描边必须在高亮之后，否则被高亮盖掉）
 	fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="#ffffff"/>`+"\n",
 		x0, y0, x1-x0, y1-y0)
-	if s := selectedOptionBase(sel); s != nil {
+	s := selectedOptionBase(sel)
+	if s != nil {
 		if sx, sy, sw, sh := borderBoxRect(s); sw > 0 && sh > 0 {
 			fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`+"\n",
-				sx, sy, sw, sh, hexColor(0xCF, 0xE2, 0xFF))
+				sx, sy, sw, sh, hexColor(0x19, 0x67, 0xD2))
 		}
 	}
 	fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="#767676" stroke-width="1"/>`+"\n",
 		x0, y0, x1-x0, y1-y0)
 	for _, o := range opts {
-		dumpSVGNode(b, o, nil, ctr)
+		// 选中项文字白字，与渲染路径 renderNodeTextColor 同构（Chrome #1967D2 底白字）
+		if o == s {
+			dumpSVGNodeFill(b, o, nil, ctr, "#ffffff")
+		} else {
+			dumpSVGNode(b, o, nil, ctr)
+		}
 	}
 }
 
 func dumpSVGNode(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *int) {
+	dumpSVGNodeFill(b, e, clips, ctr, "")
+}
+
+// dumpSVGNodeFill 与 dumpSVGNode 同构，fillOverride 非空时覆盖本子树的文字
+// 填充色（select 浮层选中项白字；仅作用于 text 的 fill，盒背景/边框不变）。
+func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *int, fillOverride string) {
 	if e == nil {
 		return
 	}
@@ -136,6 +148,9 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *int) {
 				fw = ` font-weight="bold"`
 			}
 			fam = base.computed.FontFamily()
+		}
+		if fillOverride != "" {
+			fill = fillOverride
 		}
 		ff := fmt.Sprintf(` font-family="%s"`, escapeXML(svgFontStack(fam)))
 		decAttr := ""
@@ -217,7 +232,7 @@ func dumpSVGNode(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *int) {
 		if isFormControl(base) {
 			continue // 控件文本已由 dumpControlText 输出（select 浮层另走一层）
 		}
-		dumpSVGNode(b, child, clips, ctr)
+		dumpSVGNodeFill(b, child, clips, ctr, fillOverride)
 	}
 	if clipped {
 		b.WriteString("</g>\n")

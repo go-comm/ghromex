@@ -108,8 +108,8 @@ func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p
 }
 
 // renderSelectPopup 绘制展开的选项浮层：容器底与边框 → 选中项高亮 →
-// 各 option 自身（背景/边框/文字，复用 renderNode）。必须画在常规层与
-// 定位层之后，才能盖住其下的流内容。
+// 各 option 自身（背景/边框/文字，复用 renderNode；选中项文字改白）。
+// 必须画在常规层与定位层之后，才能盖住其下的流内容。
 func renderSelectPopup(g Graphics, sel *htmlElement, focus HTMLElement) {
 	opts := selectOptions(sel.self)
 	if len(opts) == 0 {
@@ -121,7 +121,8 @@ func renderSelectPopup(g Graphics, sel *htmlElement, focus HTMLElement) {
 	}
 	w, h := x1-x0, y1-y0
 	g.DrawColor(x0, y0, w, h, NewColor(0xFF, 0xFF, 0xFF, 0xFF))
-	if s := selectedOptionBase(sel); s != nil {
+	s := selectedOptionBase(sel)
+	if s != nil {
 		if sx, sy, sw, sh := borderBoxRect(s); sw > 0 && sh > 0 {
 			g.DrawColor(sx, sy, sw, sh, selectHighlight)
 		}
@@ -135,9 +136,24 @@ func renderSelectPopup(g Graphics, sel *htmlElement, focus HTMLElement) {
 	}
 	strokeRoundedRect(g, x0, y0, w, h, 0, edges{1, 1, 1, 1}, bc)
 	for _, o := range opts {
-		renderNode(g, o, nil, focus)
+		if o == s {
+			// 蓝底随种子 Paint 下传：option 自身无背景色，而 LCD 后端按
+			// paint.Background() 与落点底色合成、nil 时按白底——白字配
+			// 白底合成会渲成实心白块（字看不清）。这里把高亮底作为
+			// 沿父链的最近实底交给后端，白字才能压在蓝底上出正确字形。
+			seed := NewPaint()
+			seed.SetBackground(selectHighlight)
+			renderNodeTextColor(g, o, seed, focus, selectHighlightText)
+		} else {
+			renderNode(g, o, nil, focus)
+		}
 	}
 }
 
-// selectHighlight 是展开浮层中选中项的高亮底色。
-var selectHighlight = NewColor(0xCF, 0xE2, 0xFF, 255)
+// selectHighlight / selectHighlightText 是展开浮层选中项的高亮底色与文字色。
+// Chrome 实测（本机 Chrome 展开 <select>）：选中行 #1967D2 实心蓝 + 白字，
+// 未选中行白底黑字——旧值 #CFE2FF 浅蓝黑字与 Chrome 不符，已按实测修正。
+var (
+	selectHighlight     = NewColor(0x19, 0x67, 0xD2, 255)
+	selectHighlightText = NewColor(0xFF, 0xFF, 0xFF, 255)
+)

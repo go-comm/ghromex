@@ -156,6 +156,14 @@ func popClips(g Graphics, n int) {
 var focusBlue = NewColor(37, 99, 235, 255)
 
 func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement) {
+	renderNodeTextColor(g, e, parentPaint, focus, nil)
+}
+
+// renderNodeTextColor 与 renderNode 同构，但用 textColor 强制覆盖本子树的
+// 文字绘制色（select 展开浮层的选中项：#1967D2 高亮底上出白字，Chrome 同款）。
+// 覆盖作用于 Paint（文字绘制与子树继承，含级联到 textNode 的值）；元素自身
+// 背景/边框仍按 computed 绘制，表单控件专用绘制分支不读该 Paint，不受影响。
+func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement, textColor Color) {
 	if e == nil {
 		return
 	}
@@ -197,6 +205,9 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 				p.SetBackground(c)
 			}
 		}
+	}
+	if textColor != nil {
+		p.SetColor(textColor)
 	}
 
 	// 文本节点：绘制布局阶段生成的行片段 + 文本装饰（下划线/删除线）
@@ -331,7 +342,7 @@ func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement)
 		if isFormControl(base) {
 			continue // 控件内容由专用绘制负责（select 选项另走浮层 pass）
 		}
-		renderNode(g, child, p, focus)
+		renderNodeTextColor(g, child, p, focus, textColor)
 	}
 	if clipped {
 		popClip(g)
