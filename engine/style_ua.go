@@ -25,6 +25,8 @@ a { display: inline; color: #2563EB; text-decoration: underline; }
 /* 表单控件默认值对齐 Chrome（Windows）UA 样式：
    button: buttonface=#EFEFEF、文字色 buttontext=#000（不继承）、居中文本、
            边框灰 #767676、字号 13px（≈浏览器 13.33px Arial）。
+           字体统一 Arial（引擎默认字体，桌面 UI 取向；Chrome 控件用系统
+           UI 字体 Segoe UI，见 README「字体默认语义」）。
            垂直 padding 3px：Chrome 实测外盒高 25（Segoe 13.33 行高所致），
            引擎字形高 16 → 24，1px 差异属字体行高度量（见 README 已知限制）。
    input : field=#FFF、边框同上、padding 1px 2px、宽高 177x21（border-box
@@ -32,17 +34,17 @@ a { display: inline; color: #2563EB; text-decoration: underline; }
    Chrome 的 border 实为 2px outset/inset，引擎目前只支持平面 solid，用 1px 近似。
    box-sizing:border-box 与 Chrome UA 样式表对表单控件的默认一致：
    width:100% 声明的控件不再叠加 padding/border 溢出容器。 */
-button { display: inline-block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; text-align: center; background-color: #EFEFEF; border: 1px solid #767676; border-radius: 2px; padding: 3px 6px; }
+button { display: inline-block; box-sizing: border-box; font-family: Arial; font-size: 13px; color: #000000; text-align: center; background-color: #EFEFEF; border: 1px solid #767676; border-radius: 2px; padding: 3px 6px; }
 /* input 无文字子节点，引擎不会为空元素预留行盒（浏览器靠字体撑出约 21px），
    故显式给 height 让外盒=21px。type 间的尺寸/外观差异见 applyInputTypeDefaults
    （选择器不支持属性选择器，无法用 input[type=...] 表达）。 */
-input { display: inline-block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; width: 177px; height: 21px; }
-/* select/textarea 同 input 口径：border-box + 13px system-ui + 177px 宽。
+input { display: inline-block; box-sizing: border-box; font-family: Arial; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; width: 177px; height: 21px; }
+/* select/textarea 同 input 口径：border-box + 13px Arial + 177px 宽。
    select 高 21px（外盒），展开的选项浮层由 layoutSelectPopups 单独定位，
    option 为 block 以免进入常规流参与行盒排布；textarea 两行高。 */
-select { display: inline-block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; width: 177px; height: 21px; }
-option { display: block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; padding: 3px 6px; }
-textarea { display: inline-block; box-sizing: border-box; font-family: system-ui; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 2px 4px; width: 177px; height: 44px; overflow: hidden; }
+select { display: inline-block; box-sizing: border-box; font-family: Arial; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; width: 177px; height: 21px; }
+option { display: block; box-sizing: border-box; font-family: Arial; font-size: 13px; color: #000000; padding: 3px 6px; }
+textarea { display: inline-block; box-sizing: border-box; font-family: Arial; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 2px 4px; width: 177px; height: 44px; overflow: hidden; }
 /* textarea 的 overflow 走 hidden 而非浏览器的 auto：折行内容的滚动由
    textarea 自身 scrollTop 机制驱动（光标跟随 + 滚轮，见 scroll.go），
    通用 overflow 滚动对原子控件不生效（scrollMax 对原子控件恒 0），

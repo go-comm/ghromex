@@ -30,7 +30,7 @@ import (
 func TestSelectPopupLCDTextLegible(t *testing.T) {
 	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
 	defer os.Unsetenv("SDL_VIDEO_DRIVER")
-	t.Setenv("GHROMEX_LCD", "") // 本测试就是为 LCD 路径而设，强制不走 "0" 回退
+	t.Setenv("GHROMEX_LCD", "1") // 文本默认灰度 AA，本测试专锁 LCD 路径，显式开启
 
 	html, err := os.ReadFile(filepath.Join("..", "..", "demo", "form-ua.html"))
 	if err != nil {

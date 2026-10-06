@@ -214,13 +214,14 @@ type fontFace struct {
 }
 
 // lcdText 报告 LCD 子像素渲染是否启用（TTF_RenderUTF8_LCD + LIGHT_SUBPIXEL
-// hinting）。默认开启：探针实测横向硬跳变 12→0，竖笔画边缘锐度追平浏览器
-// ClearType；已知代价是彩色背景上会有轻微彩边（与浏览器子像素渲染同性质）。
-// GHROMEX_LCD=0 关闭（回退灰度 AA 纹理）。
+// hinting）。默认关闭：文本默认灰度 AA（TTF LIGHT hinting，无彩边、对落点
+// 背景色不敏感）。GHROMEX_LCD=1 开启：竖笔画边缘横向锐度与浏览器 ClearType
+// 同级，代价是彩底上竖笔边缘轻微彩边（与浏览器子像素渲染同性质），且需按
+// 落点背景色合成（见 DrawText）。
 // 惰性函数而非包级变量：hasTTFLCD 在 Load()（DLL 符号解析）后才有值，
 // 包初始化时求值恒为 false。
 func lcdText() bool {
-	return os.Getenv("GHROMEX_LCD") != "0" && hasTTFLCD
+	return os.Getenv("GHROMEX_LCD") == "1" && hasTTFLCD
 }
 
 type texKey struct {
@@ -458,7 +459,8 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 				}
 			}
 			if tex == 0 {
-				// 回退/默认路径：灰度 AA blended（BLENDMODE_BLEND）
+				// 默认路径：灰度 AA blended（BLENDMODE_BLEND）
+				//（GHROMEX_LCD 未开、DLL 无 LCD 符号或 LCD 渲染失败时）
 				color := uintptr(cr) | uintptr(cg)<<8 | uintptr(cb)<<16 | uintptr(ca)<<24
 				surf := ttfRenderUTF8Blended(f.handle, p, color)
 				runtime.KeepAlive(b)

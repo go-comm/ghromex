@@ -298,7 +298,7 @@ func TestSelectDisplayTextIsOptionText(t *testing.T) {
 // 浮层选中项文字 Paint 是否同时携带白字与蓝底（LCD 后端的合成前提）。
 type paintRecorder struct{ draws []recDraw }
 
-type recDraw struct{ text, color, bg string }
+type recDraw struct{ text, color, bg, fam string }
 
 func recHex(c engine.Color) string {
 	if c == nil {
@@ -312,6 +312,7 @@ func (r *paintRecorder) DrawText(x, y, w, h int, p engine.Paint, s string) {
 	d := recDraw{text: s, color: "<nil>", bg: "<nil>"}
 	if p != nil {
 		d.color, d.bg = recHex(p.Color()), recHex(p.Background())
+		d.fam = p.FontFamily()
 	}
 	r.draws = append(r.draws, d)
 }
@@ -332,6 +333,7 @@ func TestSelectPopupTextPaintCarriesBlue(t *testing.T) {
 	engine.RenderNode(rec, doc)
 
 	var popupWhite, alphaBlack bool
+	alphaFam := ""
 	for _, d := range rec.draws {
 		switch d.text {
 		case "Bravo":
@@ -341,6 +343,7 @@ func TestSelectPopupTextPaintCarriesBlue(t *testing.T) {
 		case "Alpha":
 			if d.color == "#000000" {
 				alphaBlack = true
+				alphaFam = d.fam
 			}
 		}
 	}
@@ -349,5 +352,9 @@ func TestSelectPopupTextPaintCarriesBlue(t *testing.T) {
 	}
 	if !alphaBlack {
 		t.Error("未选中项（Alpha）文字应为黑字#000000")
+	}
+	// 控件 UA 默认字体为 Arial（不再 system-ui/Segoe UI），README「字体默认语义」。
+	if alphaFam != "Arial" {
+		t.Errorf("选项文字 font-family = %q, want Arial（控件 UA 默认字体）", alphaFam)
 	}
 }

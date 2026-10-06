@@ -12,8 +12,8 @@ import (
 // ---------------------------------------------------------------------------
 // 灰度 AA 管线保真度探针
 //
-// 背景：用户反馈 GHROMEX_LCD=0（灰度回退路径）下字体模糊。模糊有两个可能
-// 来源，必须先分离再谈优化：
+// 背景：用户反馈灰度路径（反馈时为 GHROMEX_LCD=0 回退，现为默认渲染方式）
+// 下字体模糊。模糊有两个可能来源，必须先分离再谈优化：
 //
 //  1. 管线缺陷（可修）：纹理被缩放/坐标非整数/alpha 合成错误（如字形 surface
 //     实为预乘 alpha 却按直通 alpha 贴图，边缘会系统性偏浅 = 观感发虚）；
@@ -43,6 +43,7 @@ func TestGrayscalePipelineFidelity(t *testing.T) {
 		os.Setenv("SDL_VIDEO_DRIVER", "dummy")
 		defer os.Unsetenv("SDL_VIDEO_DRIVER")
 	}
+	// 显式钉住灰度路径：探针结论不随默认值/LCD 开关漂移。
 	os.Setenv("GHROMEX_LCD", "0")
 	defer os.Unsetenv("GHROMEX_LCD")
 
