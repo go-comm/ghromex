@@ -146,19 +146,27 @@ serif → Times New Roman、monospace → Courier New、system-ui → Segoe UI�
 Chrome 控件用系统 UI 字体 Segoe UI）；
 汉字/假名/谚文按字符级脚本分段 fallback 到微软雅黑（中英混排与 Chrome 一致）；
 每个字体文件只开一个 FT_Face，字号/粗体动态切换；
-文本渲染默认走灰度 AA（TTF LIGHT hinting，较 NORMAL 网格吸附的小字号纵向
-硬跳变降约 60%；无彩边、对落点背景色不敏感）；`GHROMEX_LCD=1` 切换到
+文本渲染默认走灰度 AA（无彩边、对落点背景色不敏感），hinting 档位由
+`GHROMEX_HINT` 控制（`normal|light|mono|none`，默认 normal）：与 Chrome 灰度
+基线的同页对比矩阵（fontcmp 口径指标，13px 中文）显示 normal 最同构——
+竖画硬跳变 7（Chrome 0）、横画 237（Chrome 227）、墨核 412（Chrome 347），
+而 light 档横画偏软（75，即"糊"感来源）；要更柔可 `GHROMEX_HINT=light`。
+`GHROMEX_CONTRAST=k`（>1 生效，如 1.3/1.5，上限 3，默认关）在 blended
+覆盖通道施加 Skia 同类的对比度 tone 曲线（以 0.5 为枢轴推两端：边缘更实、
+毛边更净），代价是墨色变重、竖边台阶感随 k 增大，常与 light/none 档联调
+提利。`GHROMEX_LCD=1` 切换到
 LCD 子像素（TTF_RenderUTF8_LCD + LIGHT_SUBPIXEL hinting，竖笔画边缘横向
 锐度与浏览器 ClearType 同级；合成按文字落点背景色进行——渲染管线沿父链
 携带最近实底，深色背景上白字不会带白底块。代价是彩底上竖笔边缘有轻微
-彩边（与浏览器子像素渲染同性质））。灰度 AA 的取舍已定量确认为固有性质、非管线失真：
+彩边（与浏览器子像素渲染同性质）；LCD 打开时 hinting 强制 subpixel，
+`GHROMEX_HINT` 仅影响灰度路径）。灰度 AA 的取舍已定量确认为固有性质、非管线失真：
 探针 `backend/sdl2/gray_text_test.go` 以同 face 同 hinting 直出 blended
 surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐像素
 比对，双渲染器偏差均值 <1.3、最大 3（超差 >4 为 0%），即绘制链路无
-失真；观感偏软仅源于 ① LIGHT hinting 用消锯齿换取的纵向柔和
-（13px 中文纵向硬跳变 161→53——锯齿与模糊是同一参数的两端）与
-② 灰度 AA 没有横向子像素分解的物理极限。故灰度路径（默认）维持现状不改，
-需要横向锐度请开 `GHROMEX_LCD=1` 走 LCD 子像素路径；
+失真；观感软硬由档位选择决定（锯齿与模糊是同一参数的两端），
+另受灰度 AA 无横向子像素分解的物理极限约束——用 `GHROMEX_HINT` /
+`GHROMEX_CONTRAST` 在锐度谱上取点，需要横向锐度请开 `GHROMEX_LCD=1`
+走 LCD 子像素路径；
 选择器支持标签、`.class`、`#id`、类型+class/id 组合链（如 `div.wide`）与特异度排序。
 
 ## 已知限制
@@ -174,8 +182,9 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 - 裁剪仅由实现 `engine.Clipper`（`PushClip`/`PopClip`）的后端生效（当前 `BufferGraphics`、SDL2 均已实现；自定义后端未实现时静默跳过裁剪、仅不裁剪不报错）
 - 边框样式目前按单色实心绘制（dashed/dotted 等不做虚线区分）
 - 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；无 webfont 加载、无斜体渲染
-- 灰度 AA（默认）的字缘较 LCD 偏软：LIGHT hinting 消锯齿与灰度无横向子像素分解所致，
-  属取舍而非缺陷（保真度探针 `backend/sdl2/gray_text_test.go` 证实管线忠实，见上文渲染段；
+- 灰度 AA（默认）无横向子像素分解，竖笔边缘锐度低于 LCD/ClearType（物理极限）；
+  软硬由 hinting/tone 曲线档位决定（`GHROMEX_HINT` 默认 normal、`GHROMEX_CONTRAST`
+  默认关，可联调取点，见渲染段），保真度探针证实管线忠实（见上文渲染段；
   需要横向锐度可 `GHROMEX_LCD=1` 开 LCD 子像素）
 
 ## 调试环境变量
@@ -184,6 +193,8 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 |---|---|
 | `GHROMEX_DEBUG=1` | 回显绘制失败原因与每次点击的命中/派发结果 |
 | `GHROMEX_LCD=1` | 开启 LCD 子像素文本渲染（默认关闭：文本默认灰度 AA；开启后竖笔更锐，彩底边缘有轻微彩边，见「已知限制」） |
+| `GHROMEX_HINT=档位` | 灰度文本 hinting：`normal`（默认，与 Chrome 灰度轮廓最同构）/`light`（更柔）/`mono`/`none`；LCD 打开时强制 LIGHT_SUBPIXEL，本变量仅影响灰度路径；face 建立时读取，进程启动前设定 |
+| `GHROMEX_CONTRAST=k` | 灰度字形 tone 曲线强度（>1 生效、上限 3，默认关）：以 0.5 为枢轴把覆盖度推两端，边缘更实、毛边更净；k 越大墨色越重、竖边台阶感越明显，可与 `GHROMEX_HINT` 联调（如 `light+1.3`、`none+1.5`），仅影响 blended（灰度）路径 |
 | `GHROMEX_SOFTWARE=1` | 强制软件渲染器（默认 GPU 加速，创建失败自动回退软件；用于 GPU 可创建但不出像素的虚拟显示环境） |
 | `GHROMEX_FONT=路径` | 指定 standard 字体（默认 Arial，即 sans-serif） |
 | `GHROMEX_CJK_FONT=路径` | 指定 CJK fallback 字体（默认微软雅黑） |

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -214,8 +215,9 @@ type fontFace struct {
 }
 
 // lcdText 报告 LCD 子像素渲染是否启用（TTF_RenderUTF8_LCD + LIGHT_SUBPIXEL
-// hinting）。默认关闭：文本默认灰度 AA（TTF LIGHT hinting，无彩边、对落点
-// 背景色不敏感）。GHROMEX_LCD=1 开启：竖笔画边缘横向锐度与浏览器 ClearType
+// hinting）。默认关闭：文本默认灰度 AA（hinting 档位见 fontHinting，默认
+// NORMAL；GHROMEX_HINT 可切 light|mono|none），无彩边、对落点背景色不敏感。
+// GHROMEX_LCD=1 开启：竖笔画边缘横向锐度与浏览器 ClearType
 // 同级，代价是彩底上竖笔边缘轻微彩边（与浏览器子像素渲染同性质），且需按
 // 落点背景色合成（见 DrawText）。
 // 惰性函数而非包级变量：hasTTFLCD 在 Load()（DLL 符号解析）后才有值，
@@ -224,12 +226,58 @@ func lcdText() bool {
 	return os.Getenv("GHROMEX_LCD") == "1" && hasTTFLCD
 }
 
+// fontHinting 返回建 face 时设置的 hinting 档位（hinting 是 face 级状态，
+// 进程启动前设定的环境变量才对全部 face 生效）。LCD 强制 LIGHT_SUBPIXEL
+// （子像素分解依赖该档位）；灰度路径按 GHROMEX_HINT 选档：
+// normal|light|mono|none，默认/非法值 = normal。
+// 默认 normal 的依据（.temp/gray-vs-chrome 矩阵实测 vs Chrome 灰度基线）：
+// CJK13 hardH 7≈0（Chrome 0，竖画无锯齿）、hardV 237≈227（横画利）、ink 412
+// 接近 Chrome 347——是全部候选里与 Chrome 轮廓最同构的一档；light 纵向更软
+// （hardV 75，即"糊"的来源）。回退/扫描用 GHROMEX_HINT=light|none|mono。
+// 该变量只影响灰度路径——LCD 打开时被 subpixel 覆盖。
+func fontHinting() uintptr {
+	if lcdText() {
+		return hintLightSubpixel
+	}
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("GHROMEX_HINT"))) {
+	case "light":
+		return hintLight
+	case "mono":
+		return hintMono
+	case "none":
+		return hintNone
+	default: // ""/"normal"/未知值 → normal
+		return hintNormal
+	}
+}
+
+// textContrast 返回灰度文本对比度系数 k（GHROMEX_CONTRAST），驱动 blended
+// 字形 surface 覆盖通道的 tone 曲线（见 text_contrast.go）。空/off/非法/≤1
+// = 关闭（k=0）；上限 3。LCD 路径不适用（其纹理已在 DLL 内按前景×背景合成）。
+func textContrast() float64 {
+	v := strings.TrimSpace(os.Getenv("GHROMEX_CONTRAST"))
+	if v == "" || strings.EqualFold(v, "off") {
+		return 0
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 1 {
+		return 0
+	}
+	if f > 3 {
+		return 3
+	}
+	return f
+}
+
 type texKey struct {
-	fontPath   string
-	text       string
-	size       int
-	bold       bool
-	lcd        bool
+	fontPath string
+	text     string
+	size     int
+	bold     bool
+	lcd      bool
+	// contrast = textContrast()×100（灰度路径的 tone 曲线档位）：随环境变量
+	// 变化重建纹理，避免切换后仍命中旧缓存。LCD 路径不施加曲线（值恒同）。
+	contrast   uint16
 	r, g, b, a uint8
 	// 落点背景色（LCD 合成用；背景不同必须分别缓存）
 	br, bg, bb uint8
@@ -315,17 +363,13 @@ func (g *Graphics) face(path string, size int, bold bool) *fontFace {
 		// 首次点击触发的重排，表现为"点一下标题位移/变粗"的首帧不一致。
 		f = &fontFace{handle: h, size: size, bold: false}
 		if hasTTFHinting {
-			// LIGHT（LCD 时 LIGHT_SUBPIXEL）替代默认 NORMAL：网格吸附是
-			// 小字号针齿的主因（font-render-compare 实测：同一文本纵向硬跳变
-			// 161→53，墨色不减）。hinting 是 face 级状态，建 face 时设一次，
-			// SetFontSize/SetFontStyle 后持续生效（TestSetFontSizePreservesHinting
-			// 回归锁定）。注意 LIGHT_SUBPIXEL 仅影响后续 LCD 渲染的子像素分解
-			// 路径，非 LCD 的 blended 调用在同一 face 上输出仍是灰度语义。
-			hint := uintptr(hintLight)
-			if lcdText() {
-				hint = uintptr(hintLightSubpixel)
-			}
-			ttfSetFontHinting(h, hint)
+			// 档位见 fontHinting：默认 NORMAL（对齐 Chrome 灰度轮廓，矩阵实测
+			// 见 .temp/gray-vs-chrome），GHROMEX_HINT 可切 light/mono/none 扫描
+			// 对比。hinting 是 face 级状态，建 face 时设一次，SetFontSize/
+			// SetFontStyle 后持续生效（TestSetFontSizePreservesHinting 回归锁定）。
+			// 注意 LIGHT_SUBPIXEL 仅影响后续 LCD 渲染的子像素分解路径，非 LCD
+			// 的 blended 调用在同一 face 上输出仍是灰度语义。
+			ttfSetFontHinting(h, fontHinting())
 		}
 		g.faces[key] = f
 	}
@@ -426,10 +470,12 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 		br, bg, bb, _ = bc.RGBA()
 	}
 	lcd := lcdText()
+	kc := textContrast()
 	for _, seg := range segs {
 		path := g.segFontPath(seg, family)
 		key := texKey{fontPath: path, text: seg.text, size: size, bold: bold, lcd: lcd,
-			r: cr, g: cg, b: cb, a: ca, br: br, bg: bg, bb: bb}
+			contrast: uint16(kc * 100),
+			r:        cr, g: cg, b: cb, a: ca, br: br, bg: bg, bb: bb}
 		info, ok := g.textures[key]
 		if !ok {
 			f := g.face(path, size, bold)
@@ -467,6 +513,9 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 				if surf == 0 {
 					continue
 				}
+				// GHROMEX_CONTRAST>1 时对覆盖通道施加 tone 曲线（直通 alpha
+				// 只需改覆盖字节），贴图后即为对比度调整过的字形。
+				applyTextContrast(surf, kc)
 				tex = sdlCreateTextureFromSurface(g.renderer, surf)
 				sdlFreeSurface(surf)
 			}

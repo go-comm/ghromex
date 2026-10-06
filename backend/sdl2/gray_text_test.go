@@ -130,10 +130,17 @@ func runGrayFidelity(t *testing.T, text, fontPath string) {
 	}
 	ref := openTTF(t, fontPath, size)
 	defer ttfCloseFont(ref)
-	// 生产 face 在 GHROMEX_LCD=0 下建 face 时设 LIGHT（见 Graphics.face），
-	// 参照必须用同一 hinting，否则比的是 hinting 差异而非管线差异。
-	ttfSetFontHinting(ref, uintptr(hintLight))
+	// 生产 face 的档位由 fontHinting() 决定（GHROMEX_HINT，灰度档；GHROMEX_LCD
+	// 已钉 0），参照必须用同一档位，否则比的是 hinting 差异而非管线差异。
+	ttfSetFontHinting(ref, fontHinting())
 	rw, rh, cov := cmpBlendedCoverage(t, ref, text)
+	// 生产路径在 GHROMEX_CONTRAST>1 时对覆盖施加 tone 曲线（applyTextContrast），
+	// 参照合成前施加同一条曲线，维持"同源直出"的可比性（探针不随默认值漂移）。
+	if kc := textContrast(); kc > 1 {
+		for i, c := range cov {
+			cov[i] = contrastAlpha(c, kc)
+		}
+	}
 	rgba := cmpCompositeWhite(rw, rh, cov, ink)
 
 	// --- 两边墨迹包围盒对齐（纹理含透明行高留白，包围盒才是字形本体） ---

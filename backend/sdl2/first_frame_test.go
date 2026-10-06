@@ -52,16 +52,12 @@ func TestFreshFaceBoldAppliedImmediately(t *testing.T) {
 	text := "用"
 
 	// 参照：直接按目标字号打开、按生产同序设置 hinting 与 bold——正确答案。
-	// hinting 必须与 face() 一致（LIGHT/LIGHT_SUBPIXEL 各自改变字形步进，
+	// hinting 必须与 face() 一致（fontHinting()：各档位改变字形步进，
 	// 见 TestSetFontSizePreservesHinting 的 163 vs 165）。
 	ref := openTTF(t, CJKFontPath(), size)
 	defer ttfCloseFont(ref)
 	if hasTTFHinting {
-		hint := uintptr(hintLight)
-		if lcdText() {
-			hint = uintptr(hintLightSubpixel)
-		}
-		ttfSetFontHinting(ref, hint)
+		ttfSetFontHinting(ref, fontHinting())
 	}
 	ttfSetFontStyle(ref, ttfStyleBold)
 	wRef, hRef := sizeTTF(t, ref, text)
