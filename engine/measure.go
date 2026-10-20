@@ -710,6 +710,14 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 
 		if cdisp == DisplayBlock {
 			flushLine()
+			// 表格：专用布局（列对齐 + 行堆叠），不走常规流——否则
+			// table/thead/tr/td 会按默认 inline-block 挤在一行。
+			if strings.EqualFold(che.tagName, "table") {
+				cursorY += layoutTable(g, che, contentW, cx, cursorY)
+				prevBlockMB = -1
+				lastInline = false
+				continue
+			}
 			// 相邻块级兄弟 margin 折叠（CSS 2.1 §8.3.1）：间隙取
 			// max(前兄 margin-bottom, 本子 margin-top) 而非两者之和。
 			// 游标已含前兄 mb（layoutH 含 margin），回退两者较小值即等效。

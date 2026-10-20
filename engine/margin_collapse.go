@@ -33,9 +33,14 @@ func listMarkerBox(g Graphics, base *htmlElement, comp CSSStyleDeclaration) (x, 
 	if lh <= 0 {
 		lh = base.height
 	}
-	// 标记盒右缘 = 内容左缘 − 0.75em（Chrome 实测：disc 圆点约 −14px、
-	// decimal 序号约 −10px，取中间值；字体不同 bearings 也有差异）
-	return base.x - fpx*3/4 - mw, base.y, mw, lh, true
+	// 标记盒右缘 = 内容左缘 − 间隙。Chrome 实测两类标记的间隙不同：disc 圆点
+	// 约 0.875em（14px@16px），decimal 序号约 0.6em（9.6px@16px）——用同一个
+	// 间隙会让其中一类明显偏左。
+	gap := fpx * 3 / 5
+	if base.listMarker == "•" {
+		gap = fpx * 7 / 8
+	}
+	return base.x - gap - mw, base.y, mw, lh, true
 }
 
 // listMarkerFor 返回列表项的标记文本：ul 用 disc（"•"），ol 用 decimal

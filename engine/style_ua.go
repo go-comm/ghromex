@@ -35,6 +35,14 @@ h3 { display: block; font-size: 18px; font-weight: bold; margin: 19px 0; } /* 1.
      改由布局/绘制层按 ul/ol 自行绘制（measure.go / render.go）。 */
   ul, ol { display: block; margin: 16px 0; padding-left: 40px; }
   li { display: block; }
+  /* 表格：引擎有最小表格模型（列对齐 + 行堆叠，见 table_layout.go）。
+     table 走专用布局；这里的 display 只影响表格以外的退化情形。 */
+  table { display: block; }
+  caption { display: block; text-align: center; }
+  /* 单元格按 inline-block 参与测量：表格布局需要各单元格的**自然宽**
+     （块级会撑满整行，量出来的列宽就等于容器宽）。 */
+  th, td { display: inline-block; padding: 1px; }
+  th { text-align: center; font-weight: bold; }
   dl { display: block; margin: 16px 0; }
   dt { display: block; font-weight: bold; }
   dd { display: block; margin-left: 40px; }
@@ -99,14 +107,15 @@ func applyInputTypeDefaults(comp CSSStyleDeclaration, base *htmlElement) {
 		return
 	}
 	px := func(n int) Size { return NewSize(SIZE_PIXEL, n, 0) }
-	zero := NewZeroSize()
 	switch typ := strings.ToLower(base.GetAttribute("type")); typ {
 	case "radio", "checkbox":
 		comp.SetWidth(px(13))
 		comp.SetHeight(px(13))
 		comp.SetPadding(NewZeroRect())
-		// 行内基线视觉对齐：无 vertical-align 支持，用 3px 顶距近似
-		comp.SetMargin(NewRect(zero, zero, px(3), zero))
+		// Chrome UA 的单选/复选外边距为 3px 3px 3px 4px（3px 顶距用于行内
+		// 基线视觉对齐——引擎无 vertical-align；4px 左边距是原生控件的
+		// 固有留白，缺它会让控件比 Chrome 左移 4~5px）。
+		comp.SetMargin(NewRect(px(3), px(3), px(3), px(4)))
 		if typ == "radio" {
 			comp.SetBorderRadius(px(7)) // ≥ 半宽 → 正圆
 		} else {
