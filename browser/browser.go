@@ -1,3 +1,5 @@
+//go:build windows
+
 // Package browser 是面向应用层的装配门面：隐藏渲染后端
 // （当前为 backend/sdl2）的选择与直接依赖，应用只需 import
 // browser 与 engine，不再接触底层类型。

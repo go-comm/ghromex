@@ -23,6 +23,7 @@
 - Go 1.20+（go.mod 基线，作库供其他项目引用，1.20 以上工具链均可构建；无需 CGO）
 - 渲染后端目前提供 Windows 实现（`backend/sdl2`，加载 `SDL2.dll` 2.28 与 `SDL2_ttf.dll`）
 - 把 `SDL2.dll`、`SDL2_ttf.dll`（及 `zlib1.dll`）放到工程根目录 `libs/`，或保证系统可搜索到它们
+- 平台边界：`engine` 包是纯 Go、可移植的（任意平台 `go build ./...` 均通过）；`backend/sdl2`、`browser` 与 `demo` 以 `//go:build windows` 标注，仅 Windows 可用，其它平台编译得到空实现（demo 运行时提示"仅支持 Windows"）
 
 ## 快速开始
 
