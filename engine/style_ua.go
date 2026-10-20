@@ -10,16 +10,38 @@ import (
 const uaCSS = `
 html { display: block; }
 head { display: none; }
-body { display: block; margin: 0; }
+/* body 的默认外边距取 Chrome 的 8px（而非 0）：body 外边距属于 UA 默认
+   样式的一部分，页面作者未显式声明时浏览器就是 8px——引擎此前按"桌面 UI
+   取向"取 0，整页内容比浏览器整体上移 8px，与 Chrome 对照时第一行标题/
+   段落位置就不同。 */
+body { display: block; margin: 8px; }
 div { display: block; }
 form { display: block; margin: 0; } /* Chrome UA: form 为块级 */
 p { display: block; margin: 16px 0; } /* Chrome UA: margin 1em，16px 基 */
 h1 { display: block; font-size: 32px; font-weight: bold; margin: 21px 0; } /* 2em；margin 0.67em */
 h2 { display: block; font-size: 24px; font-weight: bold; margin: 20px 0; } /* 1.5em；margin 0.83em */
 h3 { display: block; font-size: 18px; font-weight: bold; margin: 19px 0; } /* 1.17em=18.72px；margin 1em */
-span { display: inline; }
-label { display: inline; }
-strong { font-weight: bold; } /* Chrome UA: bolder(700) */
+ span { display: inline; }
+ label { display: inline; }
+  /* 其余行内语义标签统一 display:inline（CSS 的初始值就是 inline；未知标签
+     默认块级会让 em/i/code/small/sub/sup 等在引擎里各占一行——与浏览器
+     明显不符）。斜体/上标下标/小字号的字形差异属 v1 边界（无斜体渲染、
+     无 vertical-align），此处只保证行内性。 */
+  em, i, u, s, strike, code, kbd, samp, var, cite, dfn, abbr, q, mark, small,
+  sub, sup, time, data, output, bdi, bdo, ins, del, ruby, rt, rp { display: inline; }
+  /* 列表/定义列表/引用/预格式化：与 Chrome UA 同口径（缩进与外边距）。
+     列表标记（disc/decimal）与 list-item 显示未实现——引擎无列表项概念，
+     缩进（padding-left 40px）一致但无圆点/序号。 */
+  ul, ol { display: block; margin: 16px 0; padding-left: 40px; }
+  dl { display: block; margin: 16px 0; }
+  dt { display: block; font-weight: bold; }
+  dd { display: block; margin-left: 40px; }
+  blockquote { display: block; margin: 16px 40px; }
+  pre { display: block; font-family: monospace; margin: 16px 0; }
+  figure { display: block; margin: 16px 40px; }
+  figcaption { display: block; }
+  hr { display: block; margin: 8px 0; border: 1px solid #767676; }
+  strong { font-weight: bold; } /* Chrome UA: bolder(700) */
 b { font-weight: bold; }
 a { display: inline; color: #2563EB; text-decoration: underline; }
 /* 表单控件默认值对齐 Chrome（Windows）UA 样式：

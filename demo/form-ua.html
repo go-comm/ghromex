@@ -1,21 +1,27 @@
 <!doctype html>
 <!--
-  Ghromex UA 对照页 · form-ua.html（零作者 CSS）
+  Ghromex 对照页 · form-ua.html
   运行：go run ./demo -file demo/form-ua.html
   对照：同一文件用 Chrome/Edge 直接打开（start demo\form-ua.html）
 
-  本页仅一条作者 CSS：两侧字体统一微软雅黑（见 head 注释），其余全部
-  样式来自 UA 默认样式表，用于检验引擎内置 UA 样式与浏览器原生渲染的一致性。
+  本页分两半：
+  · 上半「UA 原生表单」：零作者 CSS（除 body 的字体统一），全部样式来自 UA
+    默认样式表，检验引擎内置 UA 样式与浏览器原生渲染的一致性；
+  · 下半「排版与常用标签」：用作者 CSS 摆出多字体、多字号与常用标签
+    （table/ol/ul/dl/blockquote/pre/hr/figure/行内语义），逐项对照字面、
+    缩进、间距与盒模型。
 
   一致区（数值对齐 Chrome/Windows 实测）：
-  - h2/h3 字号与段距、p 段距（含相邻块 margin 折叠）、label 行内、form 块级
+  - h2/h3 字号与段距、p 段距（含相邻块与父-子 margin 折叠）、label 行内、
+    form 块级
   - text/password 输入框外盒 177x21（password 可点击聚焦输入，值渲染为
     ● 掩码——明文只存于 value 属性，光标/点击定位同掩码宽度）
   - radio/checkbox 13x13 控件（radio 正圆）、点击切换选中（强调色方块 +
     白色对勾 / 圆环 + 实心圆，首项 radio 默认 checked 便于对照）
   - submit/reset 按钮外观，外盒高 25、value 文本居中
   - select 外盒高 21、option 13px + 3px 6px 内边距、a 蓝色 + 下划线
-  - 整页末行墨迹：引擎 673 vs 浏览器 666（引擎高约 7px；曾因无 margin 折叠膨胀 88px）
+  - body 边距两侧一致（UA 默认 8px）
+  - 整页末行墨迹：引擎 674 vs 浏览器 667（引擎高约 7px；曾因无 margin 折叠膨胀 88px）
 
   已知分叉（字体行高度量与 v1 边界，非 UA 规则缺失）：
   - 行高：引擎按字形高（16px 字号 → 20px 行），浏览器 normal 随字体
@@ -26,23 +32,53 @@
     选粗体一致（同页 h2 墨量比 1.01）；差异只剩字形光栅化本身
   - 灰度 AA vs 浏览器 ClearType 子像素：中文标题锐度差（引擎渲染管线
     v1 边界，改进方向 LCD 子像素见 fontcmp 探针，非本页 CSS 可解）
-  - body 边距：引擎默认 0（桌面 UI 取向），浏览器 8px
   - radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate 态
     （点击切换、checked 标记、label 激活与 radio 分组互斥已实现）
   - select 收起态宽 177px（浏览器按选中项内容收缩）、textarea 高 44px
     （浏览器 rows=2 ≈38px）——v1 固定值，其余内边距/边框与 Chrome 一致
   - 空块自折叠未实现（父-子穿越 margin 折叠已实现：<form> 内首个 <p> 的上边距
     与前一个 <p> 的下边距折叠为 16px，与浏览器一致）
+  - 列表标记未实现：ul/ol 缩进（40px）与外边距同浏览器，但无圆点/序号
+    （引擎无 list-item 概念）
+  - 表格布局未实现：引擎无表格模型，tr/td 按默认 inline-block 挤成一行，
+    浏览器按行列对齐（下方"表格"一节可见）
+  - 斜体/上标下标/小字号未实现（无 font-style/vertical-align 渲染，
+    small/sub/sup 只保证行内性）
+  - 预格式化未保留空白（pre 无 white-space:pre，缩进与换行按普通文本折叠）
 -->
 <html>
 <head>
 	<meta charset="utf-8">
-	<title>UA 原生表单 · 浏览器对照</title>
+	<title>UA 与排版对照 · 浏览器对照</title>
 	<style>
-		/* 唯一的作者声明：两侧字体统一为微软雅黑（引擎 CJK fallback 即雅黑；
-		   浏览器默认落 Noto Sans SC——细黑体，与雅黑并排观感差异大）。
+		/* 上半部分的唯一作者声明：两侧字体统一为微软雅黑（引擎 CJK fallback
+		   即雅黑；浏览器默认落 Noto Sans SC——细黑体，与雅黑并排观感差异大）。
 		   字号/边距/盒模型全部仍走 UA 默认，对照性质不变。 */
 		body { font-family: "Microsoft YaHei", sans-serif; }
+
+		/* 下半部分「排版与常用标签」的作者 CSS：同一串字符逐行换字体，
+		   便于对照字面宽度、中西文混排与 fallback 行为。 */
+		.f { margin: 4px 0; }
+		.f-arial { font-family: Arial, sans-serif; }
+		.f-times { font-family: "Times New Roman", serif; }
+		.f-courier { font-family: "Courier New", monospace; }
+		.f-segoe { font-family: "Segoe UI", system-ui, sans-serif; }
+		.f-yahei { font-family: "Microsoft YaHei", sans-serif; }
+		.f-simhei { font-family: SimHei, sans-serif; }
+		.f-simsun { font-family: SimSun, serif; }
+		.f-serif { font-family: serif; }
+		.f-sans { font-family: sans-serif; }
+		.f-mono { font-family: monospace; }
+		.f-cursive { font-family: cursive; }
+		.f-fantasy { font-family: fantasy; }
+
+		.fs12 { font-size: 12px; } .fs14 { font-size: 14px; } .fs16 { font-size: 16px; }
+		.fs18 { font-size: 18px; } .fs24 { font-size: 24px; } .fs32 { font-size: 32px; }
+		.fs80 { font-size: 80%; } .fs120 { font-size: 120%; }
+
+		/* 表格：作者 CSS 给边框与内边距（表格布局本身引擎未实现，见头注释） */
+		table.tb { border-collapse: collapse; }
+		table.tb th, table.tb td { border: 1px solid #767676; padding: 4px 8px; }
 	</style>
 </head>
 <body>
@@ -77,6 +113,87 @@
 		</p>
 	</form>
 
-	<p><strong>注</strong>：本页与浏览器原生渲染对照，剩余差异（行高、字形宽度）见头部注释。</p>
+	<h2>排版与常用标签</h2>
+	<p>以下各节使用作者 CSS，逐项与浏览器对照字面、缩进与间距。</p>
+
+	<h3>字体族</h3>
+	<div class="f f-arial">Arial：The quick brown fox jumps over 0123456789 中文</div>
+	<div class="f f-times">Times New Roman：The quick brown fox jumps over 0123456789 中文</div>
+	<div class="f f-courier">Courier New：The quick brown fox jumps over 0123456789 中文</div>
+	<div class="f f-segoe">Segoe UI：The quick brown fox jumps over 0123456789 中文</div>
+	<div class="f f-yahei">Microsoft YaHei：The quick brown fox jumps over 0123456789 中文</div>
+	<div class="f f-simhei">SimHei：The quick brown fox jumps over 0123456789 中文</div>
+	<div class="f f-simsun">SimSun：The quick brown fox jumps over 0123456789 中文</div>
+	<div class="f f-serif">serif：The quick brown fox jumps over 0123456789 中文</div>
+	<div class="f f-sans">sans-serif：The quick brown fox jumps over 0123456789 中文</div>
+	<div class="f f-mono">monospace：The quick brown fox jumps over 0123456789 中文</div>
+	<div class="f f-cursive">cursive：The quick brown fox jumps over 0123456789 中文</div>
+	<div class="f f-fantasy">fantasy：The quick brown fox jumps over 0123456789 中文</div>
+
+	<h3>字号</h3>
+	<div class="fs12">12px：字号越小字面越紧，基线间距按字形高</div>
+	<div class="fs14">14px：常用的正文小字号</div>
+	<div class="fs16">16px：默认字号</div>
+	<div class="fs18">18px：介于正文与标题之间</div>
+	<div class="fs24">24px：h2 同级</div>
+	<div class="fs32">32px：h1 同级</div>
+	<div class="fs80">80%：相对父级字号</div>
+	<div class="fs120">120%：相对父级字号</div>
+
+	<h3>行内语义</h3>
+	<p>
+		普通文字 <em>em 强调</em> <strong>strong 强调</strong> <b>b 强调</b>
+		<i>i 斜体</i> <code>code 等宽</code> <small>small 小字</small>
+		<sub>sub 下标</sub> <sup>sup 上标</sup> <span>span</span>
+		<a href="#top">a 链接</a> 结束<br>换行后一行
+	</p>
+
+	<h3>列表</h3>
+	<ul>
+		<li>无序列表第一项</li>
+		<li>无序列表第二项
+			<ul>
+				<li>嵌套一层</li>
+			</ul>
+		</li>
+	</ul>
+	<ol>
+		<li>有序列表第一项</li>
+		<li>有序列表第二项</li>
+	</ol>
+
+	<h3>定义列表</h3>
+	<dl>
+		<dt>术语</dt>
+		<dd>术语的说明文字，Chrome 下缩进 40px</dd>
+		<dt>另一个术语</dt>
+		<dd>另一段说明</dd>
+	</dl>
+
+	<h3>表格</h3>
+	<table class="tb">
+		<caption>表格标题（caption）</caption>
+		<thead>
+			<tr><th>表头一</th><th>表头二</th></tr>
+		</thead>
+		<tbody>
+			<tr><td>单元格 A1</td><td>单元格 A2</td></tr>
+			<tr><td>单元格 B1</td><td>单元格 B2</td></tr>
+		</tbody>
+	</table>
+
+	<h3>引用与预格式化</h3>
+	<blockquote>引用块：Chrome 下左右各缩进 40px。</blockquote>
+	<pre>pre 预格式化：
+	缩进与换行应原样保留</pre>
+	<p><code>code 元素</code> 与 <kbd>kbd</kbd> 属于行内等宽。</p>
+
+	<h3>其它块级标签</h3>
+	<figure>
+		<figcaption>figure 标题（figcaption）</figcaption>
+		<p>figure 内的段落内容，Chrome 下 figure 左右缩进 40px。</p>
+	</figure>
+	<hr>
+	<p><strong>注</strong>：本页与浏览器原生渲染对照，剩余差异见头部注释。</p>
 </body>
 </html>

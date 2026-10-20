@@ -10,7 +10,8 @@ import (
 
 // text-align：纯文本行按容器内容宽整体偏移（FakeGraphics 字宽估算确定）。
 func TestTextAlignTextLine(t *testing.T) {
-	// body margin 0；div 固定宽 200；默认字号 16px（Chrome 基线）；
+	// body margin 0（盒原点对齐，取样坐标不随 UA 默认 body 边距漂移）；
+	// div 固定宽 200；默认字号 16px（Chrome 基线）；
 	// "AB" 两个拉丁字符 = 2×(16*3/5)=18px
 	for _, tc := range []struct {
 		align string
@@ -21,7 +22,7 @@ func TestTextAlignTextLine(t *testing.T) {
 		{"right", 200 - 18},
 	} {
 		src := fmt.Sprintf(
-			`<html><body><div id="c" style="width:200px;text-align:%s">AB</div></body></html>`, tc.align)
+			`<html><body style="margin:0"><div id="c" style="width:200px;text-align:%s">AB</div></body></html>`, tc.align)
 		vp := engine.NewHeadlessViewport(400, 300)
 		doc, err := engine.OpenDocument(vp, src)
 		if err != nil {
@@ -38,7 +39,7 @@ func TestTextAlignTextLine(t *testing.T) {
 // text-align：含 inline-block 原子盒的行，原子盒及其子树（含内部文本）整体平移；
 // 内部文本还叠加了 text-align 继承在原子盒内部的居中。
 func TestTextAlignAtomicBox(t *testing.T) {
-	src := `<html><body><div id="w" style="width:200px;text-align:center">` +
+	src := `<html><body style="margin:0"><div id="w" style="width:200px;text-align:center">` +
 		`<span id="s" style="display:inline-block;width:40px;height:10px;background-color:#FF0000">Q</span>` +
 		`</div></body></html>`
 	vp := engine.NewHeadlessViewport(400, 300)
@@ -63,7 +64,7 @@ func TestTextAlignAtomicBox(t *testing.T) {
 
 // border-radius：扫描线圆角——外侧角像素不填充，边缘中点填充。
 func TestBorderRadiusPixels(t *testing.T) {
-	src := `<html><body><div style="width:100px;height:40px;` +
+	src := `<html><body style="margin:0"><div style="width:100px;height:40px;` +
 		`background-color:#FF0000;border-radius:8px"></div></body></html>`
 	buf, _ := openBuffered(t, 120, 60, src)
 
@@ -83,8 +84,8 @@ func TestBorderRadiusPixels(t *testing.T) {
 
 // border-radius + border：边框环沿圆角走；r=0 时保持平面四边。
 func TestBorderRadiusRing(t *testing.T) {
-	src := `<html><body><div style="width:60px;height:40px;border:2px solid #00FF00;` +
-		`background-color:#FF0000;border-radius:6px"></div></body></html>`
+	src := `<html><body style="margin:0"><div style="width:60px;height:40px;` +
+		`border:2px solid #00FF00;background-color:#FF0000;border-radius:6px"></div></body></html>`
 	buf, _ := openBuffered(t, 80, 60, src)
 
 	// 角外（row0 inset=6）→ 透明

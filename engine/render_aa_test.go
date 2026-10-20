@@ -12,7 +12,7 @@ func TestFillRadiusAntialiasing(t *testing.T) {
 	//   (3,1): d≈-0.08     → cov≈0.58（分数覆盖）
 	//   (4,1): d≈-0.61     → cov=1
 	//   (0,20): d=-0.5 恰在边界 → cov=1
-	src := `<html><body style="background-color:#FFFFFF">` +
+	src := `<!doctype html><html><body style="background-color:#FFFFFF;margin:0">` +
 		`<div style="width:100px;height:40px;background-color:#FF0000;border-radius:8px"></div>` +
 		`</body></html>`
 	buf, _ := openBuffered(t, 120, 60, src)
@@ -44,7 +44,7 @@ func TestStrokeRadiusAntialiasing(t *testing.T) {
 	//   (0,0)  外盒 d≈1.78 → cov=0
 	//   (30,0) 环全覆盖   → 纯蓝
 	//   (1,1)  外盒 d≈0.36 → cov≈0.14（分数环覆盖，蓝淡掺白）
-	src := `<html><body style="background-color:#FFFFFF">` +
+	src := `<html><body style="background-color:#FFFFFF;margin:0">` +
 		`<div style="width:60px;height:40px;border:2px solid #0000FF;border-radius:6px"></div>` +
 		`</body></html>`
 	buf, _ := openBuffered(t, 80, 60, src)

@@ -141,6 +141,12 @@ absolute/fixed 相对包含块锚定，right/bottom 回推)、`z-index`、
 overflow-x/overflow-y 分轴；hidden 只裁不滚，scroll 恒可滚，auto 溢出时可滚，
 文档级滚动不受 html overflow 关键字约束)；
 inline-block 的百分比宽度按包含块内容宽解析（而非行内剩余宽）；
+UA 默认样式表覆盖浏览器 Windows 侧的常用规则：body 外边距 8px、
+h1-h3 字号/外边距、p 段距、a 蓝色下划线、strong/b 加粗、
+em/i/code/small/sub/sup 等行内语义标签为 inline、
+ul/ol 缩进 40px、dl 的 dt 加粗与 dd 缩进、blockquote/pre/figure 外边距、
+hr 边框、form/input/select/textarea/button 的尺寸与外观；
+未实现的 UA 部分见「已知限制」（列表标记、表格模型、斜体/vertical-align）；
 字体默认语义对齐 Chrome（Windows）并做 UI 取向调整：初始字号 16px；
 standard（未指定 family）默认 sans-serif → Arial（区别于 Chrome 的 Times，更贴桌面 UI）；
 serif → Times New Roman、monospace → Courier New、system-ui → Segoe UI；
@@ -189,7 +195,10 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 - `DrawImage` 尚未实现（接口已预留）
 - 裁剪仅由实现 `engine.Clipper`（`PushClip`/`PopClip`）的后端生效（当前 `BufferGraphics`、SDL2 均已实现；自定义后端未实现时静默跳过裁剪、仅不裁剪不报错）
 - 边框样式目前按单色实心绘制（dashed/dotted 等不做虚线区分）
-- 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；无 webfont 加载、无斜体渲染
+- 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；无 webfont 加载、无斜体渲染（font-style 仅解析不渲染）
+- 列表只做缩进（ul/ol 的 padding-left 40px、dd 的 40px 缩进与 dt 加粗已对齐 Chrome），**无列表标记**（圆点/序号）与 `display:list-item`
+- **无表格布局模型**：table/thead/tbody/tr/td/caption 无专门 UA 规则，单元格按默认 inline-block 挤在一行（无行列对齐、无 border-spacing）
+- 无 `vertical-align`（sub/sup 不升降）、无 `small` 的小字号、`white-space` 未实现（`pre` 不保留空白）、无 `line-height`
 - 级联为每次重排全量重算：逐元素重跑全部规则匹配并排序（元素数 × 规则数 × 祖先深度）——大样式表 + 大文档时每次输入都会触发一次全量级联，尚未做规则索引/失效缓存
 - 灰度 AA（默认）无横向子像素分解，竖笔边缘锐度低于 LCD/ClearType（物理极限）；
   软硬由 hinting/tone 曲线档位决定（`GHROMEX_HINT` 默认 normal、`GHROMEX_CONTRAST`
