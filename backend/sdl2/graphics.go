@@ -191,6 +191,14 @@ type Graphics struct {
 
 	faces    map[faceKey]*fontFace
 	textures map[texKey]texInfo
+	// texOrder 记录纹理插入顺序（FIFO 淘汰用）；缓存无上限会让动态文本
+	// 页面（计数/时间戳）的显存单调增长，长跑必然耗尽。
+	texOrder []texKey
+
+	// env* 是文本渲染相关的环境变量取值，每帧刷新一次（见 refreshEnv）。
+	envLCD      bool
+	envHint     uintptr
+	envContrast float64
 
 	// reuseFaces 为 false 时（旧版 SDL2_ttf 无 TTF_SetFontSize），
 	// faceKey 带上 size/bold，行为退化为每组合一个 face（与历史版本一致）。
@@ -305,7 +313,7 @@ func NewGraphics(renderer uintptr, fontPath string) *Graphics {
 	if fontPath != "" {
 		std = fontPath
 	}
-	return &Graphics{
+	g := &Graphics{
 		renderer:     renderer,
 		standardFont: std,
 		cjkFont:      CJKFontPath(),
@@ -313,6 +321,18 @@ func NewGraphics(renderer uintptr, fontPath string) *Graphics {
 		textures:     make(map[texKey]texInfo),
 		reuseFaces:   hasTTFSetFontSize,
 	}
+	g.refreshEnv()
+	return g
+}
+
+// refreshEnv 刷新文本渲染相关的环境变量取值。
+// DrawText 每段文本都要读这些值，若每次都 os.Getenv 会按帧产生一批字符串
+// 分配（Windows 上每次 Getenv 都新分配）；Clear 是帧起点，在那里刷新一次
+// 即可——运行中切换环境变量仍然下一帧生效。
+func (g *Graphics) refreshEnv() {
+	g.envLCD = lcdText()
+	g.envHint = fontHinting()
+	g.envContrast = textContrast()
 }
 
 // resolveFontPath 把 CSS font-family（可含逗号分隔列表）解析为字体文件路径。
@@ -352,7 +372,7 @@ func (g *Graphics) resolveFontPath(family string) string {
 // 档位) 一个 face，用 TTF_SetFontSize / TTF_SetFontStyle 动态切换，避免同一
 // TTC 按字号重复加载；hinting 档位进 key 是为支持运行中切 GHROMEX_HINT。
 func (g *Graphics) face(path string, size int, bold bool) *fontFace {
-	key := faceKey{path: path, hint: uint8(fontHinting())}
+	key := faceKey{path: path, hint: uint8(g.envHint)}
 	if !g.reuseFaces {
 		key.size, key.bold = size, bold
 	}
@@ -479,18 +499,23 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 	if bc := paint.Background(); bc != nil {
 		br, bg, bb, _ = bc.RGBA()
 	}
-	lcd := lcdText()
-	kc := textContrast()
+	lcd := g.envLCD
+	kc := g.envContrast
 	if lcd {
 		kc = 0 // LCD 纹理在 DLL 内已合成，tone 曲线不适用（也不该因它重建缓存）
 	}
-	hint := uint8(fontHinting())
+	hint := uint8(g.envHint)
 	for _, seg := range segs {
 		path := g.segFontPath(seg, family)
 		key := texKey{fontPath: path, text: seg.text, size: size, bold: bold, lcd: lcd,
 			hint:     hint,
 			contrast: uint16(kc * 100),
-			r:        cr, g: cg, b: cb, a: ca, br: br, bg: bg, bb: bb}
+			r:        cr, g: cg, b: cb, a: ca}
+		if lcd {
+			// 落点背景色只有 LCD 路径用得到（灰度纹理与底色无关）：不写进
+			// key，否则同一段文字落在 N 种底色上会建 N 张完全相同的纹理。
+			key.br, key.bg, key.bb = br, bg, bb
+		}
 		info, ok := g.textures[key]
 		if !ok {
 			f := g.face(path, size, bold)
@@ -547,6 +572,8 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 			sdlSetTextureBlendMode(tex, uintptr(mode))
 			info = texInfo{tex: tex, w: int(tw), h: int(th), ascent: asc}
 			g.textures[key] = info
+			g.texOrder = append(g.texOrder, key)
+			g.evictTexturesIfNeeded()
 		}
 		if drawDebug {
 			// 记录每段的解析路径与"实际渲染纹理尺寸"：若 SetFontSize 参数传递失效，
@@ -590,7 +617,9 @@ func (g *Graphics) DrawImage(x, y, w, h int, image engine.Image) {
 
 // Clear 清屏。同时把裁剪栈清空并关闭 SDL 裁剪（SDL_RenderClear 本身无视
 // 裁剪区，这里仅为让 Go 侧栈与 SDL 实际状态保持一致，防上一帧配对失衡）。
+// 也是每帧的起点：在这里刷新文本渲染的环境变量取值（见 refreshEnv）。
 func (g *Graphics) Clear(r, gr, b, a uint8) {
+	g.refreshEnv()
 	g.clips = g.clips[:0]
 	checkDraw("SDL_RenderSetClipRect", sdlRenderSetClipRect(g.renderer, 0))
 	checkDraw("SDL_SetRenderDrawColor", sdlSetRenderDrawColor(g.renderer, uintptr(r), uintptr(gr), uintptr(b), uintptr(a)))
@@ -669,6 +698,27 @@ func (g *Graphics) CloseFonts() {
 		}
 	}
 	g.textures = make(map[texKey]texInfo)
+	g.texOrder = nil
+}
+
+// maxCachedTextures 是文本纹理缓存上限。缓存此前只增不减：每个新的
+// (文本,字号,粗体,颜色) 组合都新建一张 SDL_Texture，计数/时间戳这类
+// 动态文本的页面显存单调增长，长跑必然耗尽。超出后按插入顺序淘汰最旧的。
+const maxCachedTextures = 512
+
+// evictTexturesIfNeeded 超出缓存上限时按插入顺序（FIFO）淘汰最旧的纹理。
+func (g *Graphics) evictTexturesIfNeeded() {
+	for len(g.texOrder) > maxCachedTextures {
+		old := g.texOrder[0]
+		// 头移出后拷贝剩余部分（回收被移出的数组槽位，避免底层数组无限增长）
+		g.texOrder = append(g.texOrder[:0], g.texOrder[1:]...)
+		if info, ok := g.textures[old]; ok {
+			if info.tex != 0 {
+				sdlDestroyTexture(info.tex)
+			}
+			delete(g.textures, old)
+		}
+	}
 }
 
 // hasTTF 判断 TTF 符号是否已绑定（Load 之后为 true）。

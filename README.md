@@ -121,7 +121,8 @@ engine/            渲染引擎（纯 Go，不依赖任何图形后端）
   svg_dump.go        布局结果导出 SVG
   element_registry.go 标签原型注册表（自定义元素）
 backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓存
-components/        组件工厂（button / input / class 工具）
+components/        组件工厂（button / input / class 工具：InjectDefaultClasses
+                  注入 .btn/.btn-group/.input 默认样式）
 demo/              演示应用（登录页 index.html + 布局示例 form.html）
 libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 ```
@@ -146,7 +147,8 @@ serif → Times New Roman、monospace → Courier New、system-ui → Segoe UI�
 表单控件 UA 样式默认字体同为 Arial（引擎默认字体，桌面 UI 取向；
 Chrome 控件用系统 UI 字体 Segoe UI）；
 汉字/假名/谚文按字符级脚本分段 fallback 到微软雅黑（中英混排与 Chrome 一致）；
-每个字体文件只开一个 FT_Face，字号/粗体动态切换；
+每个 (字体文件, hinting 档位) 只开一个 FT_Face，字号/粗体动态切换
+（档位进 key 是为支持运行中切 `GHROMEX_HINT`；切换会新开一个 face）；
 文本渲染默认走灰度 AA（无彩边、对落点背景色不敏感），hinting 档位由
 `GHROMEX_HINT` 控制（`normal|light|mono|none`，默认 normal）：与 Chrome 灰度
 基线的同页对比矩阵（fontcmp 口径指标，13px 中文）显示 normal 最同构——
@@ -183,6 +185,7 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 - 裁剪仅由实现 `engine.Clipper`（`PushClip`/`PopClip`）的后端生效（当前 `BufferGraphics`、SDL2 均已实现；自定义后端未实现时静默跳过裁剪、仅不裁剪不报错）
 - 边框样式目前按单色实心绘制（dashed/dotted 等不做虚线区分）
 - 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；无 webfont 加载、无斜体渲染
+- 级联为每次重排全量重算：逐元素重跑全部规则匹配并排序（元素数 × 规则数 × 祖先深度）——大样式表 + 大文档时每次输入都会触发一次全量级联，尚未做规则索引/失效缓存
 - 灰度 AA（默认）无横向子像素分解，竖笔边缘锐度低于 LCD/ClearType（物理极限）；
   软硬由 hinting/tone 曲线档位决定（`GHROMEX_HINT` 默认 normal、`GHROMEX_CONTRAST`
   默认关，可联调取点，见渲染段），保真度探针证实管线忠实（见上文渲染段；
