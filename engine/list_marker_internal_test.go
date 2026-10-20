@@ -48,3 +48,35 @@ func TestListMarkers(t *testing.T) {
 		t.Errorf("SVG 导出缺少 ol 序号标记:\n%s", svg)
 	}
 }
+
+// TestListMarkerAlignsWithFirstLine 列表项内含嵌套列表时，标记必须与**首行**
+// 对齐（垂直居中于整个 li 盒会把标记画到盒子中部，视觉上多出一行孤立圆点）。
+func TestListMarkerAlignsWithFirstLine(t *testing.T) {
+	src := `<!doctype html><html><body style="margin:0">
+		<ul><li>甲<ul><li>乙</li></ul></li></ul>
+	</body></html>`
+	buf := NewBufferGraphics(200, 200)
+	vp := &HeadlessViewport{W: 200, H: 200, G: buf}
+	doc, err := OpenDocument(vp, src)
+	if err != nil {
+		t.Fatalf("OpenDocument: %v", err)
+	}
+	RenderNode(buf, doc)
+
+	li := inner(doc.QuerySelector("ul li"))
+	if li == nil {
+		t.Fatal("no li")
+	}
+	mx, my, mw, mh, ok := listMarkerBox(buf, li, li.computed)
+	if !ok {
+		t.Fatal("列表项无标记")
+	}
+	if my != li.y {
+		t.Errorf("标记 y=%d, want %d（应与内容首行对齐，而非 li 盒居中）", my, li.y)
+	}
+	// 标记应在内容左侧
+	if mx+mw > li.x {
+		t.Errorf("标记右缘 %d 未落在内容左侧（li.x=%d）", mx+mw, li.x)
+	}
+	_ = mh
+}

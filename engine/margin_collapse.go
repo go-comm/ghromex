@@ -20,6 +20,24 @@ import (
 // 的多层折叠不参与（浏览器按层传递），空块自折叠同样未实现。
 // ---------------------------------------------------------------------------
 
+// listMarkerBox 计算列表标记的绘制盒：右对齐到内容左缘 −0.75em，垂直与内容
+// **首行**对齐（不是整个 li 盒居中——li 内含嵌套列表时，居中会把标记画到
+// 盒子中部，视觉上多出一行"孤立圆点"）。返回 ok=false 表示该元素无标记。
+func listMarkerBox(g Graphics, base *htmlElement, comp CSSStyleDeclaration) (x, y, w, h int, ok bool) {
+	if base == nil || base.listMarker == "" {
+		return 0, 0, 0, 0, false
+	}
+	fpx, fbold, ffam := fontOf(comp)
+	mw, _ := g.MeasureText(base.listMarker, fpx, fbold, ffam)
+	_, lh := g.MeasureText("Mg", fpx, fbold, ffam) // 行高（与文字行盒一致）
+	if lh <= 0 {
+		lh = base.height
+	}
+	// 标记盒右缘 = 内容左缘 − 0.75em（Chrome 实测：disc 圆点约 −14px、
+	// decimal 序号约 −10px，取中间值；字体不同 bearings 也有差异）
+	return base.x - fpx*3/4 - mw, base.y, mw, lh, true
+}
+
 // listMarkerFor 返回列表项的标记文本：ul 用 disc（"•"），ol 用 decimal
 // （"1." "2."…，序号按同级 li 的次序）；父级不是列表则返回 ""。
 // 引擎没有 list-item 概念，标记在布局期算出、绘制期由 render.go 画出。

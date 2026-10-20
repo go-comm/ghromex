@@ -264,18 +264,9 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		}
 
 		// 列表标记：引擎无 list-item 概念，标记文本由布局期算出（ul → "•"，
-		// ol → "1." "2."…），画在内容左缘左侧、右对齐到 −0.5em 处
+		// ol → "1." "2."…），画在内容左缘左侧、右对齐到 −0.75em 处
 		//（Chrome 实测：标记盒右缘 = 内容左缘 − 0.5em）。
-		if base.listMarker != "" {
-			fpx, fbold, ffam := fontOf(comp)
-			mw, mh := g.MeasureText(base.listMarker, fpx, fbold, ffam)
-			// 标记盒右缘 = 内容左缘 − 0.75em（Chrome 实测：disc 圆点约 −14px、
-			// decimal 序号约 −10px，取中间值；字体不同 bearings 也有差异）
-			mx := base.x - fpx*3/4 - mw
-			my := base.y
-			if mh < base.height {
-				my += (base.height - mh) / 2
-			}
+		if mx, my, mw, mh, ok := listMarkerBox(g, base, comp); ok {
 			g.DrawText(mx, my, mw, mh, p, base.listMarker)
 		}
 
