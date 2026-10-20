@@ -147,6 +147,11 @@ serif → Times New Roman、monospace → Courier New、system-ui → Segoe UI�
 表单控件 UA 样式默认字体同为 Arial（引擎默认字体，桌面 UI 取向；
 Chrome 控件用系统 UI 字体 Segoe UI）；
 汉字/假名/谚文按字符级脚本分段 fallback 到微软雅黑（中英混排与 Chrome 一致）；
+粗体按字体族选**真粗体字文件**（雅黑 → msyhbd.ttc、Arial → arialbd.ttf、
+Segoe UI → segoeuib.ttf），不依赖 FreeType 对常规字形的合成加粗——合成加粗
+明显更重，24px 中文标题上还会出现笔画粘连/重影（浏览器按字体族选粗体字重，
+同页对照下 h2 墨量比由 1.26 收敛到 1.01）；无真粗体文件的字体（黑体等）
+仍走合成加粗，与浏览器一致；
 每个 (字体文件, hinting 档位) 只开一个 FT_Face，字号/粗体动态切换
 （档位进 key 是为支持运行中切 `GHROMEX_HINT`；切换会新开一个 face）；
 文本渲染默认走灰度 AA（无彩边、对落点背景色不敏感），hinting 档位由

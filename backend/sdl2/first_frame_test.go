@@ -4,6 +4,7 @@ package sdl2
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/go-comm/ghromex/engine"
@@ -54,12 +55,24 @@ func TestFreshFaceBoldAppliedImmediately(t *testing.T) {
 	// 参照：直接按目标字号打开、按生产同序设置 hinting 与 bold——正确答案。
 	// hinting 必须与 face() 一致（fontHinting()：各档位改变字形步进，
 	// 见 TestSetFontSizePreservesHinting 的 163 vs 165）。
-	ref := openTTF(t, CJKFontPath(), size)
+	// bold 也必须与生产同源：生产对粗体优先用**真粗体字文件**（msyhbd.ttc）
+	// 且不再叠加 TTF_STYLE_BOLD；无真粗体文件时才用常规文件 + 合成加粗。
+	refPath := CJKFontPath()
+	syntheticBold := true
+	if filepath.Base(refPath) == "msyh.ttc" {
+		if p := fontPathOf("msyhbd.ttc"); p != "" {
+			refPath = p
+			syntheticBold = false
+		}
+	}
+	ref := openTTF(t, refPath, size)
 	defer ttfCloseFont(ref)
 	if hasTTFHinting {
 		ttfSetFontHinting(ref, fontHinting())
 	}
-	ttfSetFontStyle(ref, ttfStyleBold)
+	if syntheticBold {
+		ttfSetFontStyle(ref, ttfStyleBold)
+	}
 	wRef, hRef := sizeTTF(t, ref, text)
 
 	g := NewGraphics(0, "") // MeasureText 不用 renderer，0 即可

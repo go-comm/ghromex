@@ -224,6 +224,7 @@ type faceKey struct {
 
 type fontFace struct {
 	handle uintptr
+	path   string // 实际打开的字体文件（粗体可能是真粗体变体）
 	size   int
 	bold   bool
 }
@@ -368,10 +369,49 @@ func (g *Graphics) resolveFontPath(family string) string {
 	return g.standardFont
 }
 
+// boldVariants 给出各字体文件对应的"真粗体"文件。浏览器按字体族挑选粗体
+// 字重（微软雅黑 → msyhbd.ttc、Arial → arialbd.ttf、Segoe UI →
+// segoeuib.ttf），而不是对常规字形做合成加粗。FreeType 的合成加粗
+// （FT_Outline_Embolden）明显比真粗体更重，24px 中文标题上还会出现笔画
+// 粘连/重影，与浏览器观感差别很大（实测 h2"用户注册"两字）。
+// 没有真粗体文件的字体（如 simhei.ttf）仍走合成加粗——与浏览器一致。
+var boldVariants = map[string]string{
+	"arial.ttf":   "arialbd.ttf",
+	"times.ttf":   "timesbd.ttf",
+	"cour.ttf":    "courbd.ttf",
+	"segoeui.ttf": "segoeuib.ttf",
+	"msyh.ttc":    "msyhbd.ttc",
+	"simsun.ttc":  "simsunb.ttf",
+}
+
+// facePath 返回该 (路径, 粗细) 实际会打开的字体文件路径（粗体可能命中真粗体
+// 变体）。仅用于诊断输出。
+func (g *Graphics) facePath(path string, size int, bold bool) string {
+	if bold {
+		if name, ok := boldVariants[strings.ToLower(filepath.Base(path))]; ok {
+			if p := fontPathOf(name); p != "" {
+				return p
+			}
+		}
+	}
+	return path
+}
+
 // face 取得（并按需创建/切换）字体句柄。reuseFaces 时一个 (文件, hinting
 // 档位) 一个 face，用 TTF_SetFontSize / TTF_SetFontStyle 动态切换，避免同一
 // TTC 按字号重复加载；hinting 档位进 key 是为支持运行中切 GHROMEX_HINT。
 func (g *Graphics) face(path string, size int, bold bool) *fontFace {
+	// 粗体优先用真粗体字文件（见 boldVariants）：合成加粗比真粗体重得多，
+	// 中文尤甚。命中时该 face 本身就是粗体，不再叠加 TTF_STYLE_BOLD。
+	realBold := false
+	if bold {
+		if name, ok := boldVariants[strings.ToLower(filepath.Base(path))]; ok {
+			if p := fontPathOf(name); p != "" {
+				path = p
+				realBold = true
+			}
+		}
+	}
 	key := faceKey{path: path, hint: uint8(g.envHint)}
 	if !g.reuseFaces {
 		key.size, key.bold = size, bold
@@ -391,7 +431,8 @@ func (g *Graphics) face(path string, size int, bold bool) *fontFace {
 		// 常见，如 form-ua 的 h2）handle 一直按 regular 度量与绘制，直到某次
 		// 非 bold 请求翻转标记、再来一次 bold 请求才纠正；那次翻转通常发生在
 		// 首次点击触发的重排，表现为"点一下标题位移/变粗"的首帧不一致。
-		f = &fontFace{handle: h, size: size, bold: false}
+		// 真粗体字文件本身就是粗体：直接记 true，后续不再切样式。
+		f = &fontFace{handle: h, path: path, size: size, bold: realBold}
 		if hasTTFHinting {
 			// 档位见 fontHinting：默认 NORMAL（对齐 Chrome 灰度轮廓，矩阵实测
 			// 见 .temp/gray-vs-chrome），GHROMEX_HINT 可切 light/mono/none 扫描
@@ -578,8 +619,9 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 		if drawDebug {
 			// 记录每段的解析路径与"实际渲染纹理尺寸"：若 SetFontSize 参数传递失效，
 			// actual 会与 req 不符（字号被 XMM 残值之类的外部因素带偏），此处一眼可见。
+			// 路径取 face 实际打开的文件（粗体可能命中真粗体变体 msyhbd.ttc 等）。
 			fmt.Fprintf(os.Stderr, "[font] %q req=%dpx bold=%v -> %s actual=%dx%d ascent=%d\n",
-				seg.text, size, bold, filepath.Base(path), info.w, info.h, info.ascent)
+				seg.text, size, bold, filepath.Base(g.facePath(path, size, bold)), info.w, info.h, info.ascent)
 		}
 		top := y
 		if info.ascent > 0 && refAscent > 0 {
