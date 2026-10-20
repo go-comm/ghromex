@@ -139,6 +139,16 @@ type htmlElement struct {
 	// 等），此时按 0 基数现算。
 	rsvPD, rsvBD edges
 	hasRsv       bool
+	// mtAbsorbed/mbAbsorbed：父块的外边距与本块的上/下外边距折叠时置位
+	//（CSS 2.1 §8.3.1 的父-子穿越折叠）。本块布局时据此把自身外边距记 0
+	// ——折叠后的值已由父块计入，避免重复计算。读取后即清零（一次性状态，
+	// 避免跨布局残留）。
+	mtAbsorbed, mbAbsorbed bool
+	// effTop/effBot：本块的外边距与首/末个流内块级子块折叠后的结果
+	//（父块在排布子块时算出并回填，见 measure.go 的 layoutChildren）。
+	// hasEff 为 false 表示未回填（根元素等），此时用样式里的原始 margin。
+	effTop, effBot int
+	hasEff         bool
 }
 
 func (element *htmlElement) TagName() string {

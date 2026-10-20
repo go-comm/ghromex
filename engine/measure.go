@@ -266,6 +266,23 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH i
 		}
 	}
 
+	// 父-子 margin 穿越折叠（CSS 2.1 §8.3.1）：本块的外边距若已与首/末个
+	// 流内块级子块折叠（父块在 layoutChildren 里算出并回填 effTop/effBot），
+	// 这里用折叠后的值；本块的外边距若被**它的父块**吸收（mtAbsorbed），
+	// 则自身记 0——折叠值已由父块计入，避免重复计算。
+	if el.hasEff {
+		mg[eTop] = el.effTop
+		mg[eBottom] = el.effBot
+	}
+	if el.mtAbsorbed {
+		mg[eTop] = 0
+		el.mtAbsorbed = false
+	}
+	if el.mbAbsorbed {
+		mg[eBottom] = 0
+		el.mbAbsorbed = false
+	}
+
 	cx := ox + mg[eLeft] + bd[eLeft] + pd[eLeft]
 	cy := oy + mg[eTop] + bd[eTop] + pd[eTop]
 	el.setX(cx)
@@ -691,15 +708,38 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			// 相邻块级兄弟 margin 折叠（CSS 2.1 §8.3.1）：间隙取
 			// max(前兄 margin-bottom, 本子 margin-top) 而非两者之和。
 			// 游标已含前兄 mb（layoutH 含 margin），回退两者较小值即等效。
-			// 仅 px 生效（上下 margin 百分比 v1 不支持，解析基不一致）。
-			// v1 未实现：父-子穿越折叠、空块自折叠。
+			//
+			// 本子块的有效外边距：再与首/末个流内块级子块折叠一层（父-子
+			// 穿越折叠，§8.3.1）——子块无上/下边框与内边距时，父子外边距
+			// 折叠取大者，子块自身随后不再重复计入（置位其 mt/mbAbsorbed）。
+			// 折叠值回填子块（effTop/effBot），其自身布局与此处兄弟折叠共用
+			// 同一口径。
 			mgc := resolveEdgeRect(che.computed.Margin(), contentW)
+			effTop, effBot := mgc[eTop], mgc[eBottom]
+			cheBD := resolveEdgeRect(che.computed.BorderStyleWidth(), contentW)
+			chePD := resolveEdgeRect(che.computed.Padding(), contentW)
+			if c := firstFlowBlockChild(che); c != nil && collapsesWithFirstChild(che, cheBD, chePD) {
+				cm := resolveEdgeRect(c.computed.Margin(), contentW)
+				if cm[eTop] > effTop {
+					effTop = cm[eTop]
+				}
+				c.mtAbsorbed = true
+			}
+			if c := lastFlowBlockChild(che); c != nil && collapsesWithLastChild(che, cheBD, chePD) {
+				cm := resolveEdgeRect(c.computed.Margin(), contentW)
+				if cm[eBottom] > effBot {
+					effBot = cm[eBottom]
+				}
+				c.mbAbsorbed = true
+			}
+			che.effTop, che.effBot, che.hasEff = effTop, effBot, true
+
 			if prevBlockMB >= 0 {
-				cursorY -= minInt(prevBlockMB, mgc[eTop])
+				cursorY -= minInt(prevBlockMB, effTop)
 			}
 			layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH)
 			cursorY += che.layoutH
-			prevBlockMB = mgc[eBottom]
+			prevBlockMB = effBot
 			// 块级子元素结束行内格式上下文：行尾空格被 CSS 移除，且后续内容
 			// 不再与前面的行内内容共享间隙空格。
 			pendingSpace = false
@@ -724,6 +764,8 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		// inline / inline-block → 原子盒。先在游标处试布局，溢出则换行重排。
 		// 行内盒的位置由 layoutBox 按游标决定——待定空格必须先落位。
 		flushPendingSpace()
+		// 行内盒不参与父-子 margin 折叠：清掉可能残留的折叠值。
+		che.hasEff = false
 		remain := contentW - (cursorX - cx)
 		if remain < 0 {
 			remain = 0

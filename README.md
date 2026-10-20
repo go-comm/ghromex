@@ -185,7 +185,7 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 - `<select>` 仅鼠标交互（展开/收起/选中），无键盘上下键选择、无 multiple、无 optgroup；选项浮层不随视口裁剪（超出视口的选项画到窗口外）
 - `<textarea>` 无选区/复制粘贴、无按住 Shift 扩展选区；滚轮可滚动（超盒高的行随滚动偏移平移、半截行按裁剪截断；后端未实现 `Clipper` 时退化为整行丢弃）
 - 行高按字形高度量（无 line-height 属性），与浏览器 normal（随字体 ≈1.15-1.5 倍）
-  行盒高度存在小差；父-子穿越 margin 折叠与空块自折叠未实现
+  行盒高度存在小差；空块自折叠未实现（父-子穿越 margin 折叠已实现）
 - `DrawImage` 尚未实现（接口已预留）
 - 裁剪仅由实现 `engine.Clipper`（`PushClip`/`PopClip`）的后端生效（当前 `BufferGraphics`、SDL2 均已实现；自定义后端未实现时静默跳过裁剪、仅不裁剪不报错）
 - 边框样式目前按单色实心绘制（dashed/dotted 等不做虚线区分）
