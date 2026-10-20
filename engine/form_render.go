@@ -71,8 +71,8 @@ func renderSelectValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p P
 	if ay+ah > by+bh {
 		ay = by + bh - ah
 	}
-	drawLinePixels(g, ax, ay, ax+4, ay+3, ac)
-	drawLinePixels(g, ax+8, ay, ax+5, ay+3, ac)
+	drawLinePixels2(g, ax, ay, ax+4, ay+3, ac)
+	drawLinePixels2(g, ax+8, ay, ax+5, ay+3, ac)
 }
 
 // renderTextareaValue 绘制 textarea 的折行文本与光标。

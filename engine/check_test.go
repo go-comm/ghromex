@@ -202,26 +202,27 @@ func TestCheckedRenderingPixels(t *testing.T) {
 		t.Fatalf("未选中 checkbox 左边框 = %02X%02X%02X%02X, want 767676FF", r, g, b, a)
 	}
 
-	// radio 初始选中：中心与 ±3px 为强调色实心圆（Chrome 13px 控件的圆点直径
-	// 9px），±4px 为圆点边缘（AA 过渡），最外圈是控件自身的 UA 灰边
-	//（Chrome 的 radio 外圈不是强调色环——旧实现多画了一圈 2px 强调色环）。
+	// radio 初始选中：中心与 ±3px 为强调色实心圆（Chrome 13px 控件的实心核
+	// 7px），±4px 为圆点边缘（AA 过渡），最外圈是 1px 强调色细环
+	//（Chrome 勾选态的 radio 环即强调色，非 UA 灰边）。
 	r1x, r1y := box(r1)
 	accent("radio 中心", r1x+6, r1y+6)
 	accent("radio 圆点(3px)", r1x+3, r1y+6)
 	if r, g, b, _ := colorAt(t, buf, r1x+2, r1y+6); r > 200 && g > 200 && b > 200 {
-		t.Errorf("radio 圆点边缘(4px) = %02X%02X%02X, want 蓝色（圆点直径 9px）", r, g, b)
+		t.Errorf("radio 圆点边缘(4px) = %02X%02X%02X, want 蓝色（实心核 7px）", r, g, b)
 	}
-	if r, g, b, _ := colorAt(t, buf, r1x, r1y+6); absDiff(r, 0x76) > 10 || absDiff(g, 0x76) > 10 || absDiff(b, 0x76) > 10 {
-		t.Errorf("radio 左边框 = %02X%02X%02X, want 767676（Chrome 外圈是 UA 灰边）", r, g, b)
+	if r, g, b, _ := colorAt(t, buf, r1x, r1y+6); absDiff(r, 0x25) > 30 || absDiff(g, 0x63) > 30 || absDiff(b, 0xEB) > 30 {
+		t.Errorf("radio 外圈 = %02X%02X%02X, want 近 2563EB（Chrome 勾选态的强调色细环）", r, g, b)
 	}
 
-	// checkbox 勾选：铺强调色 + 对勾折线白点
+	// checkbox 勾选：铺强调色 + 2px 实心对勾（Chrome 实测三点：短臂端
+	// (2,7)、顶点 (4,8)、长臂端 (8,3)）
 	engine.SetChecked(c, true)
 	engine.RenderNode(buf, doc)
-	accent("选中 checkbox", cx+6, cy+6)
-	white("对勾起点", cx+3, cy+7)
-	white("对勾拐点", cx+5, cy+9)
-	white("对勾终点", cx+9, cy+3)
+	accent("选中 checkbox 填充", cx+2, cy+2) // 对勾的长臂斜穿盒心，故取左上填充区
+	white("对勾短臂端", cx+2, cy+7)
+	white("对勾顶点", cx+4, cy+8)
+	white("对勾长臂端", cx+8, cy+3)
 	if r, g, b, _ := colorAt(t, buf, cx, cy+6); r != 0x25 || g != 0x63 || b != 0xEB {
 		t.Fatalf("选中 checkbox 左边框 = %02X%02X%02X, want 2563EB（边框被强调色覆盖）", r, g, b)
 	}

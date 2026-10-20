@@ -227,12 +227,13 @@ func renderCheckedMark(g Graphics, bx, by, bw, bh, r int, kind string) {
 	fillRadioMark(g, bx, by, bw, bh, checkAccent)
 }
 
-// checkPoints 是 13x13 控件上的对勾三点折线（Chrome 实测像素坐标：
-// 短臂 (3,7)→(5,9)，长臂 (5,9)→(9,3)），按控件实际尺寸等比缩放。
-var checkPoints = [3][2]float64{{3, 7}, {5, 9}, {9, 3}}
+// checkPoints 是 13x13 控件上对勾三点折线（Chrome 实测像素坐标：
+// 短臂端 (2,7)、顶点 (4,8)、长臂端 (8,3)），按控件实际尺寸等比缩放。
+var checkPoints = [3][2]float64{{2, 7}, {4, 8}, {8, 3}}
 
-// drawCheckMark 画 1px 线宽的白色对勾（Bresenham 整数线段，无抗锯齿——
-// 1px 实线在 13px 控件上比半像素 AA 更清晰）。
+// drawCheckMark 画白色对勾（Bresenham 整数线段，无抗锯齿——
+// 1px 实线在 13px 控件上比半像素 AA 更清晰）。Chrome 的对勾是 2px 描边，
+// 1px 偏细，故主线 + (1,1) 偏移的副线。
 func drawCheckMark(g Graphics, bx, by, bw, bh int, c Color) {
 	sx := float64(bw) / 13
 	sy := float64(bh) / 13
@@ -242,8 +243,24 @@ func drawCheckMark(g Graphics, bx, by, bw, bh int, c Color) {
 	x0, y0 := pt(checkPoints[0])
 	x1, y1 := pt(checkPoints[1])
 	x2, y2 := pt(checkPoints[2])
-	drawLinePixels(g, x0, y0, x1, y1, c)
-	drawLinePixels(g, x1, y1, x2, y2, c)
+	drawLinePixels2(g, x0, y0, x1, y1, c)
+	drawLinePixels2(g, x1, y1, x2, y2, c)
+}
+
+// drawLinePixels2 画 2px 粗线段：沿线每个点铺 2×2 实心块。Chrome 的对勾与
+// 下拉箭头都是 2px **实心**描边——用两条 1px 偏移线拼会是虚线状（点阵稀疏），
+// 故按点铺块。
+func drawLinePixels2(g Graphics, x0, y0, x1, y1 int, c Color) {
+	steps := absInt(x1 - x0)
+	if dy := absInt(y1 - y0); dy > steps {
+		steps = dy
+	}
+	if steps == 0 {
+		steps = 1
+	}
+	for i := 0; i <= steps; i++ {
+		g.DrawColor(x0+(x1-x0)*i/steps, y0+(y1-y0)*i/steps, 2, 2, c)
+	}
 }
 
 // drawLinePixels 用 Bresenham 逐像素画线段（含两端点）。
@@ -281,24 +298,26 @@ func absInt(v int) int {
 	return v
 }
 
-// fillRadioMark 画选中 radio：实心圆点（强调色）。Chrome 实测：选中的 radio
-// 外圈是控件自身的浅灰细边（UA 边框即承担），圆点为 9px 直径的强调色实心圆
-// ——旧实现额外画了一圈 2px 的强调色环且圆点偏小（6px），与浏览器差一截。
+// fillRadioMark 画选中 radio。Chrome 实测（13px 控件，逐像素）：外圈是 1px
+// 强调色细环 + 白色缝隙 + 直径 7px 的强调色实心圆点。旧实现画的是 2px 强调色
+// 环 + 6px 圆点（环偏厚、点偏小），上一版把环去掉又让点涨到 9px（偏大）。
+// 现按 Chrome 口径：细环 rOut-1..rOut、圆点半径 0.615r（实心核 7px）。
 func fillRadioMark(g Graphics, bx, by, bw, bh int, c Color) {
 	cx := float64(bx) + float64(bw)/2
 	cy := float64(by) + float64(bh)/2
 	rOut := math.Min(float64(bw), float64(bh)) / 2
-	// Chrome 13px 控件的圆点直径 9px → 半径 0.69r；减 0.02 让像素中心落在
+	// Chrome 13px 控件的圆点实心核 7px（半径 ≈3.9）；减 0.02 让像素中心落在
 	// ±0.5 的 AA 带中点（与 paintCoverage 的 SDF 口径一致）。
-	rDot := rOut*0.69 - 0.02
-	y0 := int(math.Floor(cy-rDot)) - 1
-	y1 := int(math.Ceil(cy+rDot)) + 1
-	x0 := int(math.Floor(cx-rDot)) - 1
-	x1 := int(math.Ceil(cx+rDot)) + 1
+	rDot := rOut*0.615 - 0.02
+	rRingIn := rOut - 0.75
+	y0 := int(math.Floor(cy-rOut)) - 1
+	y1 := int(math.Ceil(cy+rOut)) + 1
+	x0 := int(math.Floor(cx-rOut)) - 1
+	x1 := int(math.Ceil(cx+rOut)) + 1
 	for y := y0; y <= y1; y++ {
 		paintCoverage(g, y, x0, x1, c, func(x int) float64 {
 			d := math.Hypot(float64(x)+0.5-cx, float64(y)+0.5-cy)
-			return diskCoverage(d, rDot)
+			return math.Max(diskCoverage(d, rDot), annulusCoverage(d, rRingIn, rOut))
 		})
 	}
 }
