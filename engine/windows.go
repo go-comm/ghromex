@@ -47,10 +47,17 @@ type HeadlessViewport struct {
 	G    Graphics
 }
 
+// NewHeadlessViewport 创建无显示视口：w×h 视口 + FakeGraphics 绘制后端，
+// 供无显示器环境做级联/布局与 SVG 导出（不产生任何窗口）。
 func NewHeadlessViewport(w, h int) *HeadlessViewport {
 	return &HeadlessViewport{W: w, H: h, G: NewFakeGraphics()}
 }
 
-func (v *HeadlessViewport) ViewportWidth() int  { return v.W }
+// ViewportWidth 返回视口宽度（px）。
+func (v *HeadlessViewport) ViewportWidth() int { return v.W }
+
+// ViewportHeight 返回视口高度（px）。
 func (v *HeadlessViewport) ViewportHeight() int { return v.H }
-func (v *HeadlessViewport) Graphics() Graphics  { return v.G }
+
+// Graphics 返回该视口使用的绘制后端（默认 FakeGraphics）。
+func (v *HeadlessViewport) Graphics() Graphics { return v.G }
