@@ -200,6 +200,26 @@ func OnDocumentKeyDown(doc HTMLDocument, key int) bool {
 	return false
 }
 
+// inputVisibleWindow 计算单行 input 的可见窗口：值超宽时**舍头保尾**
+// （只画尾部），返回可见文本、它在完整显示值中的起始下标 cut 与文本宽高。
+// 渲染与光标映射（点击落光标/Home/End 行边界）必须同口径——此前渲染按
+// 舍头保尾裁掉前缀，而光标映射仍从字符串头部量前缀宽，点击可见区会把
+// 光标定位到不可见的前缀里，随后插入的字符落到错误位置。
+func inputVisibleWindow(g Graphics, b *htmlElement, px int, bold bool, family string) (text string, cut, tw, th int) {
+	full := displayValue(b)
+	runes := []rune(full)
+	tw, th = g.MeasureText(full, px, bold, family)
+	// 按钮型不截断：auto 宽已按 value 外盒测量，两侧 padding 即呼吸空间
+	//（Chrome 同语义）。
+	typ := strings.ToLower(b.GetAttribute("type"))
+	buttonLike := typ == "submit" || typ == "reset" || typ == "button"
+	for !buttonLike && tw > b.width-4 && len(runes) > 1 {
+		runes = runes[1:]
+		tw, th = g.MeasureText(string(runes), px, bold, family)
+	}
+	return string(runes), len([]rune(full)) - len(runes), tw, th
+}
+
 // controlLayout 返回当前控件的行布局：textarea 为折行结果，
 // 单行 input 视为「不折行的一行」（行高取字体行高）。
 func controlLayout(doc HTMLDocument, b *htmlElement) textareaLayout {
@@ -210,7 +230,11 @@ func controlLayout(doc HTMLDocument, b *htmlElement) textareaLayout {
 	px, bold, family := fontOf(b.computed)
 	// 按显示文本测量：password 走 ● 掩码（宽度与明文不同），点击落光标、
 	// Home/End 行边界的前缀宽必须与绘制的掩码文本同口径。
-	lines := wrapTextarea(g, displayValue(b), maxInt(b.width<<10, 1), px, bold, family)
+	// 单行 input 的「行」= 可见窗口（舍头保尾），行区间按完整显示值
+	// 编号，光标下标因此仍是完整值里的位置。
+	visible, cut, tw, _ := inputVisibleWindow(g, b, px, bold, family)
+	full := len([]rune(displayValue(b)))
+	lines := []textareaLine{{text: visible, start: cut, end: full, w: tw}}
 	_, lh := g.MeasureText("Mg", px, bold, family)
 	if lh <= 0 {
 		lh = b.height

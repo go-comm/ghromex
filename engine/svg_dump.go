@@ -273,7 +273,9 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 	}
 
 	if strings.EqualFold(base.tagName, "select") {
-		val := selectDisplayText(base)
+		// 与渲染路径同口径：可用宽 = 内容宽 - 箭头位，超宽舍尾保留头。
+		val := selectDisplayClipped(NewFakeGraphics(), base, base.width-selectArrowWidth,
+			fs, comp.FontWeight() == FontWeightBold, fam)
 		if val == "" {
 			return
 		}

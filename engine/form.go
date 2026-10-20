@@ -36,7 +36,9 @@ func SetValue(el HTMLElement, value string) {
 	b.SetAttribute("value", value)
 	b.caret = len([]rune(value))
 	if strings.EqualFold(b.tagName, "textarea") {
-		b.scrollTop = 0
+		// 光标落在值末尾：滚动到光标行（scrollTop 负值 = 哨兵，由布局期
+		// 解析成实际偏移）——否则长文本设值后光标与末尾内容都在可视区外。
+		b.scrollTop = -1
 	}
 }
 

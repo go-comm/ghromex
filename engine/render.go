@@ -291,23 +291,16 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 			default:
 				size := p.Size().Pixel()
 				// password 已在此按 ● 掩码（displayValue），下方测量/截断/
-				// 光标前缀宽全部以掩码文本为口径。
-				full := displayValue(base)
-				fullRunes := []rune(full)
-				val, runes := full, fullRunes
-				tw, th := g.MeasureText(val, size, p.Bold(), p.FontFamily())
-				// 按钮型不截断：auto 宽已按 value 外盒测量，两侧 padding 即呼吸
-				// 空间（Chrome 同语义）；文本型保留 -4 余量给光标。
+				// 光标前缀宽全部以掩码文本为口径。可见窗口（舍头保尾）与光标
+				// 映射共用 inputVisibleWindow——同一口径，避免光标落到被裁掉的
+				// 前缀里（插入字符会落到错误位置）。
+				val, cut, tw, th := inputVisibleWindow(g, base, size, p.Bold(), p.FontFamily())
+				fullRunes := []rune(displayValue(base))
+				// 按钮型 value 文本水平居中（对齐 Chrome 按钮文字）；按钮型
+				// 不截断（auto 宽已按 value 外盒测量），故此处不会被裁短。
 				buttonLike := typ == "submit" || typ == "reset" || typ == "button"
-				for !buttonLike && tw > base.width-4 && len(runes) > 1 {
-					runes = runes[1:]
-					val = string(runes)
-					tw, th = g.MeasureText(val, size, p.Bold(), p.FontFamily())
-				}
-				cut := len(fullRunes) - len(runes) // 舍去的前缀 rune 数
 				tx := base.x
 				if buttonLike && base.width > tw {
-					// 按钮型 value 文本水平居中（对齐 Chrome 按钮文字）
 					tx = base.x + (base.width-tw)/2
 				}
 				ty := base.y

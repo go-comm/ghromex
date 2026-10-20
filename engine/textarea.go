@@ -114,6 +114,15 @@ func layoutTextarea(g Graphics, el *htmlElement) textareaLayout {
 	}
 	scroll := el.scrollTop
 	if scroll < 0 {
+		// 负值哨兵：跳到光标行（SetValue 设值后光标在末尾，见 form.go）。
+		row := caretRow(lines, el.caret)
+		top := row * lh
+		scroll = top
+		if top+lh > el.height {
+			scroll = top + lh - el.height
+		}
+	}
+	if scroll < 0 {
 		scroll = 0
 	}
 	if maxScroll := len(lines)*lh - el.height; scroll > maxScroll {

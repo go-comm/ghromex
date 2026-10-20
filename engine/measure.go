@@ -154,6 +154,7 @@ func inputButtonTextWidth(g Graphics, el *htmlElement, comp CSSStyleDeclaration,
 		return -1
 	}
 	var text string
+	arrowReserve := 0
 	switch {
 	case strings.EqualFold(el.tagName, "input"):
 		switch strings.ToLower(el.GetAttribute("type")) {
@@ -163,8 +164,10 @@ func inputButtonTextWidth(g Graphics, el *htmlElement, comp CSSStyleDeclaration,
 		}
 		text = el.GetAttribute("value")
 	case strings.EqualFold(el.tagName, "select"):
-		// select 的 auto 宽按显示文本 + 右侧下拉箭头位（16px）收缩
-		text = selectDisplayText(el) + "  "
+		// select 的 auto 宽按显示文本 + 右侧下拉箭头位（selectArrowWidth）
+		// 收缩——与绘制同口径，否则显示文本会被箭头挤掉。
+		text = selectDisplayText(el)
+		arrowReserve = selectArrowWidth
 	default:
 		return -1
 	}
@@ -175,7 +178,7 @@ func inputButtonTextWidth(g Graphics, el *htmlElement, comp CSSStyleDeclaration,
 	w, _ := g.MeasureText(text, fontPx, comp.FontWeight() == FontWeightBold, comp.FontFamily())
 	bd := resolveEdgeRect(comp.BorderStyleWidth(), pctW)
 	pd := resolveEdgeRect(comp.Padding(), pctW)
-	return w + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
+	return w + arrowReserve + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
 }
 
 // defaultFormControlHeight 为 height:auto 的原子表单控件给出内容盒兜底高度

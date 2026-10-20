@@ -17,20 +17,35 @@ func isFormControl(b *htmlElement) bool {
 	return false
 }
 
+// selectArrowWidth 是 select 右侧下拉箭头的预留宽度。绘制时箭头占内容盒
+// 右缘这么多像素，auto 宽度也须预留同样的空间——否则显示文本会被自己的
+// 箭头挤掉（此前 auto 宽按「文本 + 两个空格」估算，比 16px 少约 9px，
+// 实测 auto 宽 select 把自己的值截成 "Alph"）。
+const selectArrowWidth = 16
+
+// selectDisplayClipped 按可用宽度截断 select 的显示文本（超宽舍尾保留头：
+// 光标不在 select 尾部）。绘制与 SVG 导出共用，保证同一控件两处文本一致
+// （此前导出全值、渲染截断，用 SVG 校验布局会误判）。
+func selectDisplayClipped(g Graphics, b *htmlElement, avail, size int, bold bool, family string) string {
+	val := selectDisplayText(b)
+	runes := []rune(val)
+	for len(runes) > 1 {
+		tw, _ := g.MeasureText(val, size, bold, family)
+		if tw <= avail {
+			break
+		}
+		runes = runes[:len(runes)-1]
+		val = string(runes)
+	}
+	return val
+}
+
 // renderSelectValue 绘制 select 收起态的选中文本与右侧下拉箭头。
 // 文本超宽舍尾保留头（与 input 舍头保尾相反：光标不在 select 尾部）。
 func renderSelectValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p Paint, bx, by, bw, bh, r int) {
-	const arrowW = 16
-	val := selectDisplayText(b)
+	val := selectDisplayClipped(g, b, b.width-selectArrowWidth, p.Size().Pixel(), p.Bold(), p.FontFamily())
 	size := p.Size().Pixel()
 	tw, th := g.MeasureText(val, size, p.Bold(), p.FontFamily())
-	runes := []rune(val)
-	avail := b.width - arrowW
-	for tw > avail && len(runes) > 1 {
-		runes = runes[:len(runes)-1]
-		val = string(runes)
-		tw, th = g.MeasureText(val, size, p.Bold(), p.FontFamily())
-	}
 	if val != "" {
 		tx, ty := b.x, b.y
 		if th < b.height {
