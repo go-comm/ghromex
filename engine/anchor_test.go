@@ -20,8 +20,8 @@ func TestAnchorUAStyle(t *testing.T) {
 	doc := openDoc(t, 400, 300, anchorPage)
 	svg := doc.DumpSVG()
 
-	if !strings.Contains(svg, `fill="#2563eb"`) {
-		t.Error("链接色未生效（UA a { color:#2563EB }）")
+	if !strings.Contains(svg, `fill="#0000ee"`) {
+		t.Error("链接色未生效（UA a { color:#0000EE }，与 Chrome 默认链接色一致）")
 	}
 	// 文本按空白切成多段（"link"+" "+"text" = 3 段、"plain" = 1 段），
 	// 三段链接文字都带 UA 下划线；#u 内联 none 覆盖后不带。

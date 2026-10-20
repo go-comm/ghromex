@@ -56,7 +56,7 @@ func TestTextareaFocusRingVisible(t *testing.T) {
 	<textarea id="t">hello</textarea>
 	</body></html>`
 	buf, doc := openBuffered(t, 200, 120, src)
-	const fr, fg, fb = 37, 99, 235 // focusBlue
+	const fr, fg, fb = 0x00, 0x78, 0xD4 // focusBlue（Windows 系统强调色默认）
 	hasFocusBlue := func() bool {
 		for y := 0; y < 120; y++ {
 			for x := 0; x < 200; x++ {

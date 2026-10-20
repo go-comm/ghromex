@@ -34,10 +34,11 @@
     v1 边界，改进方向 LCD 子像素见 fontcmp 探针，非本页 CSS 可解）
   - radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate 态
     （点击切换、checked 标记、label 激活与 radio 分组互斥已实现）
-  - select 收起态按内容收缩（与浏览器一致：文字 + 箭头位），textarea 高 44px
-    （浏览器 rows=2 ≈38px）——v1 固定高度，其余内边距/边框与 Chrome 一致
+  - select 收起态按内容收缩（与浏览器一致：文字 + 箭头位），textarea 外盒
+    160x38（与浏览器 rows=2/cols=20 的默认一致）
   - 选中标记：radio 为 1px 强调色细环 + 7px 强调色实心圆核、checkbox 为强调色
-    方块 + 2px 实心对勾（均按 Chrome 逐像素实测对齐）
+    方块 + 2px 实心对勾（均按 Chrome 逐像素实测对齐；强调色取 Windows 系统
+    强调色默认值 #0078D4，Chrome 随系统配色变化）
   - 空块自折叠未实现（父-子穿越 margin 折叠已实现：<form> 内首个 <p> 的上边距
     与前一个 <p> 的下边距折叠为 16px，与浏览器一致）
   - 列表：缩进/外边距/标记（ul 的 •、ol 的 1. 2. 序号）均与浏览器一致；标记

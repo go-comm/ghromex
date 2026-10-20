@@ -53,7 +53,7 @@ h3 { display: block; font-size: 18px; font-weight: bold; margin: 19px 0; } /* 1.
   hr { display: block; margin: 8px 0; border: 1px solid #767676; }
   strong { font-weight: bold; } /* Chrome UA: bolder(700) */
 b { font-weight: bold; }
-a { display: inline; color: #2563EB; text-decoration: underline; }
+a { display: inline; color: #0000EE; text-decoration: underline; } /* Chrome 默认链接色 #0000EE */
 /* 表单控件默认值对齐 Chrome（Windows）UA 样式：
    button: buttonface=#EFEFEF、文字色 buttontext=#000（不继承）、居中文本、
            边框灰 #767676、字号 13px（≈浏览器 13.33px Arial）。
@@ -76,7 +76,7 @@ input { display: inline-block; box-sizing: border-box; font-family: Arial; font-
    option 为 block 以免进入常规流参与行盒排布；textarea 两行高。 */
  select { display: inline-block; box-sizing: border-box; font-family: Arial; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; height: 21px; }
 option { display: block; box-sizing: border-box; font-family: Arial; font-size: 13px; color: #000000; padding: 3px 6px; }
- textarea { display: inline-block; box-sizing: border-box; font-family: Arial; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 2px 4px; width: 177px; height: 44px; overflow: hidden; }
+ textarea { display: inline-block; box-sizing: border-box; font-family: Arial; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 2px 4px; width: 160px; height: 38px; overflow: hidden; }
 /* textarea 的 overflow 走 hidden 而非浏览器的 auto：折行内容的滚动由
    textarea 自身 scrollTop 机制驱动（光标跟随 + 滚轮，见 scroll.go），
    通用 overflow 滚动对原子控件不生效（scrollMax 对原子控件恒 0），

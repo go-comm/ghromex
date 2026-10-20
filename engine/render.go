@@ -152,8 +152,10 @@ func popClips(g Graphics, n int) {
 	}
 }
 
-// focusBlue 是 v1 硬编码的聚焦框颜色（演示主题主色）。
-var focusBlue = NewColor(37, 99, 235, 255)
+// focusBlue 是聚焦框与控件强调色的取值：Chrome 的表单控件用**系统强调色**
+// （Windows 默认 #0078D4，随用户配色变化）；引擎取 Windows 默认强调色硬编码，
+// 使聚焦框与 radio/checkbox 的选中标记与浏览器观感一致。
+var focusBlue = NewColor(0x00, 0x78, 0xD4, 255)
 
 func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement) {
 	renderNodeTextColor(g, e, parentPaint, focus, nil)

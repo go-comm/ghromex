@@ -182,8 +182,9 @@ func TestCheckedRenderingPixels(t *testing.T) {
 	}
 	accent := func(tag string, x, y int) {
 		t.Helper()
-		if r, g, b, a := colorAt(t, buf, x, y); r != 37 || g != 99 || b != 235 || a != 255 {
-			t.Fatalf("%s 像素(%d,%d) = %02X%02X%02X%02X, want 2563EBFF（强调色未画出）",
+		// 强调色 = focusBlue（Windows 系统强调色默认 #0078D4，与 Chrome 控件一致）
+		if r, g, b, a := colorAt(t, buf, x, y); r != 0x00 || g != 0x78 || b != 0xD4 || a != 255 {
+			t.Fatalf("%s 像素(%d,%d) = %02X%02X%02X%02X, want 0078D4FF（强调色未画出）",
 				tag, x, y, r, g, b, a)
 		}
 	}
@@ -211,8 +212,8 @@ func TestCheckedRenderingPixels(t *testing.T) {
 	if r, g, b, _ := colorAt(t, buf, r1x+2, r1y+6); r > 200 && g > 200 && b > 200 {
 		t.Errorf("radio 圆点边缘(4px) = %02X%02X%02X, want 蓝色（实心核 7px）", r, g, b)
 	}
-	if r, g, b, _ := colorAt(t, buf, r1x, r1y+6); absDiff(r, 0x25) > 30 || absDiff(g, 0x63) > 30 || absDiff(b, 0xEB) > 30 {
-		t.Errorf("radio 外圈 = %02X%02X%02X, want 近 2563EB（Chrome 勾选态的强调色细环）", r, g, b)
+	if r, g, b, _ := colorAt(t, buf, r1x, r1y+6); absDiff(r, 0x00) > 30 || absDiff(g, 0x78) > 30 || absDiff(b, 0xD4) > 30 {
+		t.Errorf("radio 外圈 = %02X%02X%02X, want 近 0078D4（Chrome 勾选态的强调色细环）", r, g, b)
 	}
 
 	// checkbox 勾选：铺强调色 + 2px 实心对勾（Chrome 实测三点：短臂端
@@ -223,8 +224,8 @@ func TestCheckedRenderingPixels(t *testing.T) {
 	white("对勾短臂端", cx+2, cy+7)
 	white("对勾顶点", cx+4, cy+8)
 	white("对勾长臂端", cx+8, cy+3)
-	if r, g, b, _ := colorAt(t, buf, cx, cy+6); r != 0x25 || g != 0x63 || b != 0xEB {
-		t.Fatalf("选中 checkbox 左边框 = %02X%02X%02X, want 2563EB（边框被强调色覆盖）", r, g, b)
+	if r, g, b, _ := colorAt(t, buf, cx, cy+6); r != 0x00 || g != 0x78 || b != 0xD4 {
+		t.Fatalf("选中 checkbox 左边框 = %02X%02X%02X, want 0078D4（边框被强调色覆盖）", r, g, b)
 	}
 
 	// radio 分组：SetChecked 置位 r2 会取消同组 r1，再渲染即 r2 有环、r1 变白
