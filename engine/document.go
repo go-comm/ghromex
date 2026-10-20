@@ -79,7 +79,11 @@ func (document *htmlDocument) CreateElement(tag string) HTMLElement {
 		e = CustomElements().Get(tag)
 	}
 	if e != nil {
-		return e.Clone()
+		// CloneElement 对 typed nil 原型返回 nil（调 Clone 会空指针崩溃），
+		// 此时退化为未知元素，不让创建流程崩掉。
+		if c := CloneElement(e); c != nil {
+			return c
+		}
 	}
 	return newHTMLUnknownElement(tag)
 }

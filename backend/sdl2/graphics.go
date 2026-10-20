@@ -498,7 +498,7 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 				continue
 			}
 			asc := int32(0)
-			if ttfFontAscent != nil {
+			if hasTTFFontAscent {
 				asc = int32(ttfFontAscent(f.handle))
 			}
 			b, p := cBytes(seg.text)
@@ -567,7 +567,7 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 // ascentOf 读取指定字体当前样式的基线（调用后 face 的 size/bold 已就位）。
 func (g *Graphics) ascentOf(path string, size int, bold bool) int32 {
 	f := g.face(path, size, bold)
-	if f == nil || ttfFontAscent == nil {
+	if f == nil || !hasTTFFontAscent {
 		return 0
 	}
 	return int32(ttfFontAscent(f.handle))

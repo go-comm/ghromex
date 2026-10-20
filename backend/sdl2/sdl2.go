@@ -43,22 +43,22 @@ var (
 	dllSDL *windows.LazyDLL
 	dllTTF *windows.LazyDLL
 
-	sdlInit                     nativeCall
-	sdlQuit                     nativeCall
-	sdlGetError                 nativeCall
-	sdlCreateWindow             nativeCall
-	sdlShowWindow               nativeCall
-	sdlRaiseWindow              nativeCall
-	sdlGetWindowFlags           nativeCall
-	sdlSetWindowTitle           nativeCall
-	sdlDestroyWindow            nativeCall
-	sdlCreateRenderer           nativeCall
-	sdlDestroyRenderer          nativeCall
-	sdlSetRenderDrawBlendMode   nativeCall
-	sdlSetRenderDrawColor       nativeCall
-	sdlRenderClear              nativeCall
-	sdlRenderPresent            nativeCall
-	sdlRenderFillRect           nativeCall
+	sdlInit                   nativeCall
+	sdlQuit                   nativeCall
+	sdlGetError               nativeCall
+	sdlCreateWindow           nativeCall
+	sdlShowWindow             nativeCall
+	sdlRaiseWindow            nativeCall
+	sdlGetWindowFlags         nativeCall
+	sdlSetWindowTitle         nativeCall
+	sdlDestroyWindow          nativeCall
+	sdlCreateRenderer         nativeCall
+	sdlDestroyRenderer        nativeCall
+	sdlSetRenderDrawBlendMode nativeCall
+	sdlSetRenderDrawColor     nativeCall
+	sdlRenderClear            nativeCall
+	sdlRenderPresent          nativeCall
+	sdlRenderFillRect         nativeCall
 	// SDL_RenderSetClipRect（SDL_render.h 2.0.0 起）：rect 传 NULL 关闭
 	// 裁剪，返回 0 成功/负值失败；每层裁剪由 Graphics 维护交集栈后下推。
 	sdlRenderSetClipRect        nativeCall
@@ -75,7 +75,7 @@ var (
 	sdlGetModState              nativeCall
 	sdlQueryTexture             nativeCall
 	sdlRenderReadPixels         nativeCall
-	sdlGetRenderOutputFormat    nativeCall
+	sdlGetWindowPixelFormat     nativeCall
 	sdlClearError               nativeCall
 
 	ttfInit              nativeCall
@@ -91,6 +91,7 @@ var (
 	ttfRenderUTF8LCD     nativeCall
 	hasTTFSetFontSize    bool
 	hasTTFHinting        bool
+	hasTTFFontAscent     bool
 	hasTTFLCD            bool
 )
 
@@ -231,7 +232,10 @@ func doLoad() error {
 	sdlGetModState = bindSdl("SDL_GetModState")
 	sdlQueryTexture = bindSdl("SDL_QueryTexture")
 	sdlRenderReadPixels = bindProcOpt(dllSDL, "SDL_RenderReadPixels")
-	sdlGetRenderOutputFormat = bindProcOpt(dllSDL, "SDL_GetRenderOutputFormat")
+	// 截图回读用的像素格式查询：SDL2 的对应 API 是 SDL_GetWindowPixelFormat。
+	// 此前绑的是 SDL_GetRenderOutputFormat——那是 SDL3 才有的名字，SDL2 从不
+	// 导出，绑定结果永远返回 0，"优先用渲染目标原生格式"实为死代码。
+	sdlGetWindowPixelFormat = bindProcOpt(dllSDL, "SDL_GetWindowPixelFormat")
 	sdlClearError = bindProcOpt(dllSDL, "SDL_ClearError")
 	if bindErr != nil {
 		return fmt.Errorf("解析 SDL2.dll 符号失败: %w", bindErr)
@@ -247,7 +251,7 @@ func doLoad() error {
 	// 动态字号与基线查询：face 复用（一个字体文件一个 FT_Face）依赖这两个符号，
 	// 缺失时 Graphics 自动退化为按 (文件,字号,粗体) 各开一个 face 的旧路径。
 	ttfSetFontSize, hasTTFSetFontSize = bindProbe(dllTTF, "TTF_SetFontSize")
-	ttfFontAscent, _ = bindProbe(dllTTF, "TTF_FontAscent")
+	ttfFontAscent, hasTTFFontAscent = bindProbe(dllTTF, "TTF_FontAscent")
 	ttfSetFontHinting, hasTTFHinting = bindProbe(dllTTF, "TTF_SetFontHinting")
 	ttfRenderUTF8LCD, hasTTFLCD = bindProbe(dllTTF, "TTF_RenderUTF8_LCD")
 	if bindErr != nil {

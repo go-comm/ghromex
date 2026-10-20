@@ -1,6 +1,9 @@
 package engine
 
-import "sync"
+import (
+	"reflect"
+	"sync"
+)
 
 var (
 	globalSystemElements = &elementRegistry{}
@@ -27,15 +30,22 @@ func (registry *elementRegistry) Define(tag string, element HTMLElement) {
 
 func (registry *elementRegistry) Get(tag string) HTMLElement {
 	o, _ := registry.elements.Load(tag)
-	if o != nil {
-		return o.(HTMLElement)
+	if o == nil {
+		return nil
 	}
-	return nil
+	// 双返回值断言：注册表里若存了非 HTMLElement（外部 API 直接塞入），
+	// 单值断言会 panic——这里降级为 nil。
+	e, _ := o.(HTMLElement)
+	return e
 }
 
 // CloneElement 克隆注册表中的原型，返回全新的独立实例。
+// 原型是 typed nil（接口非 nil、指针为 nil）时返回 nil：调 Clone 会空指针崩溃。
 func CloneElement(e HTMLElement) HTMLElement {
 	if e == nil {
+		return nil
+	}
+	if v := reflect.ValueOf(e); v.Kind() == reflect.Ptr && v.IsNil() {
 		return nil
 	}
 	return e.Clone()

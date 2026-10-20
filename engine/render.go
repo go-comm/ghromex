@@ -256,6 +256,14 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 			strokeRoundedRect(g, bx, by, bw, bh, r, bd, bc)
 		}
 
+		// 聚焦框画在边框盒上，必须早于下方 overflow 裁剪压栈：textarea 默认
+		// overflow:hidden，裁剪区是 padding 盒，画在边框盒上的聚焦框会被整圈
+		// 裁掉（此前聚焦框在裁剪栈内绘制 → textarea 永远看不到聚焦指示）。
+		// 单选/复选此前就没有聚焦框（Chrome 同款圆环由选中标记承担），保持。
+		if focused && isFormControl(base) && bw > 0 && bh > 0 && checkKind(base) == "" {
+			strokeRoundedRect(g, bx, by, bw, bh, r, edges{1, 1, 1, 1}, focusBlue)
+		}
+
 		// overflow 非 visible：裁剪区为 padding 盒（CSS 语义），包住下方
 		// 的控件内容与全部子元素；非 Clipper 后端或退化盒（w/h ≤ 0）此处
 		// 不压栈，clipped 保持 false 与 popClip 严格配对。
@@ -274,7 +282,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 			case strings.EqualFold(base.tagName, "select"):
 				renderSelectValue(g, base, comp, p, bx, by, bw, bh, r)
 			case strings.EqualFold(base.tagName, "textarea"):
-				renderTextareaValue(g, base, comp, p, bx, by, bw, bh, r, focused)
+				renderTextareaValue(g, base, comp, p, focused)
 			case typ == "radio", typ == "checkbox":
 				// 控件盒（背景/边框/圆角）已由上方通用路径按 UA 样式绘制；
 				// 选中时补画强调色底与对勾/圆环（Chrome 同构，见 check.go）
@@ -329,7 +337,6 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 					if th > 2 {
 						g.DrawColor(cx, ty, 1, th-2, cc)
 					}
-					strokeRoundedRect(g, bx, by, bw, bh, r, edges{1, 1, 1, 1}, focusBlue)
 				}
 			}
 		}

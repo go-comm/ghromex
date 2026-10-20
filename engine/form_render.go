@@ -60,8 +60,9 @@ func renderSelectValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p P
 // 盒外的行不画；后端支持裁剪（Clipper）时半截行也画，交由 overflow 裁剪
 // 截断（滚动时行随 scrollTop 平移，必然出现半截行），否则退化为整行丢弃，
 // 保持"不画出盒外"的历史行为。
+// 聚焦框不在此画：它位于边框盒，须早于 overflow 裁剪压栈（见 render.go）。
 func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p Paint,
-	bx, by, bw, bh, r int, focused bool) {
+	focused bool) {
 	px, bold, family := fontOf(comp)
 	l := layoutTextarea(g, b)
 	_, clipOK := g.(Clipper)
@@ -104,7 +105,7 @@ func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p
 		}
 		g.DrawColor(cx, cy, 1, maxInt(l.lh-2, 1), cc)
 	}
-	strokeRoundedRect(g, bx, by, bw, bh, r, edges{1, 1, 1, 1}, focusBlue)
+	// 聚焦框不在此画：它位于边框盒，须早于 overflow 裁剪压栈（见 render.go）。
 }
 
 // renderSelectPopup 绘制展开的选项浮层：容器底与边框 → 选中项高亮 →

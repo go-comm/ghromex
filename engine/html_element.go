@@ -389,10 +389,33 @@ func (element *htmlElement) GetBoundingClientRect() Rect {
 	if comp != nil {
 		b := comp.BorderStyleWidth()
 		p := comp.Padding()
-		l -= b.Left().Pixel() + p.Left().Pixel()
-		t -= b.Top().Pixel() + p.Top().Pixel()
-		w += p.Left().Pixel() + p.Right().Pixel() + b.Left().Pixel() + b.Right().Pixel()
-		h += p.Top().Pixel() + p.Bottom().Pixel() + b.Top().Pixel() + b.Bottom().Pixel()
+		// 边长取像素值。样式边集可能是 nil（外部 API 可塞入非法值；非法
+		// 声明已由 CSS 解析层忽略，但这里仍需自保）——直接 .Pixel() 会空指针
+		// 崩溃，而本函数在每次点击的命中测试里都会走到。
+		px := func(r Rect, edge boxEdge) int {
+			if r == nil {
+				return 0
+			}
+			var s Size
+			switch edge {
+			case edgeTop:
+				s = r.Top()
+			case edgeRight:
+				s = r.Right()
+			case edgeBottom:
+				s = r.Bottom()
+			default:
+				s = r.Left()
+			}
+			if s == nil {
+				return 0
+			}
+			return s.Pixel()
+		}
+		l -= px(b, edgeLeft) + px(p, edgeLeft)
+		t -= px(b, edgeTop) + px(p, edgeTop)
+		w += px(p, edgeLeft) + px(p, edgeRight) + px(b, edgeLeft) + px(b, edgeRight)
+		h += px(p, edgeTop) + px(p, edgeBottom) + px(b, edgeTop) + px(b, edgeBottom)
 	}
 	return NewRect(NewSize(SIZE_PIXEL, l, 0), NewSize(SIZE_PIXEL, l+w, 0),
 		NewSize(SIZE_PIXEL, t, 0), NewSize(SIZE_PIXEL, t+h, 0))

@@ -33,6 +33,10 @@ type Window struct {
 	// shown 记录窗口是否已显示。首帧 Present 之前保持隐藏（建窗带
 	// windowHidden），首帧提交后才 ShowWindow + RaiseWindow——见 present。
 	shown bool
+
+	// closed 记录窗口是否已关闭：Close 幂等（重复 SDL_Destroy* 是
+	// use-after-free），关闭后 Run/绘制一律拒绝。
+	closed bool
 }
 
 // NewWindow 创建带渲染器的窗口。坐标体系 1:1（1 CSS px = 1 物理像素）。
@@ -67,6 +71,10 @@ func NewWindow(w, h int, title string) (*Window, error) {
 		uintptr(w), uintptr(h), windowHidden|windowResizable)
 	runtime.KeepAlive(b)
 	if hwnd == 0 {
+		// 与上方各失败分支保持一致：解锁 OS 线程 + 退出 SDL 子系统。
+		// 漏掉会让该 goroutine 永久钉在 OS 线程上，且 video 子系统残留。
+		runtime.UnlockOSThread()
+		sdlQuit()
 		return nil, fmt.Errorf("SDL_CreateWindow: %s", lastError())
 	}
 
@@ -191,18 +199,20 @@ func (win *Window) RenderFrame() {
 }
 
 // Screenshot 回读渲染目标当前内容（32bpp 原生字节，行主序）及其像素格式与尺寸。
-// 优先使用渲染目标原生格式；不支持查询时（旧版 DLL 无 SDL_GetRenderOutputFormat）
-// 固定请求 SDL_PIXELFORMAT_ARGB8888，由 SDL 负责转换。
+// 优先使用窗口的原生像素格式（SDL2 的 SDL_GetWindowPixelFormat）；查不到
+// 或非 32bpp 时固定请求 XBGR8888（0x16562004，小端下内存字节序 R,G,B,X），
+// 由 SDL 负责转换。注意渲染目标无 alpha 通道时第 4 字节恒为 0（不是 alpha），
+// 颜色只能按前三个通道读。
 // 配合 SDL_VIDEO_DRIVER=dummy 可在无显示器环境验证渲染结果。
 func (win *Window) Screenshot() ([]byte, uint32, int, int, error) {
-	const pixelFormatARGB8888 = 0x16562004
+	const pixelFormatXBGR8888 = 0x16562004
 	w, h := win.w, win.h
-	format := uint32(sdlGetRenderOutputFormat(win.renderer))
+	format := uint32(sdlGetWindowPixelFormat(win.win))
 	if format == 0 {
-		format = pixelFormatARGB8888
+		format = pixelFormatXBGR8888
 	}
 	if (format>>8)&0xFF != 32 {
-		format = pixelFormatARGB8888
+		format = pixelFormatXBGR8888
 	}
 	buf := make([]byte, w*h*4)
 	clearError()
@@ -220,6 +230,9 @@ func (win *Window) Screenshot() ([]byte, uint32, int, int, error) {
 
 // Run 进入事件循环：处理关闭/尺寸变化/暴露/点击，并按内容变化重排、逐帧重绘。
 func (win *Window) Run() error {
+	if win.closed {
+		return fmt.Errorf("window already closed")
+	}
 	if win.doc == nil {
 		return fmt.Errorf("window has no document, call OpenDocument first")
 	}
@@ -296,6 +309,11 @@ func (win *Window) Run() error {
 					engine.OnDocumentWheel(win.doc, int(ev.x), int(ev.y), dx, dy)
 				}
 			}
+			if !running {
+				// 关闭事件已到达：不再消费队列里的剩余事件——否则窗口已关
+				// 仍会有点击/按键改写文档并触发重排（对已销毁的渲染器绘制）。
+				break
+			}
 		}
 
 		if doc := win.doc; doc != nil {
@@ -321,16 +339,23 @@ func (win *Window) Run() error {
 	return nil
 }
 
-// Close 释放窗口资源。
+// Close 释放窗口资源。幂等：重复调用直接返回——重复 SDL_Destroy* 会对已
+// 销毁对象二次释放（use-after-free），句柄不置零也会让后续绘制打到野指针。
 func (win *Window) Close() {
+	if win.closed {
+		return
+	}
+	win.closed = true
 	if win.g != nil {
 		win.g.CloseFonts()
 	}
 	if win.renderer != 0 {
 		sdlDestroyRenderer(win.renderer)
+		win.renderer = 0
 	}
 	if win.win != 0 {
 		sdlDestroyWindow(win.win)
+		win.win = 0
 	}
 	ttfQuit()
 	sdlQuit()

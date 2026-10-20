@@ -26,10 +26,12 @@ func TestWrapTextareaRules(t *testing.T) {
 			starts: []int{0, 5},
 			ends:   []int{5, 7}},
 		{name: "空格回退断行", value: "aaaa bbbb", maxW: 30,
-			// 第 5 字超出 → 回退到空格：["aaaa","bbbb"]，空格不落行首
-			wants:  []string{"aaaa", "bbbb"},
+			// 第 5 字超出 → 回退到空格：空格**留在上一行末尾**（"aaaa "），
+			// 下一行从空格之后开始。旧实现把空格漏在两行之外——显示文本比
+			// value 少一个字符，且该下标不属于任何行区间（光标映射错位）。
+			wants:  []string{"aaaa ", "bbbb"},
 			starts: []int{0, 5},
-			ends:   []int{4, 9}},
+			ends:   []int{5, 9}},
 		{name: "显式换行", value: "a\nb", maxW: 1000,
 			// end 指向 '\n' 所在下标，下一行从其后开始
 			wants:  []string{"a", "b"},

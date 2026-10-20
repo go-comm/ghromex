@@ -55,10 +55,13 @@ func wrapTextarea(g Graphics, value string, maxW, fontPx int, bold bool, family 
 		w, _ := g.MeasureText(string(r), fontPx, bold, family)
 		if curW+w > maxW && len(cur) > 0 {
 			if lastSpace > 0 {
-				// 在最后一个空格处断行：空格留在上一行，不作下一行行首
-				keep := cur[:lastSpace]
+				// 在最后一个空格处断行：空格**留在上一行末尾**（含在 keep 内），
+				// 下一行从空格之后开始。旧实现 keep=cur[:lastSpace] 把空格本身
+				// 漏在两行之外——显示文本比 value 少字符，且该 rune 不属于任何
+				// 行区间，光标映射随之错位。
+				keep := cur[:lastSpace+1]
 				rest := append([]rune(nil), cur[lastSpace+1:]...)
-				push(string(keep), start, start+lastSpace, measure(string(keep)))
+				push(string(keep), start, start+lastSpace+1, measure(string(keep)))
 				start += lastSpace + 1
 				cur = rest
 				curW = measure(string(cur))

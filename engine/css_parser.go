@@ -130,13 +130,15 @@ func expandBoxValues(value string) (top, right, bottom, left string) {
 	}
 }
 
-func boxRect(top, right, bottom, left string) Rect {
-	return NewRect(
-		parseLength(left),
-		parseLength(right),
-		parseLength(top),
-		parseLength(bottom),
-	)
+// boxRect 解析四边简写值。任一分量非法（单位不支持等）时返回 ok=false——
+// CSS 语义是「整条声明非法 → 忽略该声明」，而不是把四边清零（清零会抹掉
+// UA 样式给出的 padding/margin）；忽略后仍保留 UA 值，与长写属性同口径。
+func boxRect(top, right, bottom, left string) (Rect, bool) {
+	ts, rs, bs, ls := parseLength(top), parseLength(right), parseLength(bottom), parseLength(left)
+	if ts == nil || rs == nil || bs == nil || ls == nil {
+		return nil, false
+	}
+	return NewRect(ls, rs, ts, bs), true
 }
 
 func parseLength(v string) Size {
@@ -376,7 +378,9 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		}
 	case "margin":
 		t, r, b, l := expandBoxValues(v)
-		comp.SetMargin(boxRect(t, r, b, l))
+		if rect, ok := boxRect(t, r, b, l); ok {
+			comp.SetMargin(rect)
+		}
 	case "margin-top":
 		comp.SetMargin(edgeRect(comp.Margin(), edgeTop, parseLength(v)))
 	case "margin-right":
@@ -387,7 +391,9 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		comp.SetMargin(edgeRect(comp.Margin(), edgeLeft, parseLength(v)))
 	case "padding":
 		t, r, b, l := expandBoxValues(v)
-		comp.SetPadding(boxRect(t, r, b, l))
+		if rect, ok := boxRect(t, r, b, l); ok {
+			comp.SetPadding(rect)
+		}
 	case "padding-top":
 		comp.SetPadding(edgeRect(comp.Padding(), edgeTop, parseLength(v)))
 	case "padding-right":
@@ -398,7 +404,9 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		comp.SetPadding(edgeRect(comp.Padding(), edgeLeft, parseLength(v)))
 	case "border-width":
 		t, r, b, l := expandBoxValues(v)
-		comp.SetBorderStyleWidth(boxRect(t, r, b, l))
+		if rect, ok := boxRect(t, r, b, l); ok {
+			comp.SetBorderStyleWidth(rect)
+		}
 	case "border-color":
 		if c := parseColor(v); c != nil {
 			comp.SetBorderColor(c)
@@ -522,9 +530,11 @@ func setEdge(rect Rect, setter func(Size), v string) {
 }
 
 // edgeRect 返回替换了指定边的 Rect 拷贝。
+// s 为 nil（声明非法：单位不支持等）时原样返回 r——CSS 语义是「非法声明被
+// 忽略」，不是把该边清零（清零会抹掉 UA 样式值，与 setEdge 的处理不一致）。
 func edgeRect(r Rect, edge boxEdge, s Size) Rect {
 	if s == nil {
-		s = NewZeroSize()
+		return r
 	}
 	var l, rt, t, b Size
 	if rr, ok := r.(*rect); ok {
