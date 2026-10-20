@@ -160,8 +160,16 @@ body { margin: 0; }
 <input type="radio" name="g" id="r2">
 </body></html>`
 
+// absDiff 返回两字节之差的绝对值（边框 AA 允许少量偏差）。
+func absDiff(a, b uint8) int {
+	if a > b {
+		return int(a - b)
+	}
+	return int(b - a)
+}
+
 // 像素级外观：未选中 = UA 白底灰边；checkbox 选中 = 强调色方块 + 白色对勾；
-// radio 选中 = 强调色圆环 + 留白 + 实心内圆（口径见 check.go）。
+// radio 选中 = 强调色实心圆点（直径 9px，Chrome 实测），外圈为 UA 灰边。
 func TestCheckedRenderingPixels(t *testing.T) {
 	buf, doc := openBuffered(t, 400, 200, checkPixelPage)
 	c := mustEl(t, doc, "#c")
@@ -194,15 +202,17 @@ func TestCheckedRenderingPixels(t *testing.T) {
 		t.Fatalf("未选中 checkbox 左边框 = %02X%02X%02X%02X, want 767676FF", r, g, b, a)
 	}
 
-	// radio 初始选中：中心强调色、留白为纯白、外环强调色（轴向 4/5/6px）
+	// radio 初始选中：中心与 ±3px 为强调色实心圆（Chrome 13px 控件的圆点直径
+	// 9px），±4px 为圆点边缘（AA 过渡），最外圈是控件自身的 UA 灰边
+	//（Chrome 的 radio 外圈不是强调色环——旧实现多画了一圈 2px 强调色环）。
 	r1x, r1y := box(r1)
 	accent("radio 中心", r1x+6, r1y+6)
-	white("radio 留白", r1x+2, r1y+6) // 距中心 4px，落在留白带内
-	if r, g, b, _ := colorAt(t, buf, r1x+1, r1y+6); b < 200 || r > 60 || g > 120 {
-		t.Fatalf("radio 外环(5px) = %02X%02X%02X, want 蓝色实环", r, g, b)
+	accent("radio 圆点(3px)", r1x+3, r1y+6)
+	if r, g, b, _ := colorAt(t, buf, r1x+2, r1y+6); r > 200 && g > 200 && b > 200 {
+		t.Errorf("radio 圆点边缘(4px) = %02X%02X%02X, want 蓝色（圆点直径 9px）", r, g, b)
 	}
-	if r, g, b, _ := colorAt(t, buf, r1x, r1y+6); r != 0x25 || g != 0x63 || b != 0xEB {
-		t.Fatalf("radio 外环(6px) = %02X%02X%02X, want 2563EB（环覆盖 UA 灰边）", r, g, b)
+	if r, g, b, _ := colorAt(t, buf, r1x, r1y+6); absDiff(r, 0x76) > 10 || absDiff(g, 0x76) > 10 || absDiff(b, 0x76) > 10 {
+		t.Errorf("radio 左边框 = %02X%02X%02X, want 767676（Chrome 外圈是 UA 灰边）", r, g, b)
 	}
 
 	// checkbox 勾选：铺强调色 + 对勾折线白点

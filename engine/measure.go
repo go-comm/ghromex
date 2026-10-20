@@ -643,7 +643,6 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	}
 
 	addItem := func(it lineItem) {
-		flushPendingSpace()
 		if len(curLine) > 0 && it.x+it.w-cx > contentW && contentW > 0 {
 			flushLine()
 			it.x = cursorX
@@ -673,6 +672,12 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				pendingTN = tnc
 			}
 			toks := tokenizeText(raw)
+			if len(toks) > 0 {
+				// 待定空格必须**先落位**再取游标：否则空格的宽度被计入游标，
+				// 而字符仍按冲刷前的游标定位 → 首字与后续字之间凭空多出一段
+				// 空隙（"不接收" 渲染成 "不 接收"）。
+				flushPendingSpace()
+			}
 			for _, tok := range toks {
 				tw, th := g.MeasureText(tok, fontPx, bold, family)
 				if tw <= 0 {

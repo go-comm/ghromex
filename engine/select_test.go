@@ -215,9 +215,26 @@ func TestSelectPopupPixels(t *testing.T) {
 				what, x, y, pr, pg, pb, r, g, b)
 		}
 	}
-	// 收起态：下拉箭头（倒三角首行 x110..116，取其行色），且不越出内容盒
-	check(110, 8, 0x76, 0x76, 0x76, "箭头首行左端")
-	check(113, 10, 0x76, 0x76, 0x76, "箭头末行")
+	// 收起态：下拉箭头为 1px 描边的人字（⌄，9×5，近黑，Chrome 实测），居中
+	// 于右侧 16px 箭头位内；不越出内容盒（右边框仍是 UA 灰边）
+	arrowDark, maxArrowX := 0, -1
+	for x := 100; x < 119; x++ {
+		for y := 0; y < 21; y++ {
+			pr, pg, pb, _, ok := buf.ColorAt(x, y)
+			if ok && pr < 90 && pg < 90 && pb < 90 {
+				arrowDark++
+				if x > maxArrowX {
+					maxArrowX = x
+				}
+			}
+		}
+	}
+	if arrowDark < 6 {
+		t.Errorf("箭头近黑像素 = %d，过少（应为人字形 ⌄）", arrowDark)
+	}
+	if maxArrowX > 116 {
+		t.Errorf("箭头右缘 x=%d 越出箭头位（应 ≤ 116）", maxArrowX)
+	}
 	check(117, 9, 0xFF, 0xFF, 0xFF, "箭头右侧应为空白")
 	check(119, 8, 0x76, 0x76, 0x76, "select 右边框不被箭头覆盖")
 

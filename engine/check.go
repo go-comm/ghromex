@@ -281,25 +281,24 @@ func absInt(v int) int {
 	return v
 }
 
-// fillRadioMark 画选中 radio：外圆环 + 留白 + 内实心圆。半径口径按 Chrome
-// 实测并在 13px 网格上取整到「像素中心落在 ±0.5 AA 带中点」——
-// 内圆 0.54r-0.02（13px → 3.49，轴向实心到 3px）、留白内缘 0.69r+0.02
-// （13px → 4.505，轴向 4px 处为纯白）、外缘 = 控件半径 r（轴向 5-6px 实色环），
-// 即「点 7px + 白缝 1px + 环 2px」。覆盖率 AA 复用 paintCoverage。
+// fillRadioMark 画选中 radio：实心圆点（强调色）。Chrome 实测：选中的 radio
+// 外圈是控件自身的浅灰细边（UA 边框即承担），圆点为 9px 直径的强调色实心圆
+// ——旧实现额外画了一圈 2px 的强调色环且圆点偏小（6px），与浏览器差一截。
 func fillRadioMark(g Graphics, bx, by, bw, bh int, c Color) {
 	cx := float64(bx) + float64(bw)/2
 	cy := float64(by) + float64(bh)/2
 	rOut := math.Min(float64(bw), float64(bh)) / 2
-	rDot := rOut*0.54 - 0.02
-	rGap := rOut*0.69 + 0.02
-	y0 := int(math.Floor(cy-rOut)) - 1
-	y1 := int(math.Ceil(cy+rOut)) + 1
-	x0 := int(math.Floor(cx-rOut)) - 1
-	x1 := int(math.Ceil(cx+rOut)) + 1
+	// Chrome 13px 控件的圆点直径 9px → 半径 0.69r；减 0.02 让像素中心落在
+	// ±0.5 的 AA 带中点（与 paintCoverage 的 SDF 口径一致）。
+	rDot := rOut*0.69 - 0.02
+	y0 := int(math.Floor(cy-rDot)) - 1
+	y1 := int(math.Ceil(cy+rDot)) + 1
+	x0 := int(math.Floor(cx-rDot)) - 1
+	x1 := int(math.Ceil(cx+rDot)) + 1
 	for y := y0; y <= y1; y++ {
 		paintCoverage(g, y, x0, x1, c, func(x int) float64 {
 			d := math.Hypot(float64(x)+0.5-cx, float64(y)+0.5-cy)
-			return math.Max(diskCoverage(d, rDot), annulusCoverage(d, rGap, rOut))
+			return diskCoverage(d, rDot)
 		})
 	}
 }

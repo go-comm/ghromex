@@ -53,22 +53,26 @@ func renderSelectValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p P
 		}
 		g.DrawText(tx, ty, tw, th, p, val)
 	}
-	// 下拉箭头：内容盒右缘内 4px 处的实心倒三角
+	// 下拉箭头：Chrome 实测是 1px 描边的"人字"（⌄，9px 宽 5px 高，近黑），
+	// 居中于右侧 16px 的箭头位内——旧实现画的是实心三角（4 行渐窄），观感
+	// 偏细偏淡。
 	ac := comp.BorderColor()
 	if ac == nil {
 		ac = NewColor(0x76, 0x76, 0x76, 255)
 	}
-	cx := b.x + b.width - 4
-	cy := b.y + (b.height-4)/2
-	if cy < by {
-		cy = by
+	ac = NewColor(0, 0, 0, 255) // Chrome 的箭头为近黑
+	// 人字形：左臂 (0,0)→(4,3)、右臂 (8,0)→(5,3)（9×5 的框内）
+	const aw, ah = 9, 5
+	ax := b.x + b.width - selectArrowWidth + (selectArrowWidth-aw)/2
+	ay := b.y + (b.height-ah)/2
+	if ay < by {
+		ay = by
 	}
-	if cy+4 > by+bh {
-		cy = by + bh - 4
+	if ay+ah > by+bh {
+		ay = by + bh - ah
 	}
-	for i := 0; i < 4; i++ {
-		g.DrawColor(cx-3+i, cy+i, 7-2*i, 1, ac)
-	}
+	drawLinePixels(g, ax, ay, ax+4, ay+3, ac)
+	drawLinePixels(g, ax+8, ay, ax+5, ay+3, ac)
 }
 
 // renderTextareaValue 绘制 textarea 的折行文本与光标。

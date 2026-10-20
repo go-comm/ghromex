@@ -34,8 +34,10 @@
     v1 边界，改进方向 LCD 子像素见 fontcmp 探针，非本页 CSS 可解）
   - radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate 态
     （点击切换、checked 标记、label 激活与 radio 分组互斥已实现）
-  - select 收起态宽 177px（浏览器按选中项内容收缩）、textarea 高 44px
-    （浏览器 rows=2 ≈38px）——v1 固定值，其余内边距/边框与 Chrome 一致
+  - select 收起态按内容收缩（与浏览器一致：文字 + 箭头位），textarea 高 44px
+    （浏览器 rows=2 ≈38px）——v1 固定高度，其余内边距/边框与 Chrome 一致
+  - 选中标记：radio 为 9px 强调色实心圆点 + UA 灰边、checkbox 为强调色方块
+    + 白色对勾（与 Chrome 同构），仅对勾折线形状略有差异
   - 空块自折叠未实现（父-子穿越 margin 折叠已实现：<form> 内首个 <p> 的上边距
     与前一个 <p> 的下边距折叠为 16px，与浏览器一致）
   - 列表标记未实现：ul/ol 缩进（40px）与外边距同浏览器，但无圆点/序号
@@ -93,7 +95,8 @@
 		<h3>偏好</h3>
 		<p><label><input type="radio" name="notice" checked> 接收邮件通知</label></p>
 		<p><label><input type="radio" name="notice"> 不接收</label></p>
-		<p><label><input type="checkbox"> 已阅读并同意条款</label></p>
+		<p><label><input type="checkbox" checked> 已阅读并同意条款</label></p>
+		<p><label><input type="checkbox"> 未勾选（对照用）</label></p>
 
 		<h3>详细资料</h3>
 		<p><label>城市 <select>
