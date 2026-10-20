@@ -1,11 +1,14 @@
 package sdl2
 
-import "unsafe"
+import (
+	"strconv"
+	"unsafe"
+)
 
 // ---------------------------------------------------------------------------
 // 灰度文本 tone 曲线（GHROMEX_CONTRAST，方案 A）
 //
-// 背景（.temp/gray-vs-chrome/report.md 量化）：SDL_ttf 的 blended 输出是
+// 背景（README「渲染段」的矩阵实测）：SDL_ttf 的 blended 输出是
 // FreeType 覆盖度**线性直出**，没有任何 gamma/对比度后处理；Chrome（Skia/
 // DirectWrite）在覆盖度之后还有一道 tone 调整（Skia SkMaskGamma 同类），把
 // 过渡像素推向两端——同样覆盖率观感更"利"。本文件在字形 surface 上做该
@@ -44,9 +47,16 @@ func surfPtr(u uintptr) unsafe.Pointer {
 }
 
 // applyTextContrast 对 blended 字形 surface 施加 tone 曲线（原地修改）。
-// s=0、k≤1 或布局异常时为 no-op；布局参数与 fontcmp 探针同一套偏移
-// （x64 SDL_Surface: w@16 h@20 pitch@24 pixels@32，format@8 → BytesPerPixel@17）。
+// s=0、k≤1 或布局异常时为 no-op。
+//
+// 布局读取按 **64 位** SDL_Surface 写死（w@16 h@20 pitch@24 pixels@32，
+// format@8 → BytesPerPixel@17）：32 位下这套偏移读出的是错位垃圾值，
+// 现有校验未必拦得住——而校验一旦漏过，后续写像素就会破坏内存。故 32 位
+// 直接不做曲线（安全降级），64 位再叠加尺寸/步幅合理性校验兜底。
 func applyTextContrast(s uintptr, k float64) {
+	if strconv.IntSize != 64 {
+		return
+	}
 	if s == 0 || k <= 1 {
 		return
 	}
@@ -55,11 +65,17 @@ func applyTextContrast(s uintptr, k float64) {
 	pitch := int(*(*int32)(surfPtr(s + 24)))
 	base := *(*uintptr)(surfPtr(s + 32))
 	format := *(*uintptr)(surfPtr(s + 8))
-	if w <= 0 || h <= 0 || base == 0 || format == 0 {
+	if w <= 0 || h <= 0 || w > 16384 || h > 16384 || base == 0 || format == 0 {
 		return
 	}
 	bpp := int(*(*uint8)(surfPtr(format + 17)))
-	if bpp < 1 || bpp > 4 || pitch < w*bpp {
+	// 只认 32bpp：blended 实测恒为 32bpp 直通 alpha；8bpp 调色板 surface 的
+	// "覆盖通道"实为调色板索引，改写会毁掉字形。
+	if bpp != 4 {
+		return
+	}
+	// 步幅合理性：行末填充通常 ≤ 数十字节；过大即错位垃圾值。
+	if pitch < w*bpp || pitch > w*bpp+1024 {
 		return
 	}
 	rowAt := func(y int) []byte {

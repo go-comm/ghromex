@@ -136,6 +136,8 @@ func runGrayFidelity(t *testing.T, text, fontPath string) {
 	rw, rh, cov := cmpBlendedCoverage(t, ref, text)
 	// 生产路径在 GHROMEX_CONTRAST>1 时对覆盖施加 tone 曲线（applyTextContrast），
 	// 参照合成前施加同一条曲线，维持"同源直出"的可比性（探针不随默认值漂移）。
+	// 前提是前景不透明（ink alpha=255）：此时 blended 的 alpha 即覆盖度本身；
+	// 若前景带 alpha，surface 的 alpha 是"覆盖×前景alpha"，参照需同乘。
 	if kc := textContrast(); kc > 1 {
 		for i, c := range cov {
 			cov[i] = contrastAlpha(c, kc)

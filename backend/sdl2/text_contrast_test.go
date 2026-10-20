@@ -3,10 +3,13 @@
 package sdl2
 
 import (
+	"bytes"
 	"os"
 	"runtime"
 	"testing"
 	"unsafe"
+
+	"github.com/go-comm/ghromex/engine"
 )
 
 // ---------------------------------------------------------------------------
@@ -76,6 +79,16 @@ func TestTextContrastEnv(t *testing.T) {
 
 // TestFontHintingEnv GHROMEX_HINT 档位映射（灰度档）+ LCD 强制 subpixel 覆盖。
 func TestFontHintingEnv(t *testing.T) {
+	// 自行加载 DLL：hasTTFLCD 只在 Load() 绑定符号后才有值——否则单跑本测试时
+	// 下面的 LCD 覆盖断言会被静默跳过（同进程别的测试先 Load 只是巧合）。
+	if err := Load(); err != nil {
+		t.Skipf("SDL DLL 不可用: %v", err)
+	}
+	if ttfInit() != 0 {
+		t.Skip("TTF_Init 失败")
+	}
+	defer ttfQuit()
+
 	origH, origL := os.Getenv("GHROMEX_HINT"), os.Getenv("GHROMEX_LCD")
 	defer func() {
 		os.Setenv("GHROMEX_HINT", origH)
@@ -249,5 +262,100 @@ func sortBytes(a []uint8) {
 		for j := i; j > 0 && a[j] < a[j-1]; j-- {
 			a[j], a[j-1] = a[j-1], a[j]
 		}
+	}
+}
+
+// TestHintSwitchRebuildsFaceAndTexture 运行中切 GHROMEX_HINT 必须重建 face 与
+// 纹理：hinting 是 face 级状态，若 faceKey/texKey 不含档位，改了环境变量会
+// 命中旧缓存 = 改了没反应（与 GHROMEX_CONTRAST 可运行中切换的语义不一致）。
+func TestHintSwitchRebuildsFaceAndTexture(t *testing.T) {
+	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
+	defer os.Unsetenv("SDL_VIDEO_DRIVER")
+	os.Setenv("GHROMEX_LCD", "0")
+	defer os.Unsetenv("GHROMEX_LCD")
+	origH := os.Getenv("GHROMEX_HINT")
+	defer os.Setenv("GHROMEX_HINT", origH)
+
+	win, err := NewWindow(300, 80, "hint-switch")
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	defer win.Close()
+	g := win.g
+
+	draw := func() []byte {
+		g.Clear(255, 255, 255, 255)
+		p := engine.NewPaint()
+		p.SetSize(engine.NewSize(engine.SIZE_PIXEL, 13, 0))
+		p.SetColor(engine.NewColor(30, 30, 30, 255))
+		g.DrawText(8, 24, 280, 20, p, "灰度Hint")
+		g.Present()
+		buf, _, _, _, err := win.Screenshot()
+		if err != nil {
+			t.Fatalf("Screenshot: %v", err)
+		}
+		return buf
+	}
+
+	os.Setenv("GHROMEX_HINT", "light")
+	light := draw()
+	faces1, texs1 := len(g.faces), len(g.textures)
+
+	os.Setenv("GHROMEX_HINT", "none")
+	none := draw()
+	if bytes.Equal(light, none) {
+		t.Fatal("切 GHROMEX_HINT 后落屏像素完全相同：face/纹理未按档位重建")
+	}
+	if len(g.faces) <= faces1 {
+		t.Errorf("face 未重建（faceKey 不含 hint 档位）: %d → %d", faces1, len(g.faces))
+	}
+	if len(g.textures) <= texs1 {
+		t.Errorf("纹理未重建（texKey 不含 hint 档位）: %d → %d", texs1, len(g.textures))
+	}
+}
+
+// TestContrastSwitchRebuildsTexture 运行中切 GHROMEX_CONTRAST 必须重建纹理：
+// 曲线是在字形 surface 上原地施加的，缓存不失效就会继续贴旧字形。
+func TestContrastSwitchRebuildsTexture(t *testing.T) {
+	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
+	defer os.Unsetenv("SDL_VIDEO_DRIVER")
+	os.Setenv("GHROMEX_LCD", "0")
+	defer os.Unsetenv("GHROMEX_LCD")
+	os.Setenv("GHROMEX_HINT", "normal")
+	origC := os.Getenv("GHROMEX_CONTRAST")
+	defer os.Setenv("GHROMEX_CONTRAST", origC)
+
+	win, err := NewWindow(300, 80, "contrast-switch")
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	defer win.Close()
+	g := win.g
+
+	draw := func() []byte {
+		g.Clear(255, 255, 255, 255)
+		p := engine.NewPaint()
+		p.SetSize(engine.NewSize(engine.SIZE_PIXEL, 13, 0))
+		p.SetColor(engine.NewColor(30, 30, 30, 255))
+		g.DrawText(8, 24, 280, 20, p, "灰度Hint")
+		g.Present()
+		buf, _, _, _, err := win.Screenshot()
+		if err != nil {
+			t.Fatalf("Screenshot: %v", err)
+		}
+		return buf
+	}
+
+	os.Setenv("GHROMEX_CONTRAST", "off")
+	off := draw()
+	texs1 := len(g.textures)
+
+	os.Setenv("GHROMEX_CONTRAST", "1.5")
+	on := draw()
+	if bytes.Equal(off, on) {
+		t.Fatal("切 GHROMEX_CONTRAST 后落屏像素完全相同：纹理未按曲线档位重建")
+	}
+	if len(g.textures) <= texs1 {
+		t.Errorf("纹理未重建（texKey 不含 contrast 档位）: %d → %d", texs1, len(g.textures))
 	}
 }

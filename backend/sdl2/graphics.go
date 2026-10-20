@@ -206,6 +206,10 @@ type faceKey struct {
 	path string
 	size int
 	bold bool
+	// hint = hinting 档位（fontHinting()）：hinting 是 face 级状态，档位进了
+	// key 才能在运行中切 GHROMEX_HINT 时重建 face（否则改了环境变量无效果，
+	// 与 GHROMEX_CONTRAST 可运行中切换的语义不一致）。
+	hint uint8
 }
 
 type fontFace struct {
@@ -230,7 +234,7 @@ func lcdText() bool {
 // 进程启动前设定的环境变量才对全部 face 生效）。LCD 强制 LIGHT_SUBPIXEL
 // （子像素分解依赖该档位）；灰度路径按 GHROMEX_HINT 选档：
 // normal|light|mono|none，默认/非法值 = normal。
-// 默认 normal 的依据（.temp/gray-vs-chrome 矩阵实测 vs Chrome 灰度基线）：
+// 默认 normal 的依据（README「渲染段」的矩阵实测 vs Chrome 灰度基线）：
 // CJK13 hardH 7≈0（Chrome 0，竖画无锯齿）、hardV 237≈227（横画利）、ink 412
 // 接近 Chrome 347——是全部候选里与 Chrome 轮廓最同构的一档；light 纵向更软
 // （hardV 75，即"糊"的来源）。回退/扫描用 GHROMEX_HINT=light|none|mono。
@@ -275,8 +279,11 @@ type texKey struct {
 	size     int
 	bold     bool
 	lcd      bool
+	// hint = hinting 档位（fontHinting()）：同 faceKey 的理由——运行中切
+	// GHROMEX_HINT 后必须重建纹理，否则仍命中旧 hinting 栅格化的缓存。
+	hint uint8
 	// contrast = textContrast()×100（灰度路径的 tone 曲线档位）：随环境变量
-	// 变化重建纹理，避免切换后仍命中旧缓存。LCD 路径不施加曲线（值恒同）。
+	// 变化重建纹理，避免切换后仍命中旧缓存。LCD 路径不施加曲线（恒记 0）。
 	contrast   uint16
 	r, g, b, a uint8
 	// 落点背景色（LCD 合成用；背景不同必须分别缓存）
@@ -339,10 +346,11 @@ func (g *Graphics) resolveFontPath(family string) string {
 	return g.standardFont
 }
 
-// face 取得（并按需创建/切换）字体句柄。reuseFaces 时一个文件一个 face，
-// 用 TTF_SetFontSize / TTF_SetFontStyle 动态切换，避免同一 TTC 按字号重复加载。
+// face 取得（并按需创建/切换）字体句柄。reuseFaces 时一个 (文件, hinting
+// 档位) 一个 face，用 TTF_SetFontSize / TTF_SetFontStyle 动态切换，避免同一
+// TTC 按字号重复加载；hinting 档位进 key 是为支持运行中切 GHROMEX_HINT。
 func (g *Graphics) face(path string, size int, bold bool) *fontFace {
-	key := faceKey{path: path}
+	key := faceKey{path: path, hint: uint8(fontHinting())}
 	if !g.reuseFaces {
 		key.size, key.bold = size, bold
 	}
@@ -471,9 +479,14 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 	}
 	lcd := lcdText()
 	kc := textContrast()
+	if lcd {
+		kc = 0 // LCD 纹理在 DLL 内已合成，tone 曲线不适用（也不该因它重建缓存）
+	}
+	hint := uint8(fontHinting())
 	for _, seg := range segs {
 		path := g.segFontPath(seg, family)
 		key := texKey{fontPath: path, text: seg.text, size: size, bold: bold, lcd: lcd,
+			hint:     hint,
 			contrast: uint16(kc * 100),
 			r:        cr, g: cg, b: cb, a: ca, br: br, bg: bg, bb: bb}
 		info, ok := g.textures[key]
