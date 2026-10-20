@@ -185,8 +185,7 @@ func borderBoxRect(b *htmlElement) (x, y, w, h int) {
 	if b.computed == nil {
 		return b.x, b.y, b.width, b.height
 	}
-	bd := resolveEdgeRect(b.computed.BorderStyleWidth(), 0, 0)
-	pd := resolveEdgeRect(b.computed.Padding(), 0, 0)
+	pd, bd := resolvedEdges(b, b.computed)
 	return b.x - pd[eLeft] - bd[eLeft], b.y - pd[eTop] - bd[eTop],
 		b.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight],
 		b.height + pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom]
@@ -253,7 +252,7 @@ func layoutSelectOptions(g Graphics, sel *htmlElement, vw, vh int) {
 	y := by + bh
 	for _, o := range opts {
 		ob := inner(o)
-		layoutBox(g, ob, bw, maxInt(vh, 0), bx, y, bw)
+		layoutBox(g, ob, bw, maxInt(vh, 0), bx, y, bw, vh)
 		y += ob.layoutH
 	}
 	total := y - (by + bh)
@@ -299,8 +298,7 @@ func boxContains(b *htmlElement, x, y int) bool {
 	}
 	var bd, pd edges
 	if b.computed != nil {
-		bd = resolveEdgeRect(b.computed.BorderStyleWidth(), 0, 0)
-		pd = resolveEdgeRect(b.computed.Padding(), 0, 0)
+		pd, bd = resolvedEdges(b, b.computed)
 	}
 	l := b.x - pd[eLeft] - bd[eLeft]
 	t := b.y - pd[eTop] - bd[eTop]

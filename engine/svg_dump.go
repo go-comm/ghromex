@@ -61,7 +61,7 @@ func ancestorSVGClips(e HTMLElement, ctr *int) []svgClip {
 
 // makeSVGClip 为元素的 padding 盒注册一个 clipPath 并返回引用。
 func makeSVGClip(base *htmlElement, ctr *int) svgClip {
-	pd := resolveEdgeRect(base.computed.Padding(), 0, 0)
+	pd, _ := resolvedEdges(base, base.computed)
 	r := clipRect{
 		x: base.x - pd[eLeft], y: base.y - pd[eTop],
 		w: base.width + pd[eLeft] + pd[eRight],
@@ -170,8 +170,7 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 	}
 
 	if comp != nil {
-		bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
-		pd := resolveEdgeRect(comp.Padding(), 0, 0)
+		pd, bd := resolvedEdges(base, comp)
 		bx := base.x - pd[eLeft] - bd[eLeft]
 		by := base.y - pd[eTop] - bd[eTop]
 		bw := base.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
@@ -217,8 +216,7 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 	}
 
 	if comp != nil && isFormControl(base) {
-		bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
-		pd := resolveEdgeRect(comp.Padding(), 0, 0)
+		pd, bd := resolvedEdges(base, comp)
 		dumpControlText(b, base, comp,
 			base.x-pd[eLeft]-bd[eLeft], base.y-pd[eTop]-bd[eTop],
 			base.width+pd[eLeft]+pd[eRight]+bd[eLeft]+bd[eRight],

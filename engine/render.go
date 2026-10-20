@@ -137,7 +137,7 @@ func pushAncestorClips(g Graphics, e HTMLElement) int {
 	n := 0
 	for i := len(chain) - 1; i >= 0; i-- {
 		b := chain[i]
-		pd := resolveEdgeRect(b.computed.Padding(), 0, 0)
+		pd, _ := resolvedEdges(b, b.computed)
 		if pushClip(g, b.x-pd[eLeft], b.y-pd[eTop],
 			b.width+pd[eLeft]+pd[eRight], b.height+pd[eTop]+pd[eBottom]) {
 			n++
@@ -233,8 +233,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 
 	// 元素：背景与边框（外扩到边框盒）
 	if comp != nil {
-		bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
-		pd := resolveEdgeRect(comp.Padding(), 0, 0)
+		pd, bd := resolvedEdges(base, comp)
 		bx := base.x - pd[eLeft] - bd[eLeft]
 		by := base.y - pd[eTop] - bd[eTop]
 		bw := base.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]

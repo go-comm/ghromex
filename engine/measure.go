@@ -15,7 +15,7 @@ func MeasureNode(g Graphics, node HTMLElement, mw, mh int) {
 	if base.computed == nil {
 		resolveStylesTree(node, nil, nil)
 	}
-	layoutBox(g, base, mw, mh, 0, 0, mw)
+	layoutBox(g, base, mw, mh, 0, 0, mw, mh)
 	layoutPositioned(g, base, mw, mh)
 	applyScrollOffsets(g, node, mw, mh)
 	layoutSelectPopups(g, node, mw, mh)
@@ -32,7 +32,7 @@ func MeasureDocumentWithStylesheet(g Graphics, doc HTMLDocument, mw, mh int) {
 		sheet = d.sheet
 	}
 	resolveStylesTree(doc, nil, sheet)
-	layoutBox(g, base, mw, mh, 0, 0, mw)
+	layoutBox(g, base, mw, mh, 0, 0, mw, mh)
 	layoutPositioned(g, base, mw, mh)
 	applyScrollOffsets(g, doc, mw, mh)
 	layoutSelectPopups(g, doc, mw, mh)
@@ -51,16 +51,34 @@ const (
 	eLeft
 )
 
-func resolveEdgeRect(r Rect, baseW, baseH int) edges {
+// resolveEdgeRect 解析盒模型四边。百分比**一律按包含块宽度**解析
+// （CSS 2.1 §8.3.2：margin/padding 的百分比相对包含块宽度，纵向边也不
+// 例外）——旧实现纵向用 baseH（高度），与 CSS 及 Chrome 不符。
+func resolveEdgeRect(r Rect, baseW int) edges {
 	var e edges
 	if r == nil {
 		return e
 	}
-	e[eTop] = maxZero(resolveLen(r.Top(), baseH))
+	e[eTop] = maxZero(resolveLen(r.Top(), baseW))
 	e[eRight] = maxZero(resolveLen(r.Right(), baseW))
-	e[eBottom] = maxZero(resolveLen(r.Bottom(), baseH))
+	e[eBottom] = maxZero(resolveLen(r.Bottom(), baseW))
 	e[eLeft] = maxZero(resolveLen(r.Left(), baseW))
 	return e
+}
+
+// resolvedEdges 返回元素布局期解析出的 padding/border 边长；未布局过
+// （display:none 等）则按 0 基数现算。绘制、命中、SVG 导出三处必须走
+// 这里，保证"布局算出的盒"与"画出来的盒"是同一个盒。
+func resolvedEdges(el *htmlElement, comp CSSStyleDeclaration) (pd, bd edges) {
+	if el != nil && el.hasRsv {
+		return el.rsvPD, el.rsvBD
+	}
+	if comp == nil {
+		return
+	}
+	pd = resolveEdgeRect(comp.Padding(), 0)
+	bd = resolveEdgeRect(comp.BorderStyleWidth(), 0)
+	return
 }
 
 func maxZero(v int) int {
@@ -114,23 +132,24 @@ func shiftInlineX(e HTMLElement, dx int) {
 // outerBoxW 返回元素真实外边距盒宽（内容宽 + padding + border + margin）。
 // layoutBox 对 block 子返回的是"占位空间宽"，不能用作真实宽度
 // （shrink-wrap 统计与 right 锚定回推均需真实值）。
-func outerBoxW(el *htmlElement) int {
+// baseW 为 margin 百分比的包含块宽度基数（须与布局期同口径，否则
+// 百分比 margin 的盒宽与实际排版不符）。
+func outerBoxW(el *htmlElement, baseW int) int {
 	if el == nil {
 		return 0
 	}
 	if el.computed == nil {
 		return el.width
 	}
-	mg := resolveEdgeRect(el.computed.Margin(), 0, 0)
-	bd := resolveEdgeRect(el.computed.BorderStyleWidth(), 0, 0)
-	pd := resolveEdgeRect(el.computed.Padding(), 0, 0)
+	mg := resolveEdgeRect(el.computed.Margin(), baseW)
+	pd, bd := resolvedEdges(el, el.computed)
 	return el.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight] + mg[eLeft] + mg[eRight]
 }
 
 // inputButtonTextWidth 返回表单控件「内容随文本收缩」时的外盒宽
 // （文本 + padding + border，与 UA border-box 尺寸同口径；
 // layoutBox 会再扣 padding/border 得内容宽）；不适用返回 -1。
-func inputButtonTextWidth(g Graphics, el *htmlElement, comp CSSStyleDeclaration) int {
+func inputButtonTextWidth(g Graphics, el *htmlElement, comp CSSStyleDeclaration, pctW int) int {
 	if comp == nil || el == nil {
 		return -1
 	}
@@ -154,14 +173,14 @@ func inputButtonTextWidth(g Graphics, el *htmlElement, comp CSSStyleDeclaration)
 		fontPx = s
 	}
 	w, _ := g.MeasureText(text, fontPx, comp.FontWeight() == FontWeightBold, comp.FontFamily())
-	bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
-	pd := resolveEdgeRect(comp.Padding(), 0, 0)
+	bd := resolveEdgeRect(comp.BorderStyleWidth(), pctW)
+	pd := resolveEdgeRect(comp.Padding(), pctW)
 	return w + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
 }
 
 // defaultFormControlHeight 为 height:auto 的原子表单控件给出内容盒兜底高度
 // （字体行高 + padding + border），避免空控件塌缩成 0 高。
-func defaultFormControlHeight(g Graphics, comp CSSStyleDeclaration) int {
+func defaultFormControlHeight(g Graphics, comp CSSStyleDeclaration, pctW int) int {
 	if g == nil || comp == nil {
 		return 21
 	}
@@ -173,8 +192,8 @@ func defaultFormControlHeight(g Graphics, comp CSSStyleDeclaration) int {
 	if h <= 0 {
 		h = fontPx
 	}
-	pd := resolveEdgeRect(comp.Padding(), 0, 0)
-	bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
+	pd := resolveEdgeRect(comp.Padding(), pctW)
+	bd := resolveEdgeRect(comp.BorderStyleWidth(), pctW)
 	h += pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom]
 	if h <= 0 {
 		h = 21
@@ -185,9 +204,11 @@ func defaultFormControlHeight(g Graphics, comp CSSStyleDeclaration) int {
 // layoutBox 布局一个元素盒。
 // outerW/outerH 为该盒在父容器内容区内可用的外边距盒空间；
 // ox/oy 为外边距盒原点；pctW 为百分比解析基数（包含块内容宽，CSS 规定百分比
-// width/padding 等相对包含块而非行内剩余空间，inline 分支不得混用）。
+// width/padding 等相对包含块而非行内剩余空间，inline 分支不得混用）；
+// pctH 为**高度**百分比的解析基数（包含块内容高；<0 表示包含块高度不确定，
+// 此时百分比高度按 auto 处理，CSS 2.1 §10.5）。
 // 返回外边距盒宽高，并写入内容盒的 x/y/width/height 与 layoutH。
-func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW int) (retW, retH int) {
+func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH int) (retW, retH int) {
 	comp := el.computed
 	if comp == nil {
 		comp = newStyle()
@@ -200,9 +221,13 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW int) (r
 		return 0, 0
 	}
 
-	mg := resolveEdgeRect(comp.Margin(), pctW, outerH)
-	bd := resolveEdgeRect(comp.BorderStyleWidth(), pctW, outerH)
-	pd := resolveEdgeRect(comp.Padding(), pctW, outerH)
+	mg := resolveEdgeRect(comp.Margin(), pctW)
+	bd := resolveEdgeRect(comp.BorderStyleWidth(), pctW)
+	pd := resolveEdgeRect(comp.Padding(), pctW)
+	// 缓存布局期解析出的边长：绘制、命中测试与 SVG 导出必须复用同一份——
+	// 否则百分比 padding 在布局期按百分比算、在绘制期按 0 算，背景/边框会画
+	// 在错误的盒上，命中框也与绘制框不符。
+	el.rsvPD, el.rsvBD, el.hasRsv = pd, bd, true
 
 	// 内容宽度。box-sizing:border-box 时显式 width/height 含 padding+border（不含 margin）。
 	borderBox := comp.BoxSizing() == BoxSizingBorderBox
@@ -216,7 +241,7 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW int) (r
 	}
 	shrinkWrap := false
 	if contentW < 0 { // auto
-		if w := inputButtonTextWidth(g, el, comp); w >= 0 {
+		if w := inputButtonTextWidth(g, el, comp, pctW); w >= 0 {
 			// input[submit/reset/button]：auto 宽按 value 文本测量（空元素
 			// 无子节点，常规 shrink-to-fit 拿不到文字宽）。返回的是外盒宽
 			//（文本+padding+border），按 border-box 语义扣减后即为内容宽——
@@ -244,6 +269,27 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW int) (r
 	el.setY(cy)
 
 	remainH := outerH - mg[eTop] - mg[eBottom] - bd[eTop] - bd[eBottom] - pd[eTop] - pd[eBottom]
+
+	// 自身声明高度（能确定时）。必须在排子元素**之前**算出：子元素的百分比
+	// 高度以包含块（= 本元素）的内容高为基数，CSS 2.1 §10.5。
+	// 百分比高度在包含块高度不确定（auto）时按 auto 处理。
+	declaredH := -1
+	if h := comp.Height(); h != nil {
+		if h.Type() == SIZE_PERCENT {
+			if pctH >= 0 {
+				declaredH = resolveLen(h, pctH)
+			}
+		} else {
+			declaredH = resolveLen(h, pctH)
+		}
+	}
+	if declaredH >= 0 && borderBox {
+		if ch := declaredH - pd[eTop] - pd[eBottom] - bd[eTop] - bd[eBottom]; ch > 0 {
+			declaredH = ch
+		} else {
+			declaredH = 0
+		}
+	}
 	// shrink-to-fit 盒的可用宽是收缩前的临时值，按它居中会把文本 run
 	// 推到最终收缩后的盒外；而收缩后单行本就铺满盒宽，强制左对齐等价。
 	align := comp.TextAlign()
@@ -257,25 +303,21 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW int) (r
 		// 其滚动量度不在此（textarea 走 layoutTextarea 的行数×行高）。
 		flowW, flowH = 0, 0
 	} else {
-		flowW, flowH = layoutChildren(g, el, contentW, remainH, cx, cy, align)
+		// 子元素的百分比高度基数 = 本元素内容高（declaredH；auto 时为 -1
+		// 表示包含块高度不确定，子元素的百分比高按 auto 处理）。
+		flowW, flowH = layoutChildren(g, el, contentW, remainH, declaredH, cx, cy, align)
 	}
 	// 未裁剪内容尺寸：overflow 滚动的夹紧依据（每轮布局重算，滚动偏移
 	// 由 applyScrollOffsets 按它 clamp）。
 	el.contentW, el.contentH = flowW, flowH
 
-	contentH := resolveLen(comp.Height(), outerH)
+	contentH := declaredH
 	if contentH < 0 {
 		contentH = flowH
 		if contentH <= 0 && isAtomicFormControl(el) {
 			// UA 未给高度（作者 height:auto）时按字体行高撑开，
 			// 否则空控件会塌缩成 0 高不可见。
-			contentH = defaultFormControlHeight(g, comp)
-		}
-	} else if borderBox {
-		if ch := contentH - pd[eTop] - pd[eBottom] - bd[eTop] - bd[eBottom]; ch > 0 {
-			contentH = ch
-		} else {
-			contentH = 0
+			contentH = defaultFormControlHeight(g, comp, pctW)
 		}
 	}
 
@@ -346,7 +388,7 @@ func containingBlock(el *htmlElement, vw, vh int) (x, y, w, h int) {
 			continue
 		}
 		// 祖先自身也是 fixed 时 CSS 仍作包含块；relative/absolute 用其 padding box。
-		pd := resolveEdgeRect(pb.computed.Padding(), 0, 0)
+		pd, _ := resolvedEdges(pb, pb.computed)
 		return pb.x - pd[eLeft], pb.y - pd[eTop],
 			pb.width + pd[eLeft] + pd[eRight], pb.height + pd[eTop] + pd[eBottom]
 	}
@@ -411,14 +453,15 @@ func layoutAbsBox(g Graphics, e HTMLElement, el *htmlElement, vw, vh int) {
 	}
 
 	// layoutBox 对 block 返回的占位空间宽不可用于锚定回推，忽略之。
-	_, oh := layoutBox(g, el, maxInt(availX, 0), maxInt(availY, 0), ox, oy, cbW)
+	// 高度百分比以包含块高度 cbH 为基数（CSS 2.1 §10.5）——不是"剩余可用
+	// 高度"：同一元素只改 top 就不该得到不同的高度。
+	_, oh := layoutBox(g, el, maxInt(availX, 0), maxInt(availY, 0), ox, oy, cbW, cbH)
 	if !lok && rok {
 		// right 锚定：目标右缘 cbX+cbW-r 减去盒子当前位置（ox+真实宽）。
 		// 注意必须含 ox：包含块不在原点时漏它会整体偏移 ox（CB 在 (40,40)
 		// 的回归用例锁定）。
-		mg := resolveEdgeRect(comp.Margin(), 0, 0)
-		bd := resolveEdgeRect(comp.BorderStyleWidth(), 0, 0)
-		pd := resolveEdgeRect(comp.Padding(), 0, 0)
+		mg := resolveEdgeRect(comp.Margin(), cbW)
+		pd, bd := resolvedEdges(el, comp)
 		realW := el.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight] + mg[eLeft] + mg[eRight]
 		shiftBox(e, cbX+cbW-r-(ox+realW), 0)
 	}
@@ -430,18 +473,23 @@ func layoutAbsBox(g Graphics, e HTMLElement, el *htmlElement, vw, vh int) {
 
 // applyRelativeOffset 对已在常规流中布局完成的 relative 盒施加 inset 偏移。
 // left/top 为正向偏移；仅给 right/bottom 时反向（CSS 取 -right/-bottom）。
-// 偏移量可正可负；百分比 v1 不支持（base 传 0 自然归 0）。
-func applyRelativeOffset(e HTMLElement, el *htmlElement) {
+// 百分比基数为**包含块宽度**（Chrome 口径：relative 的纵向 inset 百分比
+// 也按宽度算）；vw 为无父元素时的兜底（视口宽）。
+func applyRelativeOffset(e HTMLElement, el *htmlElement, vw int) {
 	in := el.computed.Inset()
+	base := vw
+	if p := inner(el.parentElement); p != nil {
+		base = p.width
+	}
 	dx, dy := 0, 0
-	if v, ok := resolveInset(in.Left(), 0); ok {
+	if v, ok := resolveInset(in.Left(), base); ok {
 		dx = v
-	} else if v, ok := resolveInset(in.Right(), 0); ok {
+	} else if v, ok := resolveInset(in.Right(), base); ok {
 		dx = -v
 	}
-	if v, ok := resolveInset(in.Top(), 0); ok {
+	if v, ok := resolveInset(in.Top(), base); ok {
 		dy = v
-	} else if v, ok := resolveInset(in.Bottom(), 0); ok {
+	} else if v, ok := resolveInset(in.Bottom(), base); ok {
 		dy = -v
 	}
 	shiftBox(e, dx, dy)
@@ -459,7 +507,7 @@ func layoutPositioned(g Graphics, el *htmlElement, vw, vh int) {
 		case PositionAbsolute, PositionFixed:
 			layoutAbsBox(g, child, che, vw, vh)
 		case PositionRelative:
-			applyRelativeOffset(child, che)
+			applyRelativeOffset(child, che, vw)
 		}
 		layoutPositioned(g, che, vw, vh)
 	}
@@ -479,7 +527,10 @@ type lineItem struct {
 	h     int
 }
 
-func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int, align TextAlign) (flowW, flowH int) {
+// layoutChildren 排布子节点。contentH 为父内容区的**可用**高度（auto 高度
+// 撑开时逐行消耗）；pctH 为子元素高度百分比的基数（父元素内容高，<0 表示
+// 包含块高度不确定 → 子的百分比高按 auto 处理）。
+func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, cy int, align TextAlign) (flowW, flowH int) {
 	cursorX := cx
 	cursorY := cy
 	lineH := 0
@@ -583,11 +634,11 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int,
 			// 游标已含前兄 mb（layoutH 含 margin），回退两者较小值即等效。
 			// 仅 px 生效（上下 margin 百分比 v1 不支持，解析基不一致）。
 			// v1 未实现：父-子穿越折叠、空块自折叠。
-			mgc := resolveEdgeRect(che.computed.Margin(), contentW, maxZero(contentH-(cursorY-cy)))
+			mgc := resolveEdgeRect(che.computed.Margin(), contentW)
 			if prevBlockMB >= 0 {
 				cursorY -= minInt(prevBlockMB, mgc[eTop])
 			}
-			layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW)
+			layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH)
 			cursorY += che.layoutH
 			prevBlockMB = mgc[eBottom]
 			// 块子的真实外盒宽计入 shrink-wrap 宽度统计：游标换行后复位到 cx，
@@ -595,9 +646,9 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int,
 			// 非裁剪盒（overflow:visible）另按「未裁剪内容宽」参与 maxRight：
 			// 祖先的 contentW 链式传播到根元素，是文档级横向滚动（宽块溢出
 			// 视口）的依据；overflow 非 visible 的盒自身即裁剪边界，内容不外传。
-			w := cx + outerBoxW(che)
+			w := cx + outerBoxW(che, contentW)
 			if !isClippingBox(che) {
-				if ext := che.contentW + (outerBoxW(che) - che.width); ext > w-cx {
+				if ext := che.contentW + (outerBoxW(che, contentW) - che.width); ext > w-cx {
 					w = cx + ext
 				}
 			}
@@ -612,13 +663,13 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, cx, cy int,
 		if remain < 0 {
 			remain = 0
 		}
-		ow, oh := layoutBox(g, che, remain, maxZero(contentH-(cursorY-cy)), cursorX, cursorY, contentW)
+		ow, oh := layoutBox(g, che, remain, maxZero(contentH-(cursorY-cy)), cursorX, cursorY, contentW, pctH)
 		if ow <= 0 && oh <= 0 {
 			continue // 零尺寸且无外盒的原子盒（如空 head）不占行高
 		}
 		if len(curLine) > 0 && cursorX+ow-cx > contentW && contentW > 0 {
 			flushLine()
-			ow, oh = layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW)
+			ow, oh = layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH)
 		}
 		it := lineItem{x: cursorX, y: cursorY, w: maxInt(ow, 1), h: maxInt(oh, 1), el: che}
 		addItem(it)

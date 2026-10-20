@@ -132,6 +132,13 @@ type htmlElement struct {
 	//（其内容量度走各自专用路径）。
 	contentW int
 	contentH int
+	// rsvPD/rsvBD 为布局期解析出的 padding/border 边长（百分比按包含块
+	// 宽度解析）。绘制与命中必须复用同一份：百分比 padding 在布局期按
+	// 百分比算、在绘制期若按 0 基数算，背景/边框就会画在错误的盒上，
+	// 命中框也会与绘制框不符。hasRsv 为 false 表示尚未布局（display:none
+	// 等），此时按 0 基数现算。
+	rsvPD, rsvBD edges
+	hasRsv       bool
 }
 
 func (element *htmlElement) TagName() string {
@@ -387,35 +394,14 @@ func (element *htmlElement) GetBoundingClientRect() Rect {
 	w := element.width
 	h := element.height
 	if comp != nil {
-		b := comp.BorderStyleWidth()
-		p := comp.Padding()
-		// 边长取像素值。样式边集可能是 nil（外部 API 可塞入非法值；非法
-		// 声明已由 CSS 解析层忽略，但这里仍需自保）——直接 .Pixel() 会空指针
-		// 崩溃，而本函数在每次点击的命中测试里都会走到。
-		px := func(r Rect, edge boxEdge) int {
-			if r == nil {
-				return 0
-			}
-			var s Size
-			switch edge {
-			case edgeTop:
-				s = r.Top()
-			case edgeRight:
-				s = r.Right()
-			case edgeBottom:
-				s = r.Bottom()
-			default:
-				s = r.Left()
-			}
-			if s == nil {
-				return 0
-			}
-			return s.Pixel()
-		}
-		l -= px(b, edgeLeft) + px(p, edgeLeft)
-		t -= px(b, edgeTop) + px(p, edgeTop)
-		w += px(p, edgeLeft) + px(p, edgeRight) + px(b, edgeLeft) + px(b, edgeRight)
-		h += px(p, edgeTop) + px(p, edgeBottom) + px(b, edgeTop) + px(b, edgeBottom)
+		// 边长用布局期解析出的值（百分比按包含块宽度解析）——命中框必须与
+		// 绘制出的边框盒是同一个盒；未布局时按 0 基数现算（resolveLen 对
+		// nil 安全，不会像直接 .Pixel() 那样空指针崩溃）。
+		pd, bd := resolvedEdges(element, comp)
+		l -= pd[eLeft] + bd[eLeft]
+		t -= pd[eTop] + bd[eTop]
+		w += pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
+		h += pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom]
 	}
 	return NewRect(NewSize(SIZE_PIXEL, l, 0), NewSize(SIZE_PIXEL, l+w, 0),
 		NewSize(SIZE_PIXEL, t, 0), NewSize(SIZE_PIXEL, t+h, 0))

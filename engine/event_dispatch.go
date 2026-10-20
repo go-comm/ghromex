@@ -31,7 +31,7 @@ func ElementAt(root HTMLElement, x, y int) HTMLElement {
 				hit = child
 				next := clips
 				if cb := inner(child); cb != nil && isClippingBox(cb) {
-					pd := resolveEdgeRect(cb.computed.Padding(), 0, 0)
+					pd, _ := resolvedEdges(cb, cb.computed)
 					next = append(append([]clipRect{}, clips...), clipRect{
 						x: cb.x - pd[eLeft], y: cb.y - pd[eTop],
 						w: cb.width + pd[eLeft] + pd[eRight],
