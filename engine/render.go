@@ -263,6 +263,22 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 			strokeRoundedRect(g, bx, by, bw, bh, r, edges{1, 1, 1, 1}, focusBlue)
 		}
 
+		// 列表标记：引擎无 list-item 概念，标记文本由布局期算出（ul → "•"，
+		// ol → "1." "2."…），画在内容左缘左侧、右对齐到 −0.5em 处
+		//（Chrome 实测：标记盒右缘 = 内容左缘 − 0.5em）。
+		if base.listMarker != "" {
+			fpx, fbold, ffam := fontOf(comp)
+			mw, mh := g.MeasureText(base.listMarker, fpx, fbold, ffam)
+			// 标记盒右缘 = 内容左缘 − 0.75em（Chrome 实测：disc 圆点约 −14px、
+			// decimal 序号约 −10px，取中间值；字体不同 bearings 也有差异）
+			mx := base.x - fpx*3/4 - mw
+			my := base.y
+			if mh < base.height {
+				my += (base.height - mh) / 2
+			}
+			g.DrawText(mx, my, mw, mh, p, base.listMarker)
+		}
+
 		// overflow 非 visible：裁剪区为 padding 盒（CSS 语义），包住下方
 		// 的控件内容与全部子元素；非 Clipper 后端或退化盒（w/h ≤ 0）此处
 		// 不压栈，clipped 保持 false 与 popClip 严格配对。

@@ -208,6 +208,25 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 		}
 	}
 
+	// 列表标记：与渲染路径同口径（内容左缘 −0.75em，右对齐到标记盒右缘），
+	// 否则 SVG 导出与屏幕渲染不同构（看不到圆点/序号）。
+	if base.listMarker != "" {
+		fpx, _, ffam := fontOf(comp)
+		mw, mh := fakeMeasureText(base.listMarker, fpx)
+		mx := base.x - fpx*3/4 - mw
+		my := base.y
+		if mh < base.height {
+			my += (base.height - mh) / 2
+		}
+		fill := "#000000"
+		if c := comp.Color(); c != nil {
+			r, g, bl, _ := c.RGBA()
+			fill = hexColor(r, g, bl)
+		}
+		fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d" font-family="%s" fill="%s">%s</text>`+"\n",
+			mx, my+mh, fpx, escapeXML(svgFontStack(ffam)), fill, escapeXML(base.listMarker))
+	}
+
 	// overflow 非 visible：控件文本与子树包进 clip-path（与渲染路径同构）。
 	// 边框在裁剪外，已在上方输出；clipPath 定义就地内联（不渲染）。
 	clipped := isClippingBox(base)

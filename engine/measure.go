@@ -738,6 +738,11 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				c.mbAbsorbed = true
 			}
 			che.effTop, che.effBot, che.hasEff = effTop, effBot, true
+			// 列表标记：引擎无 list-item 概念，按父级 ul/ol 自行计算（Chrome:
+			// ul → disc，ol → decimal 序号），绘制时画在内容左缘左侧。
+			if strings.EqualFold(che.tagName, "li") {
+				che.listMarker = listMarkerFor(el, che)
+			}
 
 			if prevBlockMB >= 0 {
 				cursorY -= minInt(prevBlockMB, effTop)

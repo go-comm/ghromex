@@ -30,9 +30,11 @@ h3 { display: block; font-size: 18px; font-weight: bold; margin: 19px 0; } /* 1.
   em, i, u, s, strike, code, kbd, samp, var, cite, dfn, abbr, q, mark, small,
   sub, sup, time, data, output, bdi, bdo, ins, del, ruby, rt, rp { display: inline; }
   /* 列表/定义列表/引用/预格式化：与 Chrome UA 同口径（缩进与外边距）。
-     列表标记（disc/decimal）与 list-item 显示未实现——引擎无列表项概念，
-     缩进（padding-left 40px）一致但无圆点/序号。 */
+     li 必须是块级（Chrome: display:list-item）——否则引擎默认的 inline-block
+     会让多个 li 挤在同一行。列表标记（disc/decimal）引擎无 list-item 概念，
+     改由布局/绘制层按 ul/ol 自行绘制（measure.go / render.go）。 */
   ul, ol { display: block; margin: 16px 0; padding-left: 40px; }
+  li { display: block; }
   dl { display: block; margin: 16px 0; }
   dt { display: block; font-weight: bold; }
   dd { display: block; margin-left: 40px; }

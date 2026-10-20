@@ -196,7 +196,7 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 - 裁剪仅由实现 `engine.Clipper`（`PushClip`/`PopClip`）的后端生效（当前 `BufferGraphics`、SDL2 均已实现；自定义后端未实现时静默跳过裁剪、仅不裁剪不报错）
 - 边框样式目前按单色实心绘制（dashed/dotted 等不做虚线区分）
 - 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；无 webfont 加载、无斜体渲染（font-style 仅解析不渲染）
-- 列表只做缩进（ul/ol 的 padding-left 40px、dd 的 40px 缩进与 dt 加粗已对齐 Chrome），**无列表标记**（圆点/序号）与 `display:list-item`
+- 列表：缩进/外边距/标记已实现并与 Chrome 对齐（ul 的 •、ol 的序号；标记位置按内容左缘 −0.75em 近似）；仍无 `display:list-item` 与 `list-style-type`（作者自定义标记类型不生效）
 - **无表格布局模型**：table/thead/tbody/tr/td/caption 无专门 UA 规则，单元格按默认 inline-block 挤在一行（无行列对齐、无 border-spacing）
 - 无 `vertical-align`（sub/sup 不升降）、无 `small` 的小字号、`white-space` 未实现（`pre` 不保留空白）、无 `line-height`
 - 级联为每次重排全量重算：逐元素重跑全部规则匹配并排序（元素数 × 规则数 × 祖先深度）——大样式表 + 大文档时每次输入都会触发一次全量级联，尚未做规则索引/失效缓存

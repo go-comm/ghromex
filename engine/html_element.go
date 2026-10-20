@@ -132,6 +132,10 @@ type htmlElement struct {
 	//（其内容量度走各自专用路径）。
 	contentW int
 	contentH int
+	// listMarker 是列表项的标记文本（"•" / "1." / "2."…）。引擎没有
+	// list-item 概念，标记由布局期按父级 ul/ol 算出、绘制期画在内容左缘
+	// 左侧（Chrome 口径：右对齐到内容左缘 −0.5em）。
+	listMarker string
 	// rsvPD/rsvBD 为布局期解析出的 padding/border 边长（百分比按包含块
 	// 宽度解析）。绘制与命中必须复用同一份：百分比 padding 在布局期按
 	// 百分比算、在绘制期若按 0 基数算，背景/边框就会画在错误的盒上，

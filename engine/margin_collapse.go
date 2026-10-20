@@ -1,5 +1,10 @@
 package engine
 
+import (
+	"strconv"
+	"strings"
+)
+
 // ---------------------------------------------------------------------------
 // margin 折叠（CSS 2.1 §8.3.1）
 //
@@ -14,6 +19,34 @@ package engine
 // v1 简化：只处理"首/末个流内块级子块"这一层；子块自身又吸收其子块外边距
 // 的多层折叠不参与（浏览器按层传递），空块自折叠同样未实现。
 // ---------------------------------------------------------------------------
+
+// listMarkerFor 返回列表项的标记文本：ul 用 disc（"•"），ol 用 decimal
+// （"1." "2."…，序号按同级 li 的次序）；父级不是列表则返回 ""。
+// 引擎没有 list-item 概念，标记在布局期算出、绘制期由 render.go 画出。
+func listMarkerFor(parent *htmlElement, child *htmlElement) string {
+	if parent == nil || child == nil {
+		return ""
+	}
+	switch strings.ToLower(parent.tagName) {
+	case "ul":
+		return "•"
+	case "ol":
+		n := 0
+		for _, c := range parent.children {
+			cb := inner(c)
+			if cb == nil {
+				continue
+			}
+			if strings.EqualFold(cb.tagName, "li") {
+				n++
+				if cb == child {
+					return strconv.Itoa(n) + "."
+				}
+			}
+		}
+	}
+	return ""
+}
 
 // flowBlockChildren 返回元素内可参与折叠的流内块级子块（按文档顺序）。
 // 跳过 display:none 与脱流盒（absolute/fixed）；遇到行内内容（行内盒或
