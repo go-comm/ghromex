@@ -27,20 +27,22 @@ func (s *Selector) isEmpty() bool {
 	return s == nil || len(s.compounds) == 0
 }
 
-// Specificity 返回 (id*100 + class/attr*10 + tag) 形式的特异度。
+// Specificity 返回选择器特异度，按 CSS 的 (a,b,c) 字典序编码为单个整数：
+// a=id 数、b=class/attr 数、c=类型选择器数，编码为 a*1e6 + b*1e3 + c。
+// 编码保证整数比较与 CSS 优先级一致——旧实现用 id*100 + class*10 + tag，
+// 11 个类（110）会压过 1 个 id（100），与 CSS 相反。
 func (s *Selector) Specificity() int {
-	score := 0
-	for _, c := range s.compounds {
-		if c.id != "" {
-			score += 100
+	var a, b, c int
+	for _, cp := range s.compounds {
+		if cp.id != "" {
+			a++
 		}
-		score += 10 * len(c.classes)
-		score += 10 * len(c.attrs)
-		if c.tag != "" {
-			score++
+		b += len(cp.classes) + len(cp.attrs)
+		if cp.tag != "" {
+			c++
 		}
 	}
-	return score
+	return a*1000000 + b*1000 + c
 }
 
 // ParseSelector 解析 "div.card > .title" 形式的选择器串。

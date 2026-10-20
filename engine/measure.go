@@ -352,6 +352,8 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH i
 // shiftBox 将元素子树整体平移 (dx, dy)：盒坐标 + 文本 run。
 // 用于 relative 偏移与 absolute 的 right/bottom 锚定回推；
 // 命中测试/绘制均读最终坐标，自然一致。
+// position:fixed 的子树跳过：fixed 以视口为包含块，不随祖先滚动平移
+// （Chrome 语义）——文档级滚动时 fixed 元素必须留在视口原位。
 func shiftBox(e HTMLElement, dx, dy int) {
 	if e == nil || (dx == 0 && dy == 0) {
 		return
@@ -367,6 +369,10 @@ func shiftBox(e HTMLElement, dx, dy int) {
 		base.runs[i].y += dy
 	}
 	for _, c := range base.children {
+		if cb := inner(c); cb != nil && cb.computed != nil &&
+			cb.computed.Position() == PositionFixed {
+			continue
+		}
 		shiftBox(c, dx, dy)
 	}
 }
@@ -551,6 +557,41 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		family = el.computed.FontFamily()
 	}
 
+	// 行内格式上下文里的空格：CSS 把连续空白折叠为单个空格，且只保留在
+	// 行内内容之间。tokenizeText 会丢弃首尾空白，纯空白文本节点因此整体
+	// 消失（`<span>A</span> <span>B</span>` 的空格被吞）。这里用
+	// pendingSpace 把空格延迟到"下一个行内项"再落位：遇到块级子元素则
+	// 丢弃（CSS 移除行尾空格）。
+	spaceW, spaceH := 0, 0
+	if g != nil {
+		spaceW, spaceH = g.MeasureText(" ", fontPx, bold, family)
+	}
+	pendingSpace := false
+	pendingTN := (*textNode)(nil)
+	lastInline := false
+
+	// flushPendingSpace 把待定空格落位到当前行（作为独立文本 run）。
+	// 必须在**下一个行内盒布局之前**调用：行内盒的位置由 layoutBox 按游标
+	// 决定，空格若在其后追加，盒子会落在空格之前。
+	flushPendingSpace := func() {
+		if !pendingSpace {
+			return
+		}
+		pendingSpace = false
+		if spaceW <= 0 || pendingTN == nil {
+			return
+		}
+		curLine = append(curLine, lineItem{tn: pendingTN, token: " ",
+			x: cursorX, y: cursorY, w: spaceW, h: spaceH})
+		cursorX += spaceW
+		if spaceH > lineH {
+			lineH = spaceH
+		}
+		if cursorX > maxRight {
+			maxRight = cursorX
+		}
+	}
+
 	flushLine := func() {
 		// text-align：行宽不足内容宽时整体平移（溢出时 dx 钳 0，左对齐语义不变）
 		dx := 0
@@ -582,6 +623,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	}
 
 	addItem := func(it lineItem) {
+		flushPendingSpace()
 		if len(curLine) > 0 && it.x+it.w-cx > contentW && contentW > 0 {
 			flushLine()
 			it.x = cursorX
@@ -598,17 +640,31 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		// 行内内容隔开两侧块盒：CSS 规定 margin 折叠仅发生在真正相邻的
 		// 块盒之间（行盒 / inline-block / 脱流盒不算分隔，但行内容算）。
 		prevBlockMB = -1
+		lastInline = true
 	}
 
 	for _, child := range el.children {
 		if tnc, ok := child.(*textNode); ok {
 			tnc.node.runs = nil
-			for _, tok := range tokenizeText(tnc.Text()) {
+			raw := tnc.Text()
+			// 前导空白：上一项是行内内容时，该空格属于行内间隙，须保留。
+			if lastInline && hasLeadingBlank(raw) {
+				pendingSpace = true
+				pendingTN = tnc
+			}
+			toks := tokenizeText(raw)
+			for _, tok := range toks {
 				tw, th := g.MeasureText(tok, fontPx, bold, family)
 				if tw <= 0 {
 					continue
 				}
 				addItem(lineItem{tn: tnc, token: tok, x: cursorX, y: cursorY, w: tw, h: th})
+			}
+			// 尾随空白：其后若还有行内内容则保留为间隙空格；若后面是块级
+			// 子元素则丢弃（CSS 移除行尾空格）。
+			if hasTrailingBlank(raw) && (len(toks) > 0 || lastInline) {
+				pendingSpace = true
+				pendingTN = tnc
 			}
 			continue
 		}
@@ -641,6 +697,10 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH)
 			cursorY += che.layoutH
 			prevBlockMB = mgc[eBottom]
+			// 块级子元素结束行内格式上下文：行尾空格被 CSS 移除，且后续内容
+			// 不再与前面的行内内容共享间隙空格。
+			pendingSpace = false
+			lastInline = false
 			// 块子的真实外盒宽计入 shrink-wrap 宽度统计：游标换行后复位到 cx，
 			// 原先漏算块宽（inline-block 容器仅含块子时会收缩到近似 0 宽）。
 			// 非裁剪盒（overflow:visible）另按「未裁剪内容宽」参与 maxRight：
@@ -659,6 +719,8 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 
 		// inline / inline-block → 原子盒。先在游标处试布局，溢出则换行重排。
+		// 行内盒的位置由 layoutBox 按游标决定——待定空格必须先落位。
+		flushPendingSpace()
 		remain := contentW - (cursorX - cx)
 		if remain < 0 {
 			remain = 0
@@ -677,6 +739,31 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 
 	flushLine()
 	return maxRight - cx, cursorY - cy
+}
+
+// hasLeadingBlank 报告文本是否以空白开头（CSS 空白字符集）。
+func hasLeadingBlank(s string) bool {
+	for _, r := range s {
+		switch r {
+		case ' ', '\t', '\n', '\r', '\f', ' ':
+			return true
+		}
+		return false
+	}
+	return false
+}
+
+// hasTrailingBlank 报告文本是否以空白结尾。
+func hasTrailingBlank(s string) bool {
+	rs := []rune(s)
+	for i := len(rs) - 1; i >= 0; i-- {
+		switch rs[i] {
+		case ' ', '\t', '\n', '\r', '\f', ' ':
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 // tokenizeText 将文本切为可断行的词：

@@ -19,6 +19,9 @@ type cssRule struct {
 type simpleDecl struct {
 	prop  string
 	value string
+	// important 标记该声明带 !important：级联时重要声明整体压过普通声明
+	// （且作者的重要声明压过 UA 的重要声明，见 style_cascade.go）。
+	important bool
 }
 
 // Merge 将 other 的规则追加到 s（用于 <style> 多段合并）。
@@ -100,10 +103,18 @@ func parseDeclarations(body string) []simpleDecl {
 		}
 		prop := strings.ToLower(strings.TrimSpace(part[:colon]))
 		value := strings.TrimSpace(part[colon+1:])
+		// !important 标记：剥离后单独记录——此前整条声明因值里带
+		// "!important" 而解析失败被丢弃（作者写 color:#f00 !important 颜色
+		// 根本不生效）。
+		important := false
+		if i := strings.LastIndex(strings.ToLower(value), "!important"); i >= 0 {
+			important = true
+			value = strings.TrimSpace(value[:i])
+		}
 		if prop == "" || value == "" {
 			continue
 		}
-		out = append(out, simpleDecl{prop: prop, value: value})
+		out = append(out, simpleDecl{prop: prop, value: value, important: important})
 	}
 	return out
 }

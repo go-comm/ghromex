@@ -64,7 +64,11 @@ func parseInto(htmlNode HTMLElement, headEl, bodyEl HTMLElement, src string, doc
 			}
 			raw := src[i : i+next]
 			i += next
-			if strings.TrimSpace(raw) == "" {
+			// 纯空白文本节点要保留：行内元素之间的空格是可见内容
+			// （`<span>A</span> <span>B</span>` 的间隙）。此前整段跳过 →
+			// 空格从未进 DOM，布局无从保留。是否显示由布局按 CSS 折叠规则
+			// 决定（行内间隙保留、行尾与块级前的空白丢弃）。
+			if raw == "" {
 				continue
 			}
 			target := ensureInsertTarget()
