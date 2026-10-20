@@ -122,7 +122,8 @@ func TestRunConsumesInjectedWheel(t *testing.T) {
 		t.Fatalf("initial top = %d, want 0", before)
 	}
 
-	// 滚轮向下（y 负 = 朝用户）→ 引擎 dy>0 → scrollTop +40 → 内容上移 40px
+	// 滚轮向下（y 负 = 朝用户）→ 引擎 dy>0 → scrollTop +100（每档 100px，
+	// 与 Chrome/Windows 一致）→ 内容上移 100px；平滑滚动在 300ms 内收敛。
 	pushMouseWheel(150, 100, 0, -1)
 
 	win.SetAutoExit(300 * time.Millisecond)
@@ -131,9 +132,9 @@ func TestRunConsumesInjectedWheel(t *testing.T) {
 	}
 
 	after := p.GetBoundingClientRect().Top().Pixel()
-	if after != before-40 {
+	if after != before-wheelStepPx {
 		t.Fatalf("rect top %d → %d, want %d（wheel 事件链断链：解码/消费/重排之一缺失）",
-			before, after, before-40)
+			before, after, before-wheelStepPx)
 	}
 }
 

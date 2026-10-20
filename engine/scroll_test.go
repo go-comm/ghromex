@@ -162,6 +162,54 @@ body{margin:0}
 	}
 }
 
+// settleScroll 反复布局直到滚动动画收敛（平滑滚动分帧推进，Chrome 同）。
+// 以被观察元素的视口顶端为收敛判据：连续两次不变即认为已到位。
+func settleScroll(t *testing.T, doc HTMLDocument, sel string) {
+	t.Helper()
+	prev := -1 << 30
+	for i := 0; i < 24; i++ {
+		LayoutDocument(doc)
+		cur := 0
+		if e := doc.QuerySelector(sel); e != nil {
+			cur = e.GetBoundingClientRect().Top().Pixel()
+		}
+		if cur == prev {
+			return
+		}
+		prev = cur
+	}
+}
+
+// TestDocumentScrollAnimation 文档级滚动是**动画式**的：滚轮只设定目标，
+// 视觉位置分帧推进（Chrome 同——引擎此前整档跳变，观感生硬）。
+func TestDocumentScrollAnimation(t *testing.T) {
+	const src = `<!doctype html><html><head><style>
+	body{margin:0}
+	#page{height:1000px;background-color:#2563EB}
+	</style></head><body><div id="page">content</div></body></html>`
+	doc, _ := openScrollDoc(t, 200, 200, src)
+	root := inner(doc)
+
+	OnDocumentWheel(doc, 100, 100, 0, 40)
+	if root.scrollTop != 40 {
+		t.Fatalf("滚动目标 = %d, want 40", root.scrollTop)
+	}
+	// 首轮布局：只推进一部分（不是整档跳到目标）
+	LayoutDocument(doc)
+	first := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel()
+	if first == 0 || first <= -40 {
+		t.Errorf("首帧应部分推进，实际 top=%d（-40 < first < 0）", first)
+	}
+	// 多轮布局后收敛到目标
+	settleScroll(t, doc, "#page")
+	if top := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel(); top != -40 {
+		t.Errorf("滚动动画未收敛：top=%d, want -40", top)
+	}
+	if root.scrollAnimOn {
+		t.Error("收敛后动画应结束")
+	}
+}
+
 func TestOnDocumentWheelDocumentScroll(t *testing.T) {
 	const src = `<!doctype html><html><head><style>
 body{margin:0}
@@ -191,9 +239,14 @@ body{margin:0}
 			got.Type, got.DeltaX, got.DeltaY, got.X, got.Y)
 	}
 
+	// 平滑滚动：视觉位置分帧推进（Chrome 同），多轮布局后收敛到目标
 	LayoutDocument(doc)
+	if top := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel(); top == 0 {
+		t.Fatalf("文档滚动未平移内容（top=%d）", top)
+	}
+	settleScroll(t, doc, "#page")
 	if top := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel(); top != -40 {
-		t.Fatalf("page rect top = %d, want -40（文档滚动未平移内容）", top)
+		t.Fatalf("page rect top = %d, want -40（滚动动画未收敛到目标）", top)
 	}
 
 	// 超量：夹紧到 contentH - 视口高
@@ -262,6 +315,7 @@ body{margin:0}
 
 	// 两层滚动叠乘：tall 相对视口 = -容器滚动 - 文档滚动
 	LayoutDocument(doc)
+	settleScroll(t, doc, "#tall")
 	if top := doc.QuerySelector("#tall").GetBoundingClientRect().Top().Pixel(); top != -401 {
 		t.Fatalf("tall rect top = %d, want -401（两层滚动未叠加）", top)
 	}

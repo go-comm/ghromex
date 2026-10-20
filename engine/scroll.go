@@ -106,14 +106,46 @@ func applyScrollOffsets(g Graphics, root HTMLElement, vw, vh int) {
 			boxW, boxH = vw, vh
 		}
 		maxX, maxY := scrollMax(base, boxW, boxH, isRoot)
-		ox := clampInt(base.scrollLeft, 0, maxX)
-		oy := clampInt(base.scrollTop, 0, maxY)
-		if ox != base.scrollLeft {
-			base.scrollLeft = ox
+		// 夹紧写回的是**目标**（scrollLeft/scrollTop）；动画的视觉位置另算，
+		// 两者不可混用（混用会把目标覆盖成中间值，动画随即停住）。
+		if cx := clampInt(base.scrollLeft, 0, maxX); cx != base.scrollLeft {
+			base.scrollLeft = cx
 		}
-		if oy != base.scrollTop {
-			base.scrollTop = oy
+		if cy := clampInt(base.scrollTop, 0, maxY); cy != base.scrollTop {
+			base.scrollTop = cy
 		}
+		ox, oy := base.scrollLeft, base.scrollTop
+		if isRoot && base.scrollAnimOn {
+			// 平滑滚动：视觉位置向目标推进 1/3（几何收敛 ≈6~8 帧 ≈70ms，
+			// Chrome ≈100ms）。推进中标记变更 → 后端下一帧继续推进。
+			adv := func(cur, target int) int {
+				d := target - cur
+				if d == 0 {
+					return cur
+				}
+				s := d / 3
+				if s == 0 {
+					s = 1
+					if d < 0 {
+						s = -1
+					}
+				}
+				return cur + s
+			}
+			base.scrollAnimTop = adv(base.scrollAnimTop, base.scrollTop)
+			base.scrollAnimLeft = adv(base.scrollAnimLeft, base.scrollLeft)
+			ox, oy = base.scrollAnimLeft, base.scrollAnimTop
+			if base.scrollAnimTop == base.scrollTop && base.scrollAnimLeft == base.scrollLeft {
+				base.scrollAnimOn = false
+			} else {
+				base.onChanged() // 推进下一帧
+			}
+		}
+		ox = clampInt(ox, 0, maxX)
+		oy = clampInt(oy, 0, maxY)
+		// 注意：此处**不再**把 ox/oy 写回 scrollLeft/scrollTop——那是滚动
+		// **目标**（夹紧在上面已完成），写回视觉位置会让目标被中间值覆盖、
+		// 动画随即停住。
 		if ox != 0 || oy != 0 {
 			// 平移全部子（含文本 run 与定位后代）：shiftBox 递归覆盖子树。
 			for _, c := range base.children {
@@ -180,6 +212,17 @@ func wheelScrollTextarea(doc HTMLDocument, el *htmlElement, delta int) int {
 	el.scrollTop = next
 	el.onChanged()
 	return delta - (next - cur)
+}
+
+// startScrollAnim 启动文档级平滑滚动动画：视觉位置从当前值起算（动画已在途
+// 则沿用当前视觉位置继续推进）。
+func startScrollAnim(el *htmlElement) {
+	if el == nil || el.scrollAnimOn {
+		return
+	}
+	el.scrollAnimTop = el.scrollTop
+	el.scrollAnimLeft = el.scrollLeft
+	el.scrollAnimOn = true
 }
 
 // OnDocumentWheel 在文档上派发一次滚轮事件：坐标为视口坐标，
@@ -251,6 +294,7 @@ func OnDocumentWheel(doc HTMLDocument, x, y, dx, dy int) bool {
 	if remX != 0 && maxX > 0 {
 		next := clampInt(root.scrollLeft+remX, 0, maxX)
 		if next != root.scrollLeft {
+			startScrollAnim(root) // 平滑滚动：视觉位置从当前值起算
 			root.scrollLeft = next
 			root.onChanged()
 			remX = 0
@@ -259,6 +303,7 @@ func OnDocumentWheel(doc HTMLDocument, x, y, dx, dy int) bool {
 	if remY != 0 && maxY > 0 {
 		next := clampInt(root.scrollTop+remY, 0, maxY)
 		if next != root.scrollTop {
+			startScrollAnim(root)
 			root.scrollTop = next
 			root.onChanged()
 			remY = 0

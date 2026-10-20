@@ -141,9 +141,11 @@ const (
 	// SDL_Keymod 枚举原文），Shift+滚轮 换算横向滚动用。
 	kmodShift = 0x0003
 
-	// wheelStepPx 是每档滚轮位移的像素数（40px/notch，与计划取值一致；
-	// SDL 整数 x/y 通常为 ±1/档，自由滚轮一次多档时按倍数放大）。
-	wheelStepPx = 40
+	// wheelStepPx 是每档滚轮位移的像素数。Chrome（Windows）每档约 100px
+	// （3 行 × 约 33px），引擎此前取 40px —— 同样的滚轮在引擎里要滚 2.5 倍
+	// 的格数，体感明显"发飘/跟不上"。
+	// SDL 整数 x/y 通常为 ±1/档，自由滚轮一次多档时按倍数放大。
+	wheelStepPx = 100
 
 	// SDL_WindowEvent.event 真实取值（Win7 真机日志实证：启动 0x01,0x0C,0x0A,
 	// 0x03；移动 0x04 data=(x,y)；关闭 0x0E）：
