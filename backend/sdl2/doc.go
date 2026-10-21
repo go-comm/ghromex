@@ -3,8 +3,8 @@
 // 工具链；非 Windows 平台由 stub_other.go 提供同签名的空实现
 // （NewWindow 返回 ErrUnsupported）。
 //
-// 原生文件对话框不在本包：它是 Windows Shell 的能力，与渲染后端无关，
-// 独立在 runtime/dialog（实现要点见那里的包文档）。
+// 原生文件对话框不在本包：它是 Windows Shell 的能力，与渲染后端无关。
+// 调用入口在 runtime/dialog（通用 API），平台实现在 backend/dialog。
 //
 // # 平台与线程约束
 //

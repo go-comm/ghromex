@@ -21,7 +21,7 @@ import (
 //
 // 需要真实桌面交互，默认跳过；用下面的命令跑：
 //
-//	$env:GHROMEX_DIALOG_UI=1; go test ./runtime/dialog -run TestOpenFileDialogUI -v
+//	$env:GHROMEX_DIALOG_UI=1; go test ./backend/dialog -run TestOpenFileDialogUI -v
 //
 // 无头环境（CI）不要开这个开关：对话框弹不出来，测试会一直等到超时。
 func TestOpenFileDialogUI(t *testing.T) {

@@ -63,6 +63,17 @@ func (win *Window) SetTitle(title string) { win.sdl.SetTitle(title) }
 // Close 释放窗口资源。
 func (win *Window) Close() { win.sdl.Close() }
 
+// NativeHandle 返回窗口的原生句柄（Windows 上是 HWND），供 runtime/dialog
+// 的原生对话框当父窗口。
+//
+// 取不到时返回 ErrUnsupported（例如无头模式或非 Windows 平台）。
+func (win *Window) NativeHandle() (uintptr, error) {
+	if win == nil || win.sdl == nil {
+		return 0, ErrUnsupported
+	}
+	return win.sdl.NativeHandle()
+}
+
 // ClipboardText 读取系统剪贴板文本（UTF-8）。剪贴板属平台能力：引擎只
 // 给出选区文本，读写由后端完成。非 Windows 平台返回空串。
 func ClipboardText() string { return sdl2.ClipboardText() }

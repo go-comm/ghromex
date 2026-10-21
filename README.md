@@ -170,10 +170,11 @@ backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓
                    页面文本段数超限时不再逐帧重渲染）、
                    剪贴板读写（Ctrl+C 写 / Ctrl+V 读，引擎只管文本）、
                    原生窗口句柄（NativeHandle，供原生对话框当父窗口）
-runtime/dialog/     平台能力（与渲染后端无关）：Windows 原生对话框——
-                   文件对话框（Shell IFileDialog，纯 Win32 COM，无 CGO：打开文件 /
-                   打开多个文件 / 选择文件夹 / 另存为）与消息框（user32
-                   MessageBoxW，不需要 COM）。父窗口句柄由调用方传入
+runtime/dialog/     原生对话框的通用调用入口（平台无关的类型 + 五个对话框：
+                   打开文件 / 打开多个文件 / 选择文件夹 / 另存为 / 消息框）
+backend/dialog/     原生对话框的平台实现（Windows）：文件对话框走 Shell
+                   IFileDialog（纯 Win32 COM，无 CGO），消息框走 user32
+                   MessageBoxW（不需要 COM）。父窗口句柄由调用方传入
 examples/          可独立运行的示例（每个目录 main.go + index.html）：
   login/             登录页（按钮交互、状态文本）
   form/              常规表单（员工登记表：布局特性 + 可输入控件）

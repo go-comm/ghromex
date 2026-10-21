@@ -36,6 +36,7 @@ import (
 
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/runtime/dialog"
 )
 
 //go:embed index.html
@@ -407,22 +408,21 @@ func (n *notepad) openFile() {
 // 对话框是模态的：调用期间会阻塞当前线程（父窗口的 SDL 事件循环随之
 // 暂停），这与原生应用里模态对话框的表现一致。
 func (n *notepad) pickFiles(title string, multi bool) []string {
-	if n.win == nil {
+	parent, err := n.dialogParent()
+	if err != nil {
+		n.message(err.Error())
 		return nil
 	}
-	opts := browser.DialogOptions{
+	opts := dialog.Options{
 		Title:      title,
 		DefaultDir: n.currentDir(),
 		Filters:    fileFilters(),
 	}
-	var (
-		paths []string
-		err   error
-	)
+	var paths []string
 	if multi {
-		paths, err = n.win.OpenMultipleFilesDialog(opts)
+		paths, err = dialog.OpenMultipleFilesDialog(parent, opts)
 	} else {
-		paths, err = n.win.OpenFileDialog(opts)
+		paths, err = dialog.OpenFileDialog(parent, opts)
 	}
 	if err != nil {
 		n.message("打开对话框失败：" + err.Error())
@@ -431,13 +431,26 @@ func (n *notepad) pickFiles(title string, multi bool) []string {
 	return paths
 }
 
+// dialogParent 取原生对话框的父窗口句柄；无头模式没有窗口。
+func (n *notepad) dialogParent() (dialog.Parent, error) {
+	if n.win == nil {
+		return 0, fmt.Errorf("无头模式没有原生窗口，无法弹原生对话框")
+	}
+	hwnd, err := n.win.NativeHandle()
+	if err != nil {
+		return 0, err
+	}
+	return dialog.Parent(hwnd), nil
+}
+
 // openDir 选一个文件夹（原生「选择文件夹」对话框），把结果填进路径栏。
 func (n *notepad) openDir() {
-	if n.win == nil {
+	parent, err := n.dialogParent()
+	if err != nil {
 		n.message("无头模式没有原生对话框，请直接在路径栏填写目录")
 		return
 	}
-	dir, err := n.win.OpenDirectoryDialog(browser.DialogOptions{
+	dir, err := dialog.OpenDirectoryDialog(parent, dialog.Options{
 		Title:      "选择文件夹",
 		DefaultDir: n.currentDir(),
 	})
@@ -453,8 +466,8 @@ func (n *notepad) openDir() {
 }
 
 // fileFilters 是记事本用到的文件类型过滤器。
-func fileFilters() []browser.FileFilter {
-	return []browser.FileFilter{
+func fileFilters() []dialog.FileFilter {
+	return []dialog.FileFilter{
 		{Name: "文本文件 (*.txt)", Pattern: "*.txt"},
 		{Name: "所有文件 (*.*)", Pattern: "*.*"},
 	}
@@ -505,7 +518,12 @@ func (n *notepad) saveFile() {
 // 路径栏。
 func (n *notepad) saveAs() {
 	if n.win != nil {
-		path, err := n.win.SaveFileDialog(browser.DialogOptions{
+		parent, err := n.dialogParent()
+		if err != nil {
+			n.message("另存为失败：" + err.Error())
+			return
+		}
+		path, err := dialog.SaveFileDialog(parent, dialog.Options{
 			Title:       "另存为",
 			DefaultDir:  n.currentDir(),
 			DefaultName: n.defaultSaveName(),

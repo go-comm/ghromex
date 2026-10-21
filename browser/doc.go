@@ -40,35 +40,21 @@
 //
 // # 原生对话框
 //
-// Window.OpenFileDialog / OpenMultipleFilesDialog / OpenDirectoryDialog /
-// SaveFileDialog 弹 Windows 原生文件对话框（Shell 的 IFileDialog，
-// Vista 起的现代外观，支持文件类型过滤与多选）：
+// 原生对话框不在本包：调用入口是 runtime/dialog（通用 API），平台实现
+// 在 backend/dialog。本包只提供 NativeHandle——原生对话框要挂在应用
+// 窗口下面，需要平台的原生窗口句柄：
 //
-//	paths, err := win.OpenFileDialog(browser.DialogOptions{
-//		Title:      "打开",
-//		DefaultDir: "C:\\Users\\me\\Documents",
-//		Filters: []browser.FileFilter{
+//	hwnd, err := win.NativeHandle()
+//	paths, err := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{
+//		Title: "打开",
+//		Filters: []dialog.FileFilter{
 //			{Name: "文本文件 (*.txt)", Pattern: "*.txt"},
-//			{Name: "所有文件 (*.*)", Pattern: "*.*"},
 //		},
-//	})
-//	if err == nil && len(paths) > 0 {
-//		// 用户选中了文件（取消时 paths 为空、err 为 nil）
-//	}
-//
-// Window.MessageDialog 弹原生消息框（信息/警告/错误/询问，OK、是-否等
-// 按钮组合），返回用户点击的按钮：
-//
-//	res, err := win.MessageDialog(browser.MessageOptions{
-//		Title:   "确认",
-//		Message: "文件已存在，要覆盖吗？",
-//		Icon:    browser.IconQuestion,
-//		Buttons: browser.ButtonsYesNo,
 //	})
 //
 // 对话框是模态的：调用期间阻塞当前线程（父窗口的 SDL 事件循环随之
 // 暂停），因此在按钮/菜单的回调里直接调用即可。非 Windows 平台返回
-// ErrUnsupported。
+// dialog.ErrUnsupported。
 //
 // 无头调试用 engine.NewHeadlessViewport + engine.RenderNode +
 // doc.DumpSVG：不需要显示器即可断言布局几何。
