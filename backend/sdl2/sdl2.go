@@ -1,10 +1,11 @@
 //go:build windows
 
-// Package sdl2 是 ghromex 的 SDL2 渲染后端。
+// 本文件是 Windows 平台的 SDL2 符号绑定与常量；包文档见 doc.go。
 //
 // 通过 golang.org/x/sys/windows 动态加载 SDL2.dll / SDL2_ttf.dll（Windows），
 // 无需 CGO 与 C 工具链。运行前需将 SDL2.dll、SDL2_ttf.dll（及其依赖 zlib1.dll）
 // 放入工程根目录 libs/，或保证系统可搜索到它们。
+
 package sdl2
 
 import (

@@ -126,8 +126,6 @@ engine/            渲染引擎（纯 Go，不依赖任何图形后端）
   element_registry.go 标签原型注册表（自定义元素）
 backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓存、
                    剪贴板读写（Ctrl+C 写 / Ctrl+V 读，引擎只管文本）
-components/        组件工厂（button / input / class 工具：InjectDefaultClasses
-                  注入 .btn/.btn-group/.input 默认样式）
 examples/          可独立运行的示例（每个目录 main.go + index.html）：
   login/             登录页（按钮交互、状态文本）
   form/              常规表单（员工登记表：布局特性 + 可输入控件）
@@ -137,8 +135,13 @@ examples/          可独立运行的示例（每个目录 main.go + index.html�
   portal/            购物门户（fixed 顶栏、层叠上下文、商品网格、秒杀、购物车交互）
   notepad/           仿 Windows 记事本（菜单栏/路径栏/编辑区/状态栏、文件读写、
                      撤销栈、剪贴板）
-libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
+libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll，见 libs/README.md）
 ```
+
+**包内文档**：每个包的入口说明写在各自的 `doc.go`（`go doc ./engine` 可读，
+也进 pkg.go.dev）：engine 讲分层地图与「改代码前必读的不变量」、backend/sdl2
+讲平台边界与线程约束、browser 讲三方分工与用法骨架；`libs/` 里第三方 DLL 的
+版本、出处、许可与查找顺序见 `libs/README.md`。
 
 ## 已支持的 CSS 子集
 
