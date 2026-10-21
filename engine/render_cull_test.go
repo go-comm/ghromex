@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -95,5 +96,50 @@ func TestSVGDumpKeepsOffscreenContent(t *testing.T) {
 	svg := doc.DumpSVG()
 	if !strings.Contains(svg, "visible") || !strings.Contains(svg, "hidden") {
 		t.Errorf("SVG 导出缺少内容（应含整页，与视口裁剪无关）:\n%s", svg)
+	}
+}
+
+// 裁剪后的画面必须与「不裁剪」逐像素相同：裁错一个盒子，元素就会在滚动
+// 时闪进闪出（视口边缘的判断一旦算错，元素会忽隐忽现）。
+//
+// 对照组用「足够高的视口」渲染同一页面（不触发裁剪），再逐像素比。
+func TestRenderCullKeepsVisiblePixels(t *testing.T) {
+	src, err := os.ReadFile("../examples/portal/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const w = 1280
+	vp := engine.NewHeadlessViewport(w, 820)
+	doc, err := engine.OpenDocument(vp, string(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	culled := engine.NewBufferGraphics(w, 820)
+	engine.RenderNode(culled, doc)
+
+	vp2 := engine.NewHeadlessViewport(w, 6000)
+	doc2, err := engine.OpenDocument(vp2, string(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	full := engine.NewBufferGraphics(w, 6000)
+	engine.RenderNode(full, doc2)
+
+	diff, firstX, firstY := 0, -1, -1
+	for y := 0; y < 820; y++ {
+		for x := 0; x < w; x++ {
+			r1, g1, b1, _, _ := culled.ColorAt(x, y)
+			r2, g2, b2, _, _ := full.ColorAt(x, y)
+			if r1 != r2 || g1 != g2 || b1 != b2 {
+				diff++
+				if firstX < 0 {
+					firstX, firstY = x, y
+				}
+			}
+		}
+	}
+	if diff != 0 {
+		t.Errorf("裁剪后画面内 %d 个像素与不裁剪时不同（首个差异在 %d,%d）：裁剪画错了内容",
+			diff, firstX, firstY)
 	}
 }
