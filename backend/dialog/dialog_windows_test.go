@@ -1,6 +1,6 @@
 //go:build windows
 
-package sdl2
+package dialog
 
 import (
 	"os"
@@ -263,19 +263,10 @@ func TestDefaultExtension(t *testing.T) {
 	}
 }
 
-// 没有可用窗口时不能弹对话框，返回错误即可（无头模式）。
-func TestDialogNeedsWindow(t *testing.T) {
-	var win *Window
-	if _, err := win.OpenFileDialog("打开", "", nil, false); err == nil {
-		t.Errorf("空窗口调用打开对话框应报错")
-	}
-	if _, err := win.OpenDirectoryDialog("选择", ""); err == nil {
-		t.Errorf("空窗口调用目录对话框应报错")
-	}
-	if _, err := win.SaveFileDialog("另存为", "", "", nil); err == nil {
-		t.Errorf("空窗口调用另存为应报错")
-	}
-}
+// 没有父窗口时对话框仍可弹出（parent=0 表示不挂父窗口）——但不写这条
+// 测试：它会真的弹出模态对话框，无头/CI 环境会一直等到超时。
+// 「无窗口时应用层拿到 ErrUnsupported」由 browser 门面的测试覆盖
+// （browser.TestDialogWithoutWindow）。
 
 // samePath 比较两个路径（Windows 上大小写不敏感，尾部斜杠可省略）。
 func samePath(a, b string) bool {

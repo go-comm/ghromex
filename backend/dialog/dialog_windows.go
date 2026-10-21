@@ -1,7 +1,7 @@
 //go:build windows
 
 // 本文件是 Windows 原生文件对话框（Shell 的 IFileDialog）的实现；
-// 包文档见 doc.go。
+// 包文档见 dialog.go。
 //
 // 为什么用 IFileDialog 而不是 comdlg32 的 GetOpenFileNameW：后者是
 // Win9x 风格的老对话框（没有左边的导航树、没有「另存为」的现代布局），
@@ -9,7 +9,7 @@
 // folder 三种形态共用一个实现，筛选器也是结构化的（COMDLG_FILTERSPEC）。
 //
 // IFileDialog 是 COM 接口，Go 没有现成绑定，这里用 syscall 按 vtable
-// 直接调用——纯 Go、无 CGO，与本后端动态加载 SDL2.dll 的做法一致。
+// 直接调用——纯 Go、无 CGO，与本仓库动态加载 SDL2.dll 的做法一致。
 //
 // 线程约束：IFileDialog 必须在 STA（单线程套间）上创建并 Show。入口处
 // LockOSThread 并用 CoInitializeEx(COINIT_APARTMENTTHREADED) 把当前线程
@@ -22,7 +22,7 @@
 // IFileSaveDialog 在其后追加。索引写错会调到相邻方法（可能直接崩），
 // 改之前先核对 IDL。
 
-package sdl2
+package dialog
 
 import (
 	"fmt"
@@ -34,15 +34,6 @@ import (
 
 	"golang.org/x/sys/windows"
 )
-
-// FileFilter 描述文件对话框里的一个类型过滤器（对应下拉框里的一项）。
-type FileFilter struct {
-	// Name 是显示名，如 "文本文件 (*.txt)"。
-	Name string
-	// Pattern 是扩展名模式，如 "*.txt"；多个模式用 ";" 分隔
-	//（"*.txt;*.md"）。
-	Pattern string
-}
 
 // 系统 DLL 与入口点。Shell 的文件对话框不经 SDL，这里直接动态加载
 // 系统 DLL（与 SDL2.dll 一样不引入 CGO）。
@@ -152,32 +143,24 @@ type dialogConfig struct {
 
 // OpenFileDialog 弹出「打开文件」对话框。
 //
+// parent 是父窗口的原生 HWND（0 = 无父窗口，对话框照样能弹）。
 // 返回用户选中的文件路径（多选时返回多个，顺序同对话框里的选择顺序）。
-// 用户取消返回 (nil, nil)——取消不是错误。没有可用窗口（如无头模式）
-// 返回错误。
-func (win *Window) OpenFileDialog(title, dir string, filters []FileFilter, multi bool) ([]string, error) {
-	parent, err := win.ownerWindow()
-	if err != nil {
-		return nil, err
-	}
+// 用户取消返回 (nil, nil)——取消不是错误。
+func OpenFileDialog(parent uintptr, opts Options) ([]string, error) {
 	return showFileDialog(parent, dialogConfig{
-		title:   title,
-		dir:     dir,
-		filters: filters,
-		multi:   multi,
+		title:   opts.Title,
+		dir:     opts.DefaultDir,
+		filters: opts.Filters,
+		multi:   opts.MultiSelect,
 	})
 }
 
 // OpenDirectoryDialog 弹出「选择文件夹」对话框，返回用户选中的目录。
 // 用户取消返回 ("", nil)。
-func (win *Window) OpenDirectoryDialog(title, dir string) (string, error) {
-	parent, err := win.ownerWindow()
-	if err != nil {
-		return "", err
-	}
+func OpenDirectoryDialog(parent uintptr, opts Options) (string, error) {
 	paths, err := showFileDialog(parent, dialogConfig{
-		title:   title,
-		dir:     dir,
+		title:   opts.Title,
+		dir:     opts.DefaultDir,
 		folders: true,
 	})
 	if err != nil || len(paths) == 0 {
@@ -188,65 +171,18 @@ func (win *Window) OpenDirectoryDialog(title, dir string) (string, error) {
 
 // SaveFileDialog 弹出「另存为」对话框，返回用户输入的保存路径。
 // 用户取消返回 ("", nil)。
-func (win *Window) SaveFileDialog(title, dir, name string, filters []FileFilter) (string, error) {
-	parent, err := win.ownerWindow()
-	if err != nil {
-		return "", err
-	}
+func SaveFileDialog(parent uintptr, opts Options) (string, error) {
 	paths, err := showFileDialog(parent, dialogConfig{
-		title:    title,
-		dir:      dir,
-		fileName: name,
-		filters:  filters,
+		title:    opts.Title,
+		dir:      opts.DefaultDir,
+		fileName: opts.DefaultName,
+		filters:  opts.Filters,
 		save:     true,
 	})
 	if err != nil || len(paths) == 0 {
 		return "", err
 	}
 	return paths[0], nil
-}
-
-// ownerWindow 返回窗口的 HWND（作为对话框的父窗口）。
-//
-// SDL_CreateWindow 返回的是 SDL_Window*，不是 HWND——原生对话框要拿真正的
-// HWND 当父窗口（否则 Show 会回 E_INVALIDARG），只能问 SDL_GetWindowWMInfo。
-// 取不到时返回 0：对话框照样能弹，只是不再挂在主窗口下面。
-func (win *Window) ownerWindow() (uintptr, error) {
-	if win == nil || win.closed || win.win == 0 {
-		return 0, fmt.Errorf("窗口尚未创建，无法弹出文件对话框")
-	}
-	return win.hwnd(), nil
-}
-
-// sdlSysWMinfo 对应 SDL_syswm.h 的 SDL_SysWMinfo（Windows 分支）：
-// version（SDL_version，3 字节 + 1 字节填充）、subsystem，以及 info
-// 联合体里的 HWND / HDC / HINSTANCE。
-type sdlSysWMinfo struct {
-	version   [3]uint8
-	_         [1]byte
-	subsystem uint32
-	winWindow uintptr
-	winHDC    uintptr
-	winHInst  uintptr
-}
-
-// hwnd 取窗口的原生 HWND；取不到返回 0。
-func (win *Window) hwnd() uintptr {
-	if !hasGetWindowWMInfo || sdlGetWindowWMInfo == nil {
-		return 0
-	}
-	var info sdlSysWMinfo
-	// info.version 必须按 SDL_VERSION 宏填成运行库的版本号，否则
-	// SDL_GetWindowWMInfo 直接返回 SDL_FALSE。
-	var ver [3]uint8
-	sdlGetVersion(uintptr(unsafe.Pointer(&ver[0])))
-	runtime.KeepAlive(&ver[0])
-	info.version = ver
-	if sdlGetWindowWMInfo(win.win, uintptr(unsafe.Pointer(&info))) == 0 {
-		return 0
-	}
-	runtime.KeepAlive(&info)
-	return info.winWindow
 }
 
 // showFileDialog 是三种对话框的公共流程：创建 → 配置 → Show → 取结果。

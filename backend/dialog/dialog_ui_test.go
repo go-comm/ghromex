@@ -1,6 +1,6 @@
 //go:build windows
 
-package sdl2
+package dialog
 
 import (
 	"errors"
@@ -12,6 +12,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/go-comm/ghromex/backend/sdl2"
 )
 
 // 原生对话框的端到端验证：真弹一次「打开文件」对话框，在后台线程里
@@ -19,7 +21,7 @@ import (
 //
 // 需要真实桌面交互，默认跳过；用下面的命令跑：
 //
-//	$env:GHROMEX_DIALOG_UI=1; go test ./backend/sdl2 -run TestOpenFileDialogUI -v
+//	$env:GHROMEX_DIALOG_UI=1; go test ./backend/dialog -run TestOpenFileDialogUI -v
 //
 // 无头环境（CI）不要开这个开关：对话框弹不出来，测试会一直等到超时。
 func TestOpenFileDialogUI(t *testing.T) {
@@ -33,18 +35,25 @@ func TestOpenFileDialogUI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	win, err := NewWindow(400, 300, "dialog-ui-test")
+	win, err := sdl2.NewWindow(400, 300, "dialog-ui-test")
 	if err != nil {
 		t.Fatalf("创建窗口失败: %v", err)
 	}
 	defer win.Close()
+	hwnd, err := win.NativeHandle()
+	if err != nil {
+		t.Fatalf("取父窗口句柄失败: %v", err)
+	}
 
 	const title = "打开文件（UI 测试）"
 	done := make(chan error, 1)
 	go func() { done <- driveFileDialog(title, path) }()
 
-	got, err := win.OpenFileDialog(title, dir,
-		[]FileFilter{{Name: "文本文件 (*.txt)", Pattern: "*.txt"}}, false)
+	got, err := OpenFileDialog(hwnd, Options{
+		Title:      title,
+		DefaultDir: dir,
+		Filters:    []FileFilter{{Name: "文本文件 (*.txt)", Pattern: "*.txt"}},
+	})
 	if err != nil {
 		t.Fatalf("打开对话框失败: %v", err)
 	}
@@ -74,18 +83,26 @@ func TestOpenFilesDialogMultiUI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	win, err := NewWindow(400, 300, "dialog-ui-multi")
+	win, err := sdl2.NewWindow(400, 300, "dialog-ui-multi")
 	if err != nil {
 		t.Fatalf("创建窗口失败: %v", err)
 	}
 	defer win.Close()
+	hwnd, err := win.NativeHandle()
+	if err != nil {
+		t.Fatalf("取父窗口句柄失败: %v", err)
+	}
 
 	const title = "多选（UI 测试）"
 	done := make(chan error, 1)
 	go func() { done <- driveFileDialog(title, "a.txt") }()
 
-	got, err := win.OpenFileDialog(title, dir,
-		[]FileFilter{{Name: "文本文件 (*.txt)", Pattern: "*.txt"}}, true)
+	got, err := OpenFileDialog(hwnd, Options{
+		Title:       title,
+		DefaultDir:  dir,
+		Filters:     []FileFilter{{Name: "文本文件 (*.txt)", Pattern: "*.txt"}},
+		MultiSelect: true,
+	})
 	if err != nil {
 		t.Fatalf("打开多选对话框失败: %v", err)
 	}

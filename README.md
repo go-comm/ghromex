@@ -124,7 +124,7 @@ paths, err := win.OpenFileDialog(browser.DialogOptions{
 
 对话框是模态的：调用期间阻塞当前线程（父窗口的 SDL 事件循环随之暂停），
 在按钮/菜单的回调里直接调用即可。实现走 Shell 的 `IFileDialog`（纯 Win32
-COM 调用，无 CGO），细节见 `backend/sdl2/doc.go`。
+COM 调用，无 CGO），细节见 `backend/dialog/dialog.go`。
 
 ## 项目结构
 
@@ -149,8 +149,11 @@ engine/            渲染引擎（纯 Go，不依赖任何图形后端）
   element_registry.go 标签原型注册表（自定义元素）
 backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓存（LRU + 像素双上限，
                    页面文本段数超限时不再逐帧重渲染）、
-                   （+ Windows 原生文件对话框：Shell IFileDialog，无 CGO）、
-                   剪贴板读写（Ctrl+C 写 / Ctrl+V 读，引擎只管文本）
+                   剪贴板读写（Ctrl+C 写 / Ctrl+V 读，引擎只管文本）、
+                   原生窗口句柄（NativeHandle，供原生对话框当父窗口）
+backend/dialog/     Windows 原生文件对话框（Shell IFileDialog，纯 Win32 COM，无 CGO）：
+                   打开文件（可多选）/ 选择文件夹 / 另存为。与渲染后端无关，
+                   父窗口句柄由调用方传入，故单列一包
 examples/          可独立运行的示例（每个目录 main.go + index.html）：
   login/             登录页（按钮交互、状态文本）
   form/              常规表单（员工登记表：布局特性 + 可输入控件）

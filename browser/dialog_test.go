@@ -22,9 +22,9 @@ func TestDialogWithoutWindow(t *testing.T) {
 	}
 }
 
-// 过滤器要原样转发给后端（显示名与扩展名模式都不能丢）。
+// 过滤器要原样转发给对话框包（显示名与扩展名模式都不能丢）。
 func TestFilterForward(t *testing.T) {
-	got := toBackendFilters([]FileFilter{
+	got := toDialogFilters([]FileFilter{
 		{Name: "文本文件 (*.txt)", Pattern: "*.txt"},
 		{Name: "所有文件 (*.*)", Pattern: "*.*"},
 	})
@@ -37,7 +37,7 @@ func TestFilterForward(t *testing.T) {
 	if got[1].Name != "所有文件 (*.*)" || got[1].Pattern != "*.*" {
 		t.Errorf("第 2 个过滤器 = %+v", got[1])
 	}
-	if toBackendFilters(nil) != nil {
+	if toDialogFilters(nil) != nil {
 		t.Errorf("空过滤器应转发为 nil")
 	}
 }

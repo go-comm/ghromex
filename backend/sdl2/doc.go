@@ -1,7 +1,10 @@
 // Package sdl2 是 Ghromex 的 SDL2 渲染后端：窗口、事件循环、文本纹理
-// 缓存、系统剪贴板，以及 Windows 原生文件对话框。纯动态加载 SDL2.dll /
-// SDL2_ttf.dll，无需 CGO 与 C 工具链；非 Windows 平台由 stub_other.go
-// 提供同签名的空实现（NewWindow 与文件对话框返回 ErrUnsupported）。
+// 缓存与系统剪贴板。纯动态加载 SDL2.dll / SDL2_ttf.dll，无需 CGO 与 C
+// 工具链；非 Windows 平台由 stub_other.go 提供同签名的空实现
+// （NewWindow 返回 ErrUnsupported）。
+//
+// 原生文件对话框不在本包：它是 Windows Shell 的能力，与渲染后端无关，
+// 独立在 backend/dialog（实现要点见那里的包文档）。
 //
 // # 平台与线程约束
 //
@@ -14,18 +17,12 @@
 //     （./、../、../../）里再找一遍；命中后用 SetDllDirectory 把该目录
 //     加进 DLL 搜索路径，SDL2_ttf 依赖的 zlib1.dll 才能被找到。
 //
-// # 原生文件对话框
+// # 原生窗口句柄
 //
-// OpenFileDialog / OpenDirectoryDialog / SaveFileDialog 走 Windows Shell
-// 的 IFileDialog（Vista 起的现代对话框），不经 SDL：纯 Win32 COM 调用，
-// 同样无 CGO。实现见 dialog_windows.go——要点：
-//
-//   - IFileDialog 必须在 STA 上创建与 Show：入口处 CoInitializeEx
-//     (COINIT_APARTMENTTHREADED)，并 LockOSThread 固定线程。
-//   - 父窗口用 SDL_GetWindowWMInfo 取真 HWND（SDL_CreateWindow 返回的是
-//     SDL_Window*，不是 HWND；拿错会让 Show 直接回 E_INVALIDARG）。
-//   - 虚表下标以 Windows SDK 的 ShObjIdl_core.idl 为准；GetResults 的
-//     下标在不同 Windows 版本上不同，实现里运行时探测（getResultsSlot）。
+// Window.NativeHandle 返回窗口的原生 HWND，供原生对话框当父窗口：
+// SDL_CreateWindow 返回的是 SDL_Window*，不是 HWND——原生对话框要拿真
+// HWND 当父窗口（拿错会让 Show 直接回 E_INVALIDARG），只能问
+// SDL_GetWindowWMInfo。取不到时返回 0（对话框照样能弹，只是不挂主窗口）。
 //
 // # 动态加载约定
 //

@@ -61,5 +61,8 @@ func SetClipboardText(string) {}
 // Close 在非 Windows 平台为空操作。
 func (*Window) Close() {}
 
+// NativeHandle 在非 Windows 平台返回 0（无原生句柄）。
+func (*Window) NativeHandle() (uintptr, error) { return 0, ErrUnsupported }
+
 // 平台无关地保持与 Windows 实现一致的接口实现。
 var _ engine.Viewport = (*Window)(nil)

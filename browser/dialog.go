@@ -2,7 +2,7 @@
 
 package browser
 
-import "github.com/go-comm/ghromex/backend/sdl2"
+import "github.com/go-comm/ghromex/backend/dialog"
 
 // FileFilter 描述文件对话框里的一个类型过滤器（对应下拉框里的一项）。
 type FileFilter struct {
@@ -38,8 +38,16 @@ func (win *Window) OpenFileDialog(opts DialogOptions) ([]string, error) {
 	if win == nil || win.sdl == nil {
 		return nil, ErrUnsupported
 	}
-	return win.sdl.OpenFileDialog(opts.Title, opts.DefaultDir,
-		toBackendFilters(opts.Filters), opts.MultiSelect)
+	parent, err := win.sdl.NativeHandle()
+	if err != nil {
+		return nil, err
+	}
+	return dialog.OpenFileDialog(parent, dialog.Options{
+		Title:       opts.Title,
+		DefaultDir:  opts.DefaultDir,
+		Filters:     toDialogFilters(opts.Filters),
+		MultiSelect: opts.MultiSelect,
+	})
 }
 
 // OpenDirectoryDialog 弹出原生「选择文件夹」对话框，返回用户选中的目录。
@@ -49,7 +57,14 @@ func (win *Window) OpenDirectoryDialog(opts DialogOptions) (string, error) {
 	if win == nil || win.sdl == nil {
 		return "", ErrUnsupported
 	}
-	return win.sdl.OpenDirectoryDialog(opts.Title, opts.DefaultDir)
+	parent, err := win.sdl.NativeHandle()
+	if err != nil {
+		return "", err
+	}
+	return dialog.OpenDirectoryDialog(parent, dialog.Options{
+		Title:      opts.Title,
+		DefaultDir: opts.DefaultDir,
+	})
 }
 
 // SaveFileDialog 弹出原生「另存为」对话框，返回用户输入的保存路径。
@@ -59,18 +74,27 @@ func (win *Window) SaveFileDialog(opts DialogOptions) (string, error) {
 	if win == nil || win.sdl == nil {
 		return "", ErrUnsupported
 	}
-	return win.sdl.SaveFileDialog(opts.Title, opts.DefaultDir, opts.DefaultName,
-		toBackendFilters(opts.Filters))
+	parent, err := win.sdl.NativeHandle()
+	if err != nil {
+		return "", err
+	}
+	return dialog.SaveFileDialog(parent, dialog.Options{
+		Title:       opts.Title,
+		DefaultDir:  opts.DefaultDir,
+		DefaultName: opts.DefaultName,
+		Filters:     toDialogFilters(opts.Filters),
+	})
 }
 
-// toBackendFilters 把门面的过滤器转成后端类型（后端不认识 browser 包）。
-func toBackendFilters(filters []FileFilter) []sdl2.FileFilter {
+// toDialogFilters 把门面的过滤器转成对话框包的类型（对话框包不认识
+// browser 包）。
+func toDialogFilters(filters []FileFilter) []dialog.FileFilter {
 	if len(filters) == 0 {
 		return nil
 	}
-	out := make([]sdl2.FileFilter, 0, len(filters))
+	out := make([]dialog.FileFilter, 0, len(filters))
 	for _, f := range filters {
-		out = append(out, sdl2.FileFilter{Name: f.Name, Pattern: f.Pattern})
+		out = append(out, dialog.FileFilter{Name: f.Name, Pattern: f.Pattern})
 	}
 	return out
 }

@@ -468,6 +468,50 @@ func readClipboardText() string {
 	return s
 }
 
+// NativeHandle 返回窗口的原生 HWND（Windows），供原生对话框（backend/dialog
+// 的 IFileDialog）当父窗口。
+//
+// SDL_CreateWindow 返回的是 SDL_Window*，不是 HWND——原生对话框要拿真正的
+// HWND 当父窗口（否则 Show 会回 E_INVALIDARG），只能问 SDL_GetWindowWMInfo。
+// 取不到时返回 0：对话框照样能弹，只是不再挂在主窗口下面。
+func (win *Window) NativeHandle() (uintptr, error) {
+	if win == nil || win.closed || win.win == 0 {
+		return 0, fmt.Errorf("窗口尚未创建，无法取原生句柄")
+	}
+	return win.hwnd(), nil
+}
+
+// sdlSysWMinfo 对应 SDL_syswm.h 的 SDL_SysWMinfo（Windows 分支）：
+// version（SDL_version，3 字节 + 1 字节填充）、subsystem，以及 info
+// 联合体里的 HWND / HDC / HINSTANCE。
+type sdlSysWMinfo struct {
+	version   [3]uint8
+	_         [1]byte
+	subsystem uint32
+	winWindow uintptr
+	winHDC    uintptr
+	winHInst  uintptr
+}
+
+// hwnd 取窗口的原生 HWND；取不到返回 0。
+func (win *Window) hwnd() uintptr {
+	if !hasGetWindowWMInfo || sdlGetWindowWMInfo == nil {
+		return 0
+	}
+	var info sdlSysWMinfo
+	// info.version 必须按 SDL_VERSION 宏填成运行库的版本号，否则
+	// SDL_GetWindowWMInfo 直接返回 SDL_FALSE。
+	var ver [3]uint8
+	sdlGetVersion(uintptr(unsafe.Pointer(&ver[0])))
+	runtime.KeepAlive(&ver[0])
+	info.version = ver
+	if sdlGetWindowWMInfo(win.win, uintptr(unsafe.Pointer(&info))) == 0 {
+		return 0
+	}
+	runtime.KeepAlive(&info)
+	return info.winWindow
+}
+
 // SetTitle 设置窗口标题（应用层可随时更新，如编辑器显示当前文件名）。
 func (win *Window) SetTitle(title string) {
 	if win == nil || win.closed || win.win == 0 {
