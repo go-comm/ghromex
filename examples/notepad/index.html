@@ -46,6 +46,7 @@
 			<option value="">文件</option>
 			<option value="new">新建</option>
 			<option value="open">打开…</option>
+			<option value="opendir">选择文件夹…</option>
 			<option value="save">保存</option>
 			<option value="saveas">另存为…</option>
 			<option value="exit">退出</option>
@@ -71,7 +72,8 @@
 		</select>
 	</div>
 
-	<!-- 路径栏：没有原生文件对话框，用路径输入框代替「打开/保存」的文件选择。 -->
+	<!-- 路径栏：真实窗口下「打开/另存为」用原生文件对话框，路径栏可以直接
+	     输入路径（无头模式没有原生对话框，也用它）。 -->
 	<div id="pathbar">
 		<button id="btn-open" style="left:8px">打开</button>
 		<button id="btn-save" style="left:70px">保存</button>

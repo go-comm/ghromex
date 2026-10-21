@@ -38,6 +38,28 @@
 // / ClipboardText / SetClipboardText）——引擎只管文本，剪贴板读写留在
 // 平台侧（engine 保持纯 Go、可在无显示环境测试）。
 //
+// # 原生文件对话框
+//
+// Window.OpenFileDialog / OpenDirectoryDialog / SaveFileDialog 弹 Windows
+// 原生对话框（Shell 的 IFileDialog，Vista 起的现代外观，支持文件类型
+// 过滤与多选）：
+//
+//	paths, err := win.OpenFileDialog(browser.DialogOptions{
+//		Title:      "打开",
+//		DefaultDir: "C:\\Users\\me\\Documents",
+//		Filters: []browser.FileFilter{
+//			{Name: "文本文件 (*.txt)", Pattern: "*.txt"},
+//			{Name: "所有文件 (*.*)", Pattern: "*.*"},
+//		},
+//	})
+//	if err == nil && len(paths) > 0 {
+//		// 用户选中了文件（取消时 paths 为空、err 为 nil）
+//	}
+//
+// 对话框是模态的：调用期间阻塞当前线程（父窗口的 SDL 事件循环随之
+// 暂停），因此在按钮/菜单的回调里直接调用即可。非 Windows 平台返回
+// ErrUnsupported。
+//
 // 无头调试用 engine.NewHeadlessViewport + engine.RenderNode +
 // doc.DumpSVG：不需要显示器即可断言布局几何。
 package browser

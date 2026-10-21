@@ -93,6 +93,13 @@ var (
 	sdlRenderReadPixels     nativeCall
 	sdlGetWindowPixelFormat nativeCall
 	sdlClearError           nativeCall
+	// 取窗口的原生句柄（HWND）：原生文件对话框要拿它当父窗口。
+	// SDL_CreateWindow 返回的是 SDL_Window*，不是 HWND——真 HWND 要用
+	// SDL_GetWindowWMInfo 取。两个符号都按可选绑定处理：缺失时对话框
+	// 退化为「无父窗口」（照样能用，只是不跟随主窗口置顶）。
+	sdlGetVersion      nativeCall
+	sdlGetWindowWMInfo nativeCall
+	hasGetWindowWMInfo bool
 
 	ttfInit              nativeCall
 	ttfQuit              nativeCall
@@ -274,6 +281,11 @@ func doLoad() error {
 	// 导出，绑定结果永远返回 0，"优先用渲染目标原生格式"实为死代码。
 	sdlGetWindowPixelFormat = bindProcOpt(dllSDL, "SDL_GetWindowPixelFormat")
 	sdlClearError = bindProcOpt(dllSDL, "SDL_ClearError")
+	// 原生窗口句柄：SDL_GetWindowWMInfo 要按 SDL_SysWMinfo 结构回填，
+	// 结构里的 version 字段必须与运行库的版本一致（SDL_VERSION 宏），
+	// 所以先用 SDL_GetVersion 问出版本再填。
+	sdlGetVersion = bindProcOpt(dllSDL, "SDL_GetVersion")
+	sdlGetWindowWMInfo, hasGetWindowWMInfo = bindProbe(dllSDL, "SDL_GetWindowWMInfo")
 	if bindErr != nil {
 		return fmt.Errorf("解析 SDL2.dll 符号失败: %w", bindErr)
 	}

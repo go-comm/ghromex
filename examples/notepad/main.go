@@ -1,8 +1,9 @@
 // 示例：仿 Windows 记事本。
 //
 // 界面：菜单栏（文件/编辑/视图/帮助）、路径栏、铺满窗口的多行编辑区、
-// 状态栏（文件名、光标位置、字符数、提示消息）。文件读写用路径栏的
-// 输入框代替原生文件对话框。
+// 状态栏（文件名、光标位置、字符数、提示消息）。真实窗口下「打开…」
+// 「另存为…」用 Windows 原生文件对话框（Shell 的 IFileDialog），
+// 路径栏仍可直接输入路径（无头模式没有原生对话框，只能用它）。
 //
 //	go run ./examples/notepad
 //	go run ./examples/notepad -file notes.txt      # 启动时打开文件
@@ -28,6 +29,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -193,6 +195,8 @@ func (n *notepad) action(act string) {
 		n.newFile()
 	case "open":
 		n.openFile()
+	case "opendir":
+		n.openDir()
 	case "save":
 		n.saveFile()
 	case "saveas":
@@ -379,14 +383,90 @@ func (n *notepad) setPath(p string) {
 	n.pathIn.SetAttribute("value", p)
 }
 
-// openFile 打开路径栏里的文件。
+// openFile 打开文件：真实窗口下弹原生「打开文件」对话框，无头模式
+// （无窗口）退回到路径栏。
 func (n *notepad) openFile() {
+	if n.win != nil {
+		paths := n.pickFiles("打开", false)
+		if len(paths) == 0 {
+			return // 用户取消
+		}
+		n.loadFile(paths[0])
+		return
+	}
 	p := strings.TrimSpace(n.pathIn.GetAttribute("value"))
 	if p == "" {
 		n.message("请先在路径栏填写文件路径")
 		return
 	}
 	n.loadFile(p)
+}
+
+// pickFiles 弹原生「打开文件」对话框，返回用户选中的文件。
+//
+// 对话框是模态的：调用期间会阻塞当前线程（父窗口的 SDL 事件循环随之
+// 暂停），这与原生应用里模态对话框的表现一致。
+func (n *notepad) pickFiles(title string, multi bool) []string {
+	if n.win == nil {
+		return nil
+	}
+	paths, err := n.win.OpenFileDialog(browser.DialogOptions{
+		Title:       title,
+		DefaultDir:  n.currentDir(),
+		Filters:     fileFilters(),
+		MultiSelect: multi,
+	})
+	if err != nil {
+		n.message("打开对话框失败：" + err.Error())
+		return nil
+	}
+	return paths
+}
+
+// openDir 选一个文件夹（原生「选择文件夹」对话框），把结果填进路径栏。
+func (n *notepad) openDir() {
+	if n.win == nil {
+		n.message("无头模式没有原生对话框，请直接在路径栏填写目录")
+		return
+	}
+	dir, err := n.win.OpenDirectoryDialog(browser.DialogOptions{
+		Title:      "选择文件夹",
+		DefaultDir: n.currentDir(),
+	})
+	if err != nil {
+		n.message("选择文件夹失败：" + err.Error())
+		return
+	}
+	if dir == "" {
+		return // 用户取消
+	}
+	n.setPath(dir)
+	n.message("已选择 " + dir)
+}
+
+// fileFilters 是记事本用到的文件类型过滤器。
+func fileFilters() []browser.FileFilter {
+	return []browser.FileFilter{
+		{Name: "文本文件 (*.txt)", Pattern: "*.txt"},
+		{Name: "所有文件 (*.*)", Pattern: "*.*"},
+	}
+}
+
+// currentDir 返回对话框的初始目录：当前文件所在目录（没有当前文件时
+// 留空，让系统用上次的目录）。
+func (n *notepad) currentDir() string {
+	if n.path == "" {
+		return ""
+	}
+	return filepath.Dir(n.path)
+}
+
+// defaultSaveName 返回「另存为」的初始文件名。
+func (n *notepad) defaultSaveName() string {
+	if n.path == "" {
+		return "新建文档.txt"
+	}
+	return filepath.Base(n.path)
 }
 
 // loadFile 读取文件并载入编辑区。
@@ -410,28 +490,47 @@ func (n *notepad) saveFile() {
 		n.saveAs()
 		return
 	}
-	if err := os.WriteFile(n.path, []byte(n.cur), 0o644); err != nil {
-		n.message("保存失败：" + err.Error())
-		return
-	}
-	n.dirty = false
-	n.message("已保存 " + n.path)
+	n.writeFile(n.path)
 }
 
-// saveAs 保存到路径栏里的文件（并把它设为当前文件）。
+// saveAs 另存为：真实窗口下弹原生「另存为」对话框，无头模式退回到
+// 路径栏。
 func (n *notepad) saveAs() {
+	if n.win != nil {
+		path, err := n.win.SaveFileDialog(browser.DialogOptions{
+			Title:       "另存为",
+			DefaultDir:  n.currentDir(),
+			DefaultName: n.defaultSaveName(),
+			Filters:     fileFilters(),
+		})
+		if err != nil {
+			n.message("另存为失败：" + err.Error())
+			return
+		}
+		if path == "" {
+			return // 用户取消
+		}
+		n.writeFile(path)
+		return
+	}
 	p := strings.TrimSpace(n.pathIn.GetAttribute("value"))
 	if p == "" {
 		n.message("请先在路径栏填写文件路径")
 		return
 	}
-	if err := os.WriteFile(p, []byte(n.cur), 0o644); err != nil {
+	n.writeFile(p)
+}
+
+// writeFile 把编辑区内容写到 path，并把它设为当前文件。
+func (n *notepad) writeFile(path string) {
+	if err := os.WriteFile(path, []byte(n.cur), 0o644); err != nil {
 		n.message("保存失败：" + err.Error())
 		return
 	}
-	n.path = p
+	n.path = path
 	n.dirty = false
-	n.message("已保存 " + p)
+	n.setPath(path)
+	n.message("已保存 " + path)
 }
 
 // undoEdit 撤销上一步编辑（按文本快照回退）。

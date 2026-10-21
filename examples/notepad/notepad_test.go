@@ -189,6 +189,35 @@ func TestMenuActionClearsEditor(t *testing.T) {
 	}
 }
 
+// 无头模式没有原生对话框：「打开」退回路径栏输入的路径。
+func TestHeadlessOpenFallsBackToPathBar(t *testing.T) {
+	np := newTestNotepad(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "note.txt")
+	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	np.pathIn.SetAttribute("value", path)
+
+	clickOption(t, np.doc, "#m-file", "open")
+	if got := np.editor.GetAttribute("value"); got != "hello" {
+		t.Fatalf("打开后编辑区 = %q, want hello", got)
+	}
+	if np.path != path {
+		t.Fatalf("当前文件 = %q, want %q", np.path, path)
+	}
+}
+
+// 无头模式的「选择文件夹」没有原生对话框可用：状态栏要说明白，而不是
+// 静默无反应。
+func TestHeadlessOpenDirExplainsFallback(t *testing.T) {
+	np := newTestNotepad(t)
+	clickOption(t, np.doc, "#m-file", "opendir")
+	if msg := np.stMsg.InnerText(); !strings.Contains(msg, "路径栏") {
+		t.Errorf("状态栏提示 = %q, want 含「路径栏」", msg)
+	}
+}
+
 // 视图 → 放大字号：改的是内联样式里的 font-size。
 func TestViewZoomChangesFontSize(t *testing.T) {
 	np := newTestNotepad(t)
