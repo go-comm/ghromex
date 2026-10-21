@@ -1,4 +1,4 @@
-﻿//go:build windows
+//go:build windows
 
 // 端到端事件链测试：往事件队列注入真实平台事件（点击聚焦 →
 // 文本输入上屏 → KEYDOWN Backspace 删除），由主循环完整消费。
@@ -373,4 +373,3 @@ func skipIfClipboardUnavailable(t *testing.T) {
 		t.Skip("系统剪贴板不可用（被其它进程占用或没有桌面会话），跳过剪贴板测试")
 	}
 }
-
