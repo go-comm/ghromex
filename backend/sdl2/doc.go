@@ -4,7 +4,7 @@
 // （NewWindow 返回 ErrUnsupported）。
 //
 // 原生文件对话框不在本包：它是 Windows Shell 的能力，与渲染后端无关，
-// 独立在 backend/dialog（实现要点见那里的包文档）。
+// 独立在 runtime/dialog（实现要点见那里的包文档）。
 //
 // # 平台与线程约束
 //

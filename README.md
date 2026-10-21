@@ -26,7 +26,7 @@
 - Go 1.20+（go.mod 基线，作库供其他项目引用，1.20 以上工具链均可构建；无需 CGO）
 - 渲染后端目前提供 Windows 实现（`backend/sdl2`，加载 `SDL2.dll` 2.28 与 `SDL2_ttf.dll`）
 - 把 `SDL2.dll`、`SDL2_ttf.dll`（及 `zlib1.dll`）放到工程根目录 `libs/`，或保证系统可搜索到它们
-- 平台边界：`engine` 包是纯 Go、可移植的；`backend/sdl2` 是平台实现层——Windows 提供 SDL2 实现，其它平台 `NewWindow` 返回 `ErrUnsupported`；`browser` 与 `examples/` 都不带构建标签，任意平台 `go build ./...` / `go test ./...` 都能通过，非 Windows 启动窗口时会打印明确提示
+- 平台边界：`engine` 包是纯 Go、可移植的；`backend/sdl2` 是渲染后端——Windows 提供 SDL2 实现，其它平台 `NewWindow` 返回 `ErrUnsupported`；`runtime/` 是平台能力（原生对话框、消息框），Windows 用纯 Win32 调用实现，其它平台返回 `ErrUnsupported`；`browser` 与 `examples/` 都不带构建标签，任意平台 `go build ./...` / `go test ./...` 都能通过，非 Windows 启动窗口时会打印明确提示
 
 ## 快速开始
 
@@ -143,7 +143,7 @@ if err == nil && res == browser.ResultYes {
 对话框是模态的：调用期间阻塞当前线程（父窗口的 SDL 事件循环随之暂停），
 在按钮/菜单的回调里直接调用即可。文件对话框走 Shell 的 `IFileDialog`（纯
 Win32 COM 调用，无 CGO），消息框走 user32 的 `MessageBoxW`（不需要 COM、
-不需要 STA），细节见 `backend/dialog/dialog.go`。
+不需要 STA），细节见 `runtime/dialog/dialog.go`。
 
 ## 项目结构
 
@@ -170,10 +170,10 @@ backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓
                    页面文本段数超限时不再逐帧重渲染）、
                    剪贴板读写（Ctrl+C 写 / Ctrl+V 读，引擎只管文本）、
                    原生窗口句柄（NativeHandle，供原生对话框当父窗口）
-backend/dialog/     Windows 原生对话框：文件对话框（Shell IFileDialog，纯 Win32
-                   COM，无 CGO：打开文件 / 打开多个文件 / 选择文件夹 / 另存为）
-                   与消息框（user32 MessageBoxW，不需要 COM）。与渲染后端无关，
-                   父窗口句柄由调用方传入，故单列一包
+runtime/dialog/     平台能力（与渲染后端无关）：Windows 原生对话框——
+                   文件对话框（Shell IFileDialog，纯 Win32 COM，无 CGO：打开文件 /
+                   打开多个文件 / 选择文件夹 / 另存为）与消息框（user32
+                   MessageBoxW，不需要 COM）。父窗口句柄由调用方传入
 examples/          可独立运行的示例（每个目录 main.go + index.html）：
   login/             登录页（按钮交互、状态文本）
   form/              常规表单（员工登记表：布局特性 + 可输入控件）
@@ -188,7 +188,8 @@ libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll，见 li
 
 **包内文档**：每个包的入口说明写在各自的 `doc.go`（`go doc ./engine` 可读，
 也进 pkg.go.dev）：engine 讲分层地图与「改代码前必读的不变量」、backend/sdl2
-讲平台边界与线程约束、browser 讲三方分工与用法骨架；`libs/` 里第三方 DLL 的
+讲平台边界与线程约束、browser 讲三方分工与用法骨架；`runtime/` 的分层
+约定（后端 vs 平台能力）见 `runtime/README.md`；`libs/` 里第三方 DLL 的
 版本、出处、许可与查找顺序见 `libs/README.md`。
 
 ## 已支持的 CSS 子集

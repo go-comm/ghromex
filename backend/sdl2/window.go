@@ -468,7 +468,7 @@ func readClipboardText() string {
 	return s
 }
 
-// NativeHandle 返回窗口的原生 HWND（Windows），供原生对话框（backend/dialog
+// NativeHandle 返回窗口的原生 HWND（Windows），供原生对话框（runtime/dialog
 // 的 IFileDialog）当父窗口。
 //
 // SDL_CreateWindow 返回的是 SDL_Window*，不是 HWND——原生对话框要拿真正的

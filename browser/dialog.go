@@ -2,7 +2,7 @@
 
 package browser
 
-import "github.com/go-comm/ghromex/backend/dialog"
+import "github.com/go-comm/ghromex/runtime/dialog"
 
 // FileFilter 描述文件对话框里的一个类型过滤器（对应下拉框里的一项）。
 type FileFilter struct {
@@ -25,7 +25,7 @@ type DialogOptions struct {
 	Filters []FileFilter
 }
 
-// 消息框的类型直接复用 backend/dialog（类型别名），门面不另造一套。
+// 消息框的类型直接复用 runtime/dialog（类型别名），门面不另造一套。
 type (
 	// MessageOptions 是消息框的选项。
 	MessageOptions = dialog.MessageOptions
