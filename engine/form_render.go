@@ -170,9 +170,11 @@ func renderSelectPopup(g Graphics, sel *htmlElement, focus HTMLElement) {
 			// 沿父链的最近实底交给后端，白字才能压在蓝底上出正确字形。
 			seed := NewPaint()
 			seed.SetBackground(selectHighlight)
-			renderNodeTextColor(g, o, seed, focus, selectHighlightText)
+			// 选项浮层是覆盖在正文之上的浮层，可能有一部分在视口外
+			// （贴着视口边缘时），不按视口裁剪。
+			renderNodeTextColor(g, o, seed, focus, selectHighlightText, 0, 0)
 		} else {
-			renderNode(g, o, nil, focus)
+			renderNode(g, o, nil, focus, 0, 0)
 		}
 	}
 }

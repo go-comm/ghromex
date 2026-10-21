@@ -136,21 +136,23 @@ type htmlElement struct {
 	scrollTop int
 	// scrollLeft 为横向滚动偏移（像素），语义同 scrollTop。
 	scrollLeft int
-	// scrollAnimTop/scrollAnimLeft 是**平滑滚动的当前视觉位置**：滚动目标
-	// 在 scrollTop/scrollLeft，实际位移由每轮布局按时间推进（Chrome 的
+	// scrollAnimTop/scrollAnimLeft 是**平滑滚动的当前视觉位置**（整像素）：
+	// 滚动目标在 scrollTop/scrollLeft，实际位移由每轮布局按时间推进（Chrome 的
 	// 动画式滚动；引擎此前整档跳变，观感生硬）。scrollAnimOn 表示动画在途。
 	scrollAnimTop, scrollAnimLeft int
 	// scrollShiftTop/scrollShiftLeft 是**已施加到子树上的滚动平移量**。
 	// 布局后按绝对偏移平移一次，动画推进时只按增量平移（见
 	// applyScrollDeltas）——滚动动画帧因此不必重排。
 	scrollShiftTop, scrollShiftLeft int
-	// scrollAnimFromTop/FromLeft 是本次动画的起点（滚动中途再来一档滚轮时
-	// 从当前视觉位置重新起算，避免跳变）；scrollAnimProgress 为 0..1 的
-	// 时间进度，scrollAnimLastNs 是上一帧的时间戳（用于算实际帧间隔）。
-	scrollAnimFromTop, scrollAnimFromLeft int
-	scrollAnimProgress                    float64
-	scrollAnimLastNs                      int64
-	scrollAnimOn                          bool
+	// scrollAnimPosTop/PosLeft 是弹簧的连续位置（亚像素），scrollAnimVelTop/
+	// VelLeft 是速度（px/s）。动画用临界阻尼弹簧推进：连续滚动时新的一档
+	// 滚轮只换目标、速度保留（见 scroll.go 的 startScrollAnim）——每档都从
+	// 静止重新起步的话，滚起来是一顿一顿的。
+	scrollAnimPosTop, scrollAnimPosLeft float64
+	scrollAnimVelTop, scrollAnimVelLeft float64
+	// scrollAnimLastNs 是上一帧的时间戳（用于算实际帧间隔）。
+	scrollAnimLastNs int64
+	scrollAnimOn     bool
 	// contentW/contentH 为最近一次布局测得的未裁剪内容尺寸（常规流子
 	// 的外盒延伸量），是滚动偏移夹紧的依据；textarea 等原子控件为 0
 	//（其内容量度走各自专用路径）。

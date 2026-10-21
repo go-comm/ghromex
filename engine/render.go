@@ -125,17 +125,25 @@ func createsStackingContext(e HTMLElement) bool {
 // 整体落层，避免「祖先背景盖住自己 z:auto/absolute 子元素」。
 // 定位子树由本 pass 绘制：主 pass 递归遇到 positioned 子节点直接跳过。
 // 未实现 opacity/transform 成组、负 z 压到背景下等更细规则，需要时再扩展。
+//
+// 视口裁剪：绘制时跳过完全落在视口外的盒子（滚动时页面下半部分不再白
+// 画一遍）。这是 Chrome「只合成可见瓦片」的等价物——滚动动画每帧都要
+// 重画整页，不裁剪的话一帧上千次绘制调用，帧时间顶到 vsync 之外就掉帧。
 func RenderNode(g Graphics, node HTMLElement) {
 	if g == nil {
 		g = NewFakeGraphics()
 	}
 	var focus HTMLElement
+	vpW, vpH := 0, 0
 	if d, ok := node.(*htmlDocument); ok {
 		focus = d.focus
+		if v := d.Viewport(); v != nil {
+			vpW, vpH = v.ViewportWidth(), v.ViewportHeight()
+		}
 	}
-	renderNode(g, node, nil, focus)
+	renderNode(g, node, nil, focus, vpW, vpH)
 	for _, pb := range collectPositioned(node) {
-		paintPositioned(g, pb.e, focus)
+		paintPositioned(g, pb.e, focus, vpW, vpH)
 	}
 	// select 选项浮层最后绘制：它覆盖其后的流内容与定位层，
 	// 与命中测试（ElementAt 优先查展开 option）保持同一层序语义。
@@ -152,9 +160,9 @@ func RenderNode(g Graphics, node HTMLElement) {
 // 每个元素的 computed，renderNode 内部会用自身 comp 组装。定位子树不在
 // 主 pass 递归里，祖先的 overflow 裁剪必须按父链重新压栈，否则滚动容器
 // 里的脱流内容会画到盒外。
-func paintPositioned(g Graphics, e HTMLElement, focus HTMLElement) {
+func paintPositioned(g Graphics, e HTMLElement, focus HTMLElement, vpW, vpH int) {
 	n := pushAncestorClips(g, e)
-	renderNode(g, e, nil, focus)
+	renderNode(g, e, nil, focus, vpW, vpH)
 	// 定位元素画完后，给它最近的「圆角 + 裁剪」祖先补盖四角：定位内容
 	// 是在定位 pass 里画的（主 pass 早已补盖过一次），不补盖就会盖回
 	// 圆角（大黑卡的右上角被溢出到角外的圆形装饰盖成方角）。
@@ -164,7 +172,7 @@ func paintPositioned(g Graphics, e HTMLElement, focus HTMLElement) {
 	}
 	if createsStackingContext(e) {
 		for _, pb := range collectPositioned(e) {
-			paintPositioned(g, pb.e, focus)
+			paintPositioned(g, pb.e, focus, vpW, vpH)
 		}
 	}
 	popClips(g, n)
@@ -260,15 +268,33 @@ func popClips(g Graphics, n int) {
 // 使聚焦框与 radio/checkbox 的选中标记与浏览器观感一致。
 var focusBlue = NewColor(0x00, 0x78, 0xD4, 255)
 
-func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement) {
-	renderNodeTextColor(g, e, parentPaint, focus, nil)
+// offscreenBox 判断盒子是否完全落在视口外（画了也看不见）。
+//
+// vpW/vpH 为 0 表示视口未知（无头渲染、SVG 导出等）→ 一律不裁剪。
+//
+// 只按盒子本身判断，不连带裁子树：overflow:visible 的子内容可能从父盒
+// 里溢出来而仍然可见，由子节点各自判断。
+func offscreenBox(bx, by, bw, bh, vpW, vpH int) bool {
+	if vpW <= 0 || vpH <= 0 {
+		return false
+	}
+	if bw <= 0 || bh <= 0 {
+		return true // 空盒没有可画的东西
+	}
+	return bx+bw <= 0 || bx >= vpW || by+bh <= 0 || by >= vpH
+}
+
+func renderNode(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement, vpW, vpH int) {
+	renderNodeTextColor(g, e, parentPaint, focus, nil, vpW, vpH)
 }
 
 // renderNodeTextColor 与 renderNode 同构，但用 textColor 强制覆盖本子树的
 // 文字绘制色（select 展开浮层的选中项：#1967D2 高亮底上出白字，Chrome 同款）。
 // 覆盖作用于 Paint（文字绘制与子树继承，含级联到 textNode 的值）；元素自身
 // 背景/边框仍按 computed 绘制，表单控件专用绘制分支不读该 Paint，不受影响。
-func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement, textColor Color) {
+//
+// vpW/vpH 是可见区域（0 = 未知 → 不裁剪）：完全落在视口外的盒子不画。
+func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTMLElement, textColor Color, vpW, vpH int) {
 	if e == nil {
 		return
 	}
@@ -322,6 +348,11 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 			dec = comp.TextDecoration()
 		}
 		for _, run := range tn.node.runs {
+			// 视口外的片段不画：长页滚动时页面下半部分的文字占了大部分
+			// 绘制调用，逐段裁掉能把一帧的调用数降到可见部分那点。
+			if offscreenBox(run.x, run.y, run.w, run.h, vpW, vpH) {
+				continue
+			}
 			g.DrawText(run.x, run.y, run.w, run.h, p, run.text)
 			if dec != TextDecorationNone && run.w > 0 && run.h > 0 {
 				drawDecoration(g, dec, run.x, run.y, run.w, run.h, run.asc, p.Size().Pixel(), p)
@@ -359,26 +390,34 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 			r = (minInt(bw, bh) + 1) / 2
 		}
 
-		if bg := comp.BackgroundColor(); bg != nil {
-			fillRoundedRect(g, bx, by, bw, bh, r, bg)
-		}
-		if bc := comp.BorderColor(); bc != nil && comp.BorderStyle() != BorderStyleNone && bw > 0 && bh > 0 {
-			strokeRoundedRect(g, bx, by, bw, bh, r, bd, bc)
+		// 盒子整体在视口外：背景/边框/控件外观都不画（子树仍要遍历——
+		// overflow:visible 的子内容可能露在视口里，由子节点各自判断）。
+		inView := !offscreenBox(bx, by, bw, bh, vpW, vpH)
+
+		if inView {
+			if bg := comp.BackgroundColor(); bg != nil {
+				fillRoundedRect(g, bx, by, bw, bh, r, bg)
+			}
+			if bc := comp.BorderColor(); bc != nil && comp.BorderStyle() != BorderStyleNone && bw > 0 && bh > 0 {
+				strokeRoundedRect(g, bx, by, bw, bh, r, bd, bc)
+			}
 		}
 
 		// 聚焦框画在边框盒上，必须早于下方 overflow 裁剪压栈：textarea 默认
 		// overflow:hidden，裁剪区是 padding 盒，画在边框盒上的聚焦框会被整圈
 		// 裁掉（此前聚焦框在裁剪栈内绘制 → textarea 永远看不到聚焦指示）。
 		// 单选/复选此前就没有聚焦框（Chrome 同款圆环由选中标记承担），保持。
-		if focused && isFormControl(base) && bw > 0 && bh > 0 && checkKind(base) == "" {
+		if inView && focused && isFormControl(base) && bw > 0 && bh > 0 && checkKind(base) == "" {
 			strokeRoundedRect(g, bx, by, bw, bh, r, edges{1, 1, 1, 1}, focusBlue)
 		}
 
 		// 列表标记：引擎无 list-item 概念，标记文本由布局期算出（ul → "•"，
 		// ol → "1." "2."…），画在内容左缘左侧、右对齐到 −0.75em 处
 		//（Chrome 实测：标记盒右缘 = 内容左缘 − 0.5em）。
-		if mx, my, mw, mh, ok := listMarkerBox(g, base, comp); ok {
-			g.DrawText(mx, my, mw, mh, p, base.listMarker)
+		if inView {
+			if mx, my, mw, mh, ok := listMarkerBox(g, base, comp); ok {
+				g.DrawText(mx, my, mw, mh, p, base.listMarker)
+			}
 		}
 
 		// overflow 非 visible：裁剪区为 padding 盒（CSS 语义），包住下方
@@ -393,7 +432,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		// 聚焦蓝框，宽度溢出舍头保尾；按钮型居中不截断；radio/checkbox 选中
 		// 时补画强调色与勾选标记）；textarea 画折行文本 + 光标；
 		// select 画选中文本 + 右侧下拉箭头。
-		if isFormControl(base) && bw > 0 && bh > 0 {
+		if inView && isFormControl(base) && bw > 0 && bh > 0 {
 			typ := strings.ToLower(base.GetAttribute("type"))
 			switch {
 			case strings.EqualFold(base.tagName, "select"):
@@ -470,7 +509,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		if isFormControl(base) {
 			continue // 控件内容由专用绘制负责（select 选项另走浮层 pass）
 		}
-		renderNodeTextColor(g, child, p, focus, textColor)
+		renderNodeTextColor(g, child, p, focus, textColor, vpW, vpH)
 	}
 	if clipped {
 		// 圆角裁剪盒：把四角"圆角形状之外"的部分用元素背后的底色盖掉，

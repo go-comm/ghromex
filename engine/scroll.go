@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"math"
 	"strings"
 	"time"
 )
@@ -14,7 +15,9 @@ import (
 //   - 根元素的滚动盒取视口（而非自身盒高），从而长页面可整页滚动；
 //   - 滚轮从命中元素沿祖先链向上传递，对应轴滚到底才继续向上传
 //     （scroll chaining），最后落到文档级滚动；textarea 例外：纵向
-//     滚轮全量吸收（含撞边界后的剩余位移），光标停在框上时页面不动。
+//     滚轮全量吸收（含撞边界后的剩余位移），光标停在框上时页面不动；
+//   - 文档级滚动是**动画式**的（Chrome 同款）：滚轮只改目标，视觉位置由
+//     弹簧（位置+速度）逐帧推进，见 advanceScrollAnim/startScrollAnim。
 //
 // 滚动条 UI 不做（README 已知限制），滚轮是唯一驱动源。
 
@@ -288,40 +291,36 @@ func wheelScrollTextarea(doc HTMLDocument, el *htmlElement, delta int) int {
 	return delta - (next - cur)
 }
 
-// 文档级平滑滚动的时基参数。Chrome(Windows) 一格滚轮约 100px、动画
-// ≈100~150ms；取 120ms。按**真实时间**推进而非固定帧数：排版/绘制慢时
-// 不会把一档滚轮拖成几百毫秒（此前每帧只走剩余距离的 1/3，13 帧才收敛，
-// 配合每帧重排重绘实测 400ms+，就是"慢吞吞"的来源）；帧率高时也不会一闪而过。
+// 文档级平滑滚动的时基参数。
+//
+// 用**临界阻尼弹簧**（位置 + 速度）而不是固定时长的缓动曲线：固定曲线
+// （此前的 easeOutCubic）在连续滚动时每档都从静止重新起步，速度在档与档
+// 之间跳变——实测每档的位移是 35/26/17/12/6/3/1/0px 的锯齿，滚起来一顿
+// 一顿。弹簧只换目标、保留速度，运动是连续的（Chrome 的滚动动画就是
+// 连续重定向的），收尾也自然。
 const (
-	scrollAnimDuration = 120 * time.Millisecond
+	// scrollAnimOmega 是弹簧的固有角频率（1/s）：临界阻尼下位置偏差按
+	// e^{-ωt} 衰减，约 4/ω 收敛。取 55 → 约 70~110ms 收敛，与 Chrome
+	// 一格滚轮（≈100~150ms）同量级。
+	scrollAnimOmega = 55.0
 	// scrollAnimMinFrame 是连续布局（测试里没有 sleep，墙钟间隔≈0）时的
 	// 名义帧步长：保证紧密循环按 60fps 节奏推进并在有限帧内收敛，不依赖
 	// 墙钟（引擎布局要可重复）。真实运行时 dt 通常更大，取两者较大值。
 	scrollAnimMinFrame = 16 * time.Millisecond
+	// scrollAnimStepMax 是弹簧积分的最大子步长：显式积分在 ω·h 接近 2 时
+	// 临界（会发散），按 4ms 切分保证稳定。
+	scrollAnimStepMax = 4 * time.Millisecond
+	// scrollAnimOmega2 是 ω²（积分时要反复用）。
+	scrollAnimOmega2 = scrollAnimOmega * scrollAnimOmega
 )
 
-// easeOutCubic 是 Chrome 滚动动画同类的减速曲线：起步快、尾段缓。
-func easeOutCubic(t float64) float64 {
-	u := 1 - t
-	return 1 - u*u*u
-}
-
-// lerpInt 按进度 t 在 from→to 之间取整插值（t=1 精确落在 to 上）。
-func lerpInt(from, to int, t float64) int {
-	if t <= 0 {
-		return from
-	}
-	if t >= 1 {
-		return to
-	}
-	d := float64(to-from) * t
-	if d < 0 {
-		return from - int(-d+0.5)
-	}
-	return from + int(d+0.5)
-}
-
-// advanceScrollAnim 把文档级滚动的视觉位置向目标推进一帧。
+// advanceScrollAnim 把文档级滚动的视觉位置向目标推进一帧（弹簧积分）。
+//
+// 动画按真实时间推进（见 scrollAnimMinFrame），故帧率波动不会拖慢滚动
+// 速度；每帧只做一次平移，代价与页面元素数线性相关、与样式表规模无关。
+//
+// 引擎不自带帧循环：后端每帧调一次本函数即可（browser 的主循环已接上）。
+// 不调则动画停在起点（滚动目标仍然生效，只是不做补间）。
 func advanceScrollAnim(el *htmlElement) {
 	now := time.Now().UnixNano()
 	dt := now - el.scrollAnimLastNs
@@ -329,51 +328,53 @@ func advanceScrollAnim(el *htmlElement) {
 	if min := int64(scrollAnimMinFrame); dt < min {
 		dt = min
 	}
-	el.scrollAnimProgress += float64(dt) / float64(scrollAnimDuration)
-	if el.scrollAnimProgress >= 1 {
-		el.scrollAnimProgress = 1
+	// 半隐式欧拉积分：子步 ≤ 4ms，保证 ω·h 足够小不发散。
+	h := float64(dt) / float64(time.Second)
+	steps := int(h/scrollAnimStepMax.Seconds()) + 1
+	sh := h / float64(steps)
+	for i := 0; i < steps; i++ {
+		el.scrollAnimVelTop += (scrollAnimOmega2*(float64(el.scrollTop)-el.scrollAnimPosTop) -
+			2*scrollAnimOmega*el.scrollAnimVelTop) * sh
+		el.scrollAnimPosTop += el.scrollAnimVelTop * sh
+		el.scrollAnimVelLeft += (scrollAnimOmega2*(float64(el.scrollLeft)-el.scrollAnimPosLeft) -
+			2*scrollAnimOmega*el.scrollAnimVelLeft) * sh
+		el.scrollAnimPosLeft += el.scrollAnimVelLeft * sh
 	}
-	e := easeOutCubic(el.scrollAnimProgress)
-	nextTop := lerpInt(el.scrollAnimFromTop, el.scrollTop, e)
-	nextLeft := lerpInt(el.scrollAnimFromLeft, el.scrollLeft, e)
-	// 位移很小时缓动取整可能原地不动（如 1~2px 的目标）：至少推进 1px，
-	// 否则视觉上像卡住，且"连续两帧不变即收敛"的调用方会误判动画结束。
-	if el.scrollAnimProgress < 1 {
-		if nextTop == el.scrollAnimTop && el.scrollTop != el.scrollAnimTop {
-			if el.scrollTop > el.scrollAnimTop {
-				nextTop++
-			} else {
-				nextTop--
-			}
-		}
-		if nextLeft == el.scrollAnimLeft && el.scrollLeft != el.scrollAnimLeft {
-			if el.scrollLeft > el.scrollAnimLeft {
-				nextLeft++
-			} else {
-				nextLeft--
-			}
-		}
+	// 收敛：位置贴到目标（差 < 0.5px）就吸附并结束该轴的动画。临界阻尼
+	// 不会过冲，位置是单调逼近的，这一步就是收尾。
+	topDone := math.Abs(float64(el.scrollTop)-el.scrollAnimPosTop) < 0.5
+	leftDone := math.Abs(float64(el.scrollLeft)-el.scrollAnimPosLeft) < 0.5
+	if topDone {
+		el.scrollAnimPosTop = float64(el.scrollTop)
+		el.scrollAnimVelTop = 0
 	}
-	el.scrollAnimTop, el.scrollAnimLeft = nextTop, nextLeft
-	if el.scrollAnimProgress == 1 {
-		el.scrollAnimOn = false
+	if leftDone {
+		el.scrollAnimPosLeft = float64(el.scrollLeft)
+		el.scrollAnimVelLeft = 0
 	}
+	el.scrollAnimOn = !(topDone && leftDone)
+	// 视觉位置取整（像素网格）：布局按整像素平移子树。
+	el.scrollAnimTop = int(math.Round(el.scrollAnimPosTop))
+	el.scrollAnimLeft = int(math.Round(el.scrollAnimPosLeft))
 }
 
-// startScrollAnim 启动文档级平滑滚动动画：起点取当前视觉位置（动画已在途
-// 则从当前视觉位置重新起算，连续几档滚轮不会跳变），目标由调用方随后写入
-// scrollTop/scrollLeft。
+// startScrollAnim 启动（或重定向）文档级平滑滚动动画：目标由调用方随后
+// 写入 scrollTop/scrollLeft。
+//
+// 首次启动：位置 = 当前视觉位置、速度 = 0（弹簧自己加速再减速到目标）。
+//
+// 重定向（滚动途中又来一档滚轮）：**只换目标，速度保留**——连续滚动于是
+// 是一段连贯的滑动；每档都从静止重新起步的话，滚起来是一顿一顿的。
 func startScrollAnim(el *htmlElement) {
 	if el == nil {
 		return
 	}
-	fromTop, fromLeft := el.scrollTop, el.scrollLeft
-	if el.scrollAnimOn {
-		fromTop, fromLeft = el.scrollAnimTop, el.scrollAnimLeft
+	if !el.scrollAnimOn {
+		el.scrollAnimPosTop = float64(el.scrollAnimTop)
+		el.scrollAnimPosLeft = float64(el.scrollAnimLeft)
+		el.scrollAnimVelTop = 0
+		el.scrollAnimVelLeft = 0
 	}
-	el.scrollAnimFromTop, el.scrollAnimFromLeft = fromTop, fromLeft
-	el.scrollAnimTop, el.scrollAnimLeft = fromTop, fromLeft
-	el.scrollAnimProgress = 0
 	el.scrollAnimLastNs = time.Now().UnixNano()
 	el.scrollAnimOn = true
 }
