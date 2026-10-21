@@ -54,6 +54,7 @@ var (
 	sdlSetWindowTitle         nativeCall
 	sdlDestroyWindow          nativeCall
 	sdlCreateRenderer         nativeCall
+	sdlGetRendererInfo        nativeCall
 	sdlDestroyRenderer        nativeCall
 	sdlSetRenderDrawBlendMode nativeCall
 	sdlSetRenderDrawColor     nativeCall
@@ -240,6 +241,7 @@ func doLoad() error {
 	sdlSetWindowTitle = bindSdl("SDL_SetWindowTitle")
 	sdlDestroyWindow = bindSdl("SDL_DestroyWindow")
 	sdlCreateRenderer = bindSdl("SDL_CreateRenderer")
+	sdlGetRendererInfo = bindSdl("SDL_GetRendererInfo")
 	sdlDestroyRenderer = bindSdl("SDL_DestroyRenderer")
 	sdlSetRenderDrawBlendMode = bindSdl("SDL_SetRenderDrawBlendMode")
 	sdlSetRenderDrawColor = bindSdl("SDL_SetRenderDrawColor")
@@ -389,6 +391,8 @@ func cBytes(s string) ([]byte, uintptr) {
 // 生命周期由 SDL 保证，并非 Go 指针的 uintptr 中转。直接写
 // unsafe.Pointer(ptr) 会被 go vet 的 unsafeptr 检查误报，这里采用
 // 内存重解释（按位读取局部变量的值）绕过误报，语义完全等价。
+//
+//go:noinline
 func goString(uptr uintptr) string {
 	return goCString(uptr, 4096)
 }
@@ -397,6 +401,8 @@ func goString(uptr uintptr) string {
 // 截断处理）。goString 的 4096 字节上限只适合短串（如错误信息）；
 // 剪贴板内容可能很长，需按更大的上限读取——否则长文本会被截断成
 // 前 4096 字节（goString 找不到 NUL 时返回已读到的部分）。
+//
+//go:noinline
 func goCString(uptr uintptr, max int) string {
 	if uptr == 0 || max <= 0 {
 		return ""

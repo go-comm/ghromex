@@ -111,6 +111,11 @@ func (win *Window) clearCanvas() {
 //
 // 画布背景**不透明**时，白底那层是完全被盖住的重复填充——大窗体下就是
 // 一整屏的像素（软件光栅器下 2560×1440 要 0.3ms），没必要画。
+//
+// **前提**：画布背景是「铺满整个视口的不透明矩形」。
+// 若将来画布背景支持圆角、边距或半透明，这条优化必须回退——否则四角/
+// 边缘会露出上一帧的残留（这种 bug 像素测试能抓到，但没人会想到去测
+// 四角）。改动前先确认这一点。
 func clearLayers(doc engine.HTMLDocument) []core.Color {
 	white := engine.NewColor(255, 255, 255, 255)
 	bg := engine.CanvasBackground(doc)

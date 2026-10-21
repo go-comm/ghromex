@@ -907,35 +907,72 @@ func (g *Graphics) ascentOf(path string, size int, bold bool) int32 {
 	return int32(asc)
 }
 
+// rendererInfoSize 是 SDL_RendererInfo 的**实测**占用字节数。
+//
+// 不能照抄 SDL 头文件里 32 字节的 SDL2 定义：本仓库随附的 SDL2.dll 实际
+// 写了 88 字节（实测：把缓冲区填成 0xAA，调用后最后一个被改写的字节在
+// 第 87 位）。按 32 字节申请缓冲会**越界写坏调用者的栈**——现场症状是
+// 调用之后局部变量（渲染器句柄）变成 0、随后调用空指针崩溃。
+//
+// 缓冲区按 128 字节申请（> 88，留余量），并且只读前 8 字节（name 指针）。
+const rendererInfoSize = 128
+
+// RendererDriver 返回渲染后端的驱动名（"direct3d11" / "opengl" /
+// "software" / "llvmpipe" …），取自 SDL_GetRendererInfo。
+//
+// 用于诊断：软件路径的瓶颈是**填充率**（每像素纳秒数），GPU 路径的瓶颈
+// 通常在别处（纹理上传次数、draw call 数、swap 间隔）——两者的排查方向
+// 完全不同，先确认走的是哪条路再量。
+func RendererDriver(renderer uintptr) string {
+	if renderer == 0 || sdlGetRendererInfo == nil {
+		return ""
+	}
+	var info [rendererInfoSize]byte
+	if sdlGetRendererInfo(renderer, uintptr(unsafe.Pointer(&info[0]))) != 0 {
+		return ""
+	}
+	// name 是结构体第一个字段（char*，指向驱动名）。
+	namePtr := *(*uintptr)(unsafe.Pointer(&info[0]))
+	if namePtr == 0 {
+		return ""
+	}
+	// 读 C 侧字符串：用 goCString（标了 //go:noinline——「取形参地址再
+	// 重解释」的写法在形参被内联展开时可能读到没落栈的垃圾值）。驱动名很短，
+	// 64 字节足够。
+	return goCString(namePtr, 64)
+}
+
 // DrawColor 实现 core.Graphics。
 func (g *Graphics) DrawColor(x, y, w, h int, color core.Color) {
 	if color == nil || w <= 0 || h <= 0 {
 		return
 	}
 	r, gr, b, a := color.RGBA()
-	// 混合模式按**本次填充的 alpha** 选：不透明用 NONE（直接写像素），半透明
-	// 才用 BLEND（逐像素混合）。
+	// 混合模式按**本次填充的 alpha** 分流：不透明 → NONE（直接写像素），
+	// 半透明 → BLEND（逐像素混合）。
 	//
 	// 之前渲染器全局设成 BLEND（见 NewWindow），于是**每次填充都是逐像素
-	// 混合**：软件光栅器下约 2.1ns/像素（同样的直接写像素只要 0.2ns）。门户页
-	// 一帧要填 1700 万像素（清屏两块 + 页面背景 + 卡片），2560×1440 窗体
-	// 下单帧 37ms —— 最大化后滚动直接掉到 27fps。小窗体看不出来（像素少），
-	// 最大化后才发现是填充率的问题。
+	// 混合**：软件光栅器下约 2.1ns/像素（直接写像素只要 0.2ns）。门户页一帧
+	// 要填 1700 万像素（清屏两块 + 页面背景 + 卡片），2560×1440 窗体下单帧
+	// 37ms —— 最大化后滚动直接掉到 27fps。小窗体看不出来（像素少），最大化
+	// 后才发现是填充率的问题。
 	//
-	// 画完一律复原成 BLEND：后面的贴图拷贝（精灵、文字的抗锯齿边缘）要靠
-	// 混合。SDL 各后端对「拷贝用纹理的混合模式还是渲染器的」处理不一致，
-	// 保持渲染器状态是 BLEND 最稳。
-	blend := blendModeBlend
+	// 判定必须严格按 **A == 255**：SDL_BLENDMODE_NONE 下源 alpha 是**直接
+	// 拷贝**进目标（不是忽略）。把 A=250 当成不透明走 NONE，目标里就会留下
+	// alpha=250 的像素——主窗口最终输出忽略 alpha 看不出来，但离屏目标、
+	// 后续读回（截图）会带上它。
+	blend := uintptr(blendModeBlend)
 	if a == 255 {
 		blend = blendModeNone
 	}
-	sdlSetRenderDrawBlendMode(g.renderer, uintptr(blend))
+	sdlSetRenderDrawBlendMode(g.renderer, blend)
+	// 成对复原：混合模式是渲染器的**全局状态**，漏切会让后面的贴图拷贝
+	// （精灵、文字的抗锯齿边缘）用错模式。用 defer 保证任何退出路径
+	// （提前返回、错误、panic）都复原——不靠调用方「记得切回来」。
+	defer sdlSetRenderDrawBlendMode(g.renderer, blendModeBlend)
 	sdlSetRenderDrawColor(g.renderer, uintptr(r), uintptr(gr), uintptr(b), uintptr(a))
 	rect := sdlRect{int32(x), int32(y), int32(w), int32(h)}
 	checkDraw("SDL_RenderFillRect", sdlRenderFillRect(g.renderer, uintptr(unsafe.Pointer(&rect))))
-	if blend == blendModeNone {
-		sdlSetRenderDrawBlendMode(g.renderer, blendModeBlend)
-	}
 }
 
 // DrawImage 暂不支持（预留接口）。

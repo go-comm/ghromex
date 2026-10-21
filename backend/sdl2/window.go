@@ -109,12 +109,22 @@ func NewWindow(w, h int, title string) (*Window, error) {
 		return nil, fmt.Errorf("SDL_CreateRenderer: %s", lastError())
 	}
 	if drawDebug {
+		// 驱动名要能查：软件路径的瓶颈是填充率，GPU 路径的瓶颈通常在
+		// 纹理上传/draw call/swap 间隔——两者的排查方向完全不同，先确认
+		// 走的是哪条路再量（GHROMEX_DEBUG 非空时打印）。
+		driver := RendererDriver(renderer)
 		if gpu {
-			fmt.Fprintln(os.Stderr, "ghromex: renderer=accelerated(GPU)")
+			fmt.Fprintf(os.Stderr, "ghromex: renderer=accelerated(GPU, driver=%s)\n", driver)
 		} else {
-			fmt.Fprintln(os.Stderr, "ghromex: renderer=software")
+			fmt.Fprintf(os.Stderr, "ghromex: renderer=software (driver=%s)\n", driver)
 		}
 	}
+	// 渲染器的绘制混合模式的**全局不变量是 BLEND**：贴图拷贝（精灵、文字的
+	// 抗锯齿边缘）要靠混合，且 SDL 各后端对「拷贝用纹理的还是渲染器的混合
+	// 模式」处理不一致，保持渲染器状态是 BLEND 最稳。
+	//
+	// 不透明填充会临时切到 NONE（直接写像素，软件光栅器快 10 倍），但由
+	// Graphics.DrawColor 成对复原（defer），不会漏到这里。
 	sdlSetRenderDrawBlendMode(renderer, blendModeBlend)
 	// 激活 SDL 文本输入：不启用则驱动不会为可打印字符发 SDL_TEXTINPUT
 	//（中文 IME 组合串同样依赖此开关），真机表现为“有光标无法输入”。
