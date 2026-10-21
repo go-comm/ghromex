@@ -482,8 +482,13 @@ func fillRoundedRect(g Graphics, bx, by, bw, bh, r int, c Color) {
 		py := float64(y) + 0.5
 		lo := maxInt(bx, x0-2)
 		hi := minInt(bx+bw-1, x1+2)
-		// 角上窄带逐点算覆盖率；中段必为全覆盖（SDF 推导：qx<0 时
-		// d = qy - r ≤ -0.5），实色一次画完。
+		// 角上窄带逐点算覆盖率（查表，见 roundedCov）；中段必为全覆盖
+		// （SDF 推导：qx<0 时 d = qy - r ≤ -0.5），实色一次画完。
+		// 局部坐标：u = 像素离最近竖边的距离，v = 离最近横边的距离。
+		v := y - by
+		if vb := by + bh - 1 - y; vb < v {
+			v = vb
+		}
 		leftEnd := minInt(hi, bx+r-1)
 		rightStart := maxInt(lo, bx+bw-r)
 		if rightStart <= leftEnd+1 {
@@ -494,11 +499,11 @@ func fillRoundedRect(g Graphics, bx, by, bw, bh, r int, c Color) {
 			continue
 		}
 		paintCoverage(g, y, lo, leftEnd, c, func(x int) float64 {
-			return coverageAt(float64(x)+0.5, py, bx, by, bw, bh, r)
+			return cornerCov(r, x-bx, v)
 		})
 		g.DrawColor(leftEnd+1, y, rightStart-leftEnd-1, 1, c)
 		paintCoverage(g, y, rightStart, hi, c, func(x int) float64 {
-			return coverageAt(float64(x)+0.5, py, bx, by, bw, bh, r)
+			return cornerCov(r, bx+bw-1-x, v)
 		})
 	}
 }
@@ -521,6 +526,66 @@ func coverageAt(px, py float64, bx, by, bw, bh, r int) float64 {
 		return 0
 	}
 	return 0.5 - d
+}
+
+// ---------------------------------------------------------------------------
+// 圆角覆盖率查表
+// ---------------------------------------------------------------------------
+
+// roundedCovMaxR 是查表覆盖的最大半径；更大的圆角（少见）走逐点计算。
+const roundedCovMaxR = 20
+
+// roundedCov[r][u][v] 是半径 r、角上局部坐标 (u,v) 处的覆盖率。
+//
+// 关键性质：圆角盒 SDF（coverageAt）在**角带**里的取值只与 (r,u,v) 有关，
+// 与盒的宽高无关——像素中心相对角的偏移是 (u+0.5, v+0.5)，代入 SDF 得
+// qx = r-u-0.5、qy = r-v-0.5，于是
+//
+//	d = hypot(max(qx,0), max(qy,0)) + min(max(qx,qy),0) - r
+//
+// 只剩 r/u/v 三个整数。把它们预计算成表，绘制时只做数组索引——
+// 圆角多的页面（卡片网格）这一项曾占绘制耗时的一半以上（每像素一次
+// math.Hypot）。表大小 Σr² = 2870 项（r ≤ 20），约 23KB。
+var roundedCov [roundedCovMaxR + 1][][]float64
+
+func init() {
+	for r := 1; r <= roundedCovMaxR; r++ {
+		m := make([][]float64, r)
+		for u := 0; u < r; u++ {
+			row := make([]float64, r)
+			for v := 0; v < r; v++ {
+				row[v] = cornerCoverage(r, u, v)
+			}
+			m[u] = row
+		}
+		roundedCov[r] = m
+	}
+}
+
+// cornerCoverage 计算半径 r、角上局部坐标 (u,v) 处的覆盖率。
+// 与 coverageAt 同一套圆角盒 SDF，只是用局部坐标表达（结果与盒宽高无关）。
+func cornerCoverage(r, u, v int) float64 {
+	fr := float64(r)
+	qx := fr - float64(u) - 0.5
+	qy := fr - float64(v) - 0.5
+	d := math.Hypot(math.Max(qx, 0), math.Max(qy, 0)) + math.Min(math.Max(qx, qy), 0) - fr
+	if d <= -0.5 {
+		return 1
+	}
+	if d >= 0.5 {
+		return 0
+	}
+	return 0.5 - d
+}
+
+// cornerCov 返回角上局部坐标 (u,v)、半径 r 处的覆盖率：表内直接查；
+// r 超过表上限（或坐标越界）时退回逐点计算。
+func cornerCov(r, u, v int) float64 {
+	if r <= roundedCovMaxR && u >= 0 && u < r && v >= 0 && v < r {
+		return roundedCov[r][u][v]
+	}
+	// 退回：以 (0,0) 为角的 2r×2r 盒——角带里的 SDF 与盒大小无关。
+	return coverageAt(float64(u)+0.5, float64(v)+0.5, 0, 0, 2*r, 2*r, r)
 }
 
 // scaledAlpha 按覆盖率降低颜色 alpha；全透明返回 ok=false。

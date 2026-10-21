@@ -35,6 +35,7 @@ func TestFillRoundedRectMatchesNaiveCoverage(t *testing.T) {
 		{0, 0, 5, 5, 2},     // 极小盒
 		{10, 10, 30, 18, 9}, // r 接近半高
 		{0, 0, 200, 12, 6},  // 扁盒
+		{0, 0, 60, 60, 24},  // r 超查表上限（走逐点回退路径）
 	}
 	for _, cs := range cases {
 		w := cs.bx + cs.bw + 8
