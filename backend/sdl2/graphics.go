@@ -89,7 +89,7 @@ func fontFileOr(def, first string, rest ...string) string {
 // fontPathCache 缓存 fontPathOf 的结果（"" = 不存在）。系统字体在进程生命周期
 // 内不会变化，而字体解析在**每次排版与绘制**都会被调用（每段文本、每帧）：
 // 不缓存时一次重排要做上万次 os.Stat（Windows 上是 GetFileAttributesEx 系统
-// 调用），实测 demo/form-ua.html 单次重排 75ms、其中约一半耗在这里；滚动动画
+// 调用），实测 examples/ua/index.html 单次重排 75ms、其中约一半耗在这里；滚动动画
 // 每帧都要重排，于是滚轮手感变成"慢吞吞"。缓存后同一查询是纯内存 map 命中。
 var fontPathCache sync.Map // map[string]string
 
@@ -464,7 +464,7 @@ func (g *Graphics) face(path string, size int, bold bool) *fontFace {
 		// regular，先记 false，下方统一样式切换才会把首个 bold 请求真正落到
 		// handle 上。若记请求值 bold=true，会因 "f.bold == bold" 跳过
 		// TTF_SetFontStyle——首个请求即 bold 时（页面首段文字是粗体标题很
-		// 常见，如 form-ua 的 h2）handle 一直按 regular 度量与绘制，直到某次
+		// 常见，如 ua 示例的 h2）handle 一直按 regular 度量与绘制，直到某次
 		// 非 bold 请求翻转标记、再来一次 bold 请求才纠正；那次翻转通常发生在
 		// 首次点击触发的重排，表现为"点一下标题位移/变粗"的首帧不一致。
 		// 真粗体字文件本身就是粗体：直接记 true，后续不再切样式。
@@ -602,7 +602,7 @@ func (g *Graphics) fontPath(family string) string { return g.resolveFontPath(fam
 // 被反复请求（同一个词、同一段文本、同一份 CSS），而结果只取决于
 // （文本, 字号, 粗细, family, hinting 档位, 是否有 TTF）——字体文件在进程内
 // 不变。不缓存时每次都要走 SDL_ttf 的 TTF_SizeUTF8（CGO 调用），实测占
-// demo/form-ua.html 单次重排 80% 以上，是滚动掉帧的最后一处大头。
+// examples/ua/index.html 单次重排 80% 以上，是滚动掉帧的最后一处大头。
 // ttf 进 key：DLL 是否可用会改变度量口径（估算 vs 真实），不能串用。
 type measureKey struct {
 	text   string

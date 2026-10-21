@@ -23,31 +23,29 @@
 - Go 1.20+（go.mod 基线，作库供其他项目引用，1.20 以上工具链均可构建；无需 CGO）
 - 渲染后端目前提供 Windows 实现（`backend/sdl2`，加载 `SDL2.dll` 2.28 与 `SDL2_ttf.dll`）
 - 把 `SDL2.dll`、`SDL2_ttf.dll`（及 `zlib1.dll`）放到工程根目录 `libs/`，或保证系统可搜索到它们
-- 平台边界：`engine` 包是纯 Go、可移植的（任意平台 `go build ./...` 均通过）；`backend/sdl2`、`browser` 与 `demo` 以 `//go:build windows` 标注，仅 Windows 可用，其它平台编译得到空实现（demo 运行时提示"仅支持 Windows"）
+- 平台边界：`engine` 包是纯 Go、可移植的（任意平台 `go build ./...` 均通过）；`backend/sdl2`、`browser` 与 `examples/` 下各示例以 `//go:build windows` 标注，仅 Windows 可用，其它平台编译得到空实现（示例运行时提示"仅支持 Windows"）
 
 ## 快速开始
 
+示例按目录存放在 `examples/` 下。每个目录都是一个**可独立运行**的小程序
+（`main.go` + `index.html`，页面用 `go:embed` 打进二进制，从任意工作目录
+运行都不依赖当前路径）：
+
+| 目录 | 运行 | 内容 |
+| --- | --- | --- |
+| `examples/login` | `go run ./examples/login` | 登录页：登录/重置按钮交互、状态文本更新 |
+| `examples/form` | `go run ./examples/form` | 常规表单（员工登记表）：定位/层叠/盒模型/可输入控件 |
+| `examples/ua` | `go run ./examples/ua` | 原生 UA 表单 + 常用标签：零作者 CSS，可与 Chrome/Edge 直接对照 |
+| `examples/scroll` | `go run ./examples/scroll` | 滚动/裁剪：文档级滚动、overflow 容器、textarea 滚轮、`OnWheel` 回显 |
+
+每个示例都支持同一组调试参数：
+
 ```powershell
-# 运行内置登录页 demo
-go run ./demo
-
-# 布局能力示例（员工登记表：定位/层叠/盒模型/可输入表单）
-go run ./demo -file demo/form.html
-
-# UA 原生对照页（零作者 CSS，可与浏览器直接打开同一文件比对）
-go run ./demo -file demo/form-ua.html
-
-# 滚动/裁剪示例（文档级滚动、overflow 容器、textarea 滚轮、wheel 事件）
-go run ./demo -file demo/scroll.html
-
-# 渲染自己的页面
-go run ./demo -file page.html
-
-# 无头导出 SVG（不需要显示器）
-go run ./demo -dump-svg out.svg
+go run ./examples/ua -exit-after 3s     # 指定时长后自动退出（调试/CI）
+go run ./examples/ua -dump-svg out.svg  # 无头导出 SVG（不需要显示器）
 ```
 
-窗口交互示例：`demo/index.html` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘；`demo/form.html` 覆盖 11 项布局特性（负 inset 角标、fixed 底条、水印、包含块链锚定、z-index 层序、box-sizing 跨内核一致等），可点击输入框直接键入文字；`demo/scroll.html` 演示滚轮滚动（文档级长页、overflow 容器横/纵滚动、overflow:hidden 裁剪、textarea 滚轮、`OnWheel` 事件位移回显）。
+窗口交互示例：`examples/login` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘；`examples/form` 覆盖 11 项布局特性（负 inset 角标、fixed 底条、水印、包含块链锚定、z-index 层序、box-sizing 跨内核一致等），可点击输入框直接键入文字；`examples/scroll` 演示滚轮滚动（文档级长页、overflow 容器横/纵滚动、overflow:hidden 裁剪、textarea 滚轮、`OnWheel` 事件位移回显）。
 
 ## 代码示例
 
@@ -123,7 +121,11 @@ engine/            渲染引擎（纯 Go，不依赖任何图形后端）
 backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓存
 components/        组件工厂（button / input / class 工具：InjectDefaultClasses
                   注入 .btn/.btn-group/.input 默认样式）
-demo/              演示应用（登录页 index.html + 布局示例 form.html）
+examples/          可独立运行的示例（每个目录 main.go + index.html）：
+  login/             登录页（按钮交互、状态文本）
+  form/              常规表单（员工登记表：布局特性 + 可输入控件）
+  ua/                原生 UA 表单 + 常用标签（零作者 CSS，与 Chrome 对照）
+  scroll/            滚动/裁剪（文档级滚动、overflow、textarea、wheel 事件）
 libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 ```
 
@@ -206,7 +208,7 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 
 ## 已知限制
 
-- 布局为块级 + 行内/inline-block 流式布局 + 定位子集；无 flex/grid；滚动仅滚轮驱动（无滚动条 UI、无拖拽滚动、无 PageUp/PageDown 翻页键、无触控板惯性），wheel 步长 100px/档（与 Chrome/Windows 一致）；文档级滚动为**动画式**：按真实时间 120ms ease-out 推进（不按固定帧数，避免排版慢时把一档滚轮拖成几百毫秒），滚动只平移子树；字体路径解析与文本度量已缓存（文本度量按「文本+字号+粗细+family」），demo 对照页单次重排约 1~2ms。但滚动偏移无对外 DOM API（`scrollTop`/`scrollLeft` 未导出，仅由 wheel 与 textarea 光标跟随内部驱动），亦无 `scroll`/`wheel` 之外的滚动事件
+- 布局为块级 + 行内/inline-block 流式布局 + 定位子集；无 flex/grid；滚动仅滚轮驱动（无滚动条 UI、无拖拽滚动、无 PageUp/PageDown 翻页键、无触控板惯性），wheel 步长 100px/档（与 Chrome/Windows 一致）；文档级滚动为**动画式**：按真实时间 120ms ease-out 推进（不按固定帧数，避免排版慢时把一档滚轮拖成几百毫秒），滚动只平移子树；字体路径解析与文本度量已缓存（文本度量按「文本+字号+粗细+family」），examples/ua 单次重排约 1~2ms。但滚动偏移无对外 DOM API（`scrollTop`/`scrollLeft` 未导出，仅由 wheel 与 textarea 光标跟随内部驱动），亦无 `scroll`/`wheel` 之外的滚动事件
 - position v1 边界：absolute 双锚（left+right 同给）时 auto 宽按内容收缩而非拉伸；未实现嵌套层叠上下文（opacity/transform 成组、负 z-index 压至祖先背景之下）；命中测试未按 z-index 取最上层元素（select 选项浮层例外，按浮层层序优先）
 - `<input>` 可编辑仅支持 text 类型；radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate / 表单重置；无选区/复制粘贴
 - `<select>` 仅鼠标交互（展开/收起/选中），无键盘上下键选择、无 multiple、无 optgroup；选项浮层不随视口裁剪（超出视口的选项画到窗口外）；收起态按内容收缩（文字 + 箭头位 16px，与 Chrome 同口径）
@@ -214,14 +216,14 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 - 行高（`line-height: normal`）按字体度量（OS/2 win/typo + hhea lineGap）计算，与
   Chrome/DirectWrite 同口径；但布局全程为整数像素，浏览器的小数边距/行盒
   （如 h3 的 `margin: 1em` = 18.72px、h2 的 0.83em = 19.92px）只能取整，
-  逐段累积后整页可漂移数像素（对照页 form-ua.html 底部约 7px / 2310px）；
+  逐段累积后整页可漂移数像素（对照页 examples/ua 底部约 7px / 2310px）；
   空块自折叠未实现（父-子穿越 margin 折叠已实现）
 - `DrawImage` 尚未实现（接口已预留）
 - 裁剪仅由实现 `engine.Clipper`（`PushClip`/`PopClip`）的后端生效（当前 `BufferGraphics`、SDL2 均已实现；自定义后端未实现时静默跳过裁剪、仅不裁剪不报错）
 - 边框样式只按**单色实心**绘制：`inset/outset/groove/ridge/dashed/dotted/double`
   都退化为 solid，且不支持四边不同颜色——Chrome 的 `input`（2px inset）、
   `button`（2px outset #000）、`hr`（1px inset，上暗 #808080 下浅）因此只做到
-  外盒尺寸一致，明暗双色边框与线型差异保留（对照页 form-ua.html 的 hr 引擎画成
+  外盒尺寸一致，明暗双色边框与线型差异保留（对照页 examples/ua 的 hr 引擎画成
   两行同色）
 - 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；
   无 webfont 加载、无斜体渲染（font-style 仅解析不渲染）；
@@ -266,7 +268,7 @@ go test ./...
 
 - `engine` 包测试全为纯 Go（FakeGraphics / BufferGraphics / SVG 断言），无显示器即可跑
 - `backend/sdl2` 的事件解码回归测试不加载 DLL；事件字段偏移以真实 SDL 产生的事件实测为准（见 `decodeEvent` 注释）
-- demo 退出约定：`go run ./demo -exit-after 3s` 可用于冒烟验证
+- 示例退出约定：`go run ./examples/login -exit-after 3s` 可用于冒烟验证
 - 灰度文字保真度探针：`go test ./backend/sdl2 -run TestGrayscalePipelineFidelity`（默认 dummy 驱动软件渲染器，
   `GHROMEX_REAL=1` 走真机 GPU）——同源直出面与落屏截图逐像素比对，供回归「灰度管线忠实」结论
 - 文字锐度/字体对比条：`GHROMEX_CMP=1 go test ./backend/sdl2 -run 'TestFontCompareStrip|TestHintingValueScan'`

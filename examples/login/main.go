@@ -1,41 +1,37 @@
 //go:build windows
 
+// 示例：登录页。直接运行：
+//
+//	go run ./examples/login
+//	go run ./examples/login -exit-after 3s     # 调试/CI
+//	go run ./examples/login -dump-svg out.svg  # 无头导出
+//
+// 页面 index.html 与本文件同目录，用 go:embed 打进二进制，因此从任意
+// 工作目录运行都能出画面，不依赖当前目录。
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"fmt"
 	"os"
 	"time"
-
-	_ "embed"
 
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
 )
 
 //go:embed index.html
-var embeddedHTML []byte
+var page []byte
 
 func main() {
-	file := flag.String("file", "", "HTML 页面路径（默认使用内置 demo/index.html）")
 	exitAfter := flag.Duration("exit-after", 0, "指定时长后自动退出，如 3s（调试/CI 用）")
 	dumpSVG := flag.String("dump-svg", "", "无头模式：完成级联与布局后把结果导出为 SVG 并退出")
 	flag.Parse()
 
-	src := string(embeddedHTML)
-	if *file != "" {
-		data, err := os.ReadFile(*file)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "读取 HTML 失败:", err)
-			os.Exit(1)
-		}
-		src = string(data)
-	}
-
 	if *dumpSVG != "" {
 		vp := engine.NewHeadlessViewport(1024, 720)
-		doc, err := engine.OpenDocument(vp, src)
+		doc, err := engine.OpenDocument(vp, string(page))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "打开文档失败:", err)
 			os.Exit(1)
@@ -48,20 +44,20 @@ func main() {
 		return
 	}
 
-	win, err := browser.New(1024, 720, "Ghromex — HTML/CSS 原生 GUI")
+	win, err := browser.New(1024, 720, "Ghromex — 登录")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "启动失败:", err)
 		os.Exit(1)
 	}
 	defer win.Close()
 
-	doc, err := win.OpenDocument(src)
+	doc, err := win.OpenDocument(string(page))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "打开文档失败:", err)
 		os.Exit(1)
 	}
 
-	// 交互：登录/重置按钮点击更新状态文本，引擎自动重排重绘
+	// 交互：登录/重置按钮点击更新状态文本，引擎检测到文档变化后自动重排重绘
 	clicks := 0
 	status := doc.QuerySelector("#status")
 	if status != nil {
@@ -77,13 +73,6 @@ func main() {
 				status.SetText("已重置")
 			})
 		}
-	}
-
-	// 滚轮事件演示（demo/scroll.html 的 #banner）：显示最近一次 wheel 位移
-	if banner := doc.QuerySelector("#banner"); banner != nil {
-		banner.OnWheel(func(ev *engine.MouseEvent) {
-			banner.SetText(fmt.Sprintf("wheel 位移 dx=%d dy=%d @(%d,%d)", ev.DeltaX, ev.DeltaY, ev.X, ev.Y))
-		})
 	}
 
 	if *exitAfter > 0 {

@@ -58,7 +58,7 @@ func TestWindowHiddenUntilFirstFrame(t *testing.T) {
 	}
 }
 
-// Run 的帧循环是 demo 的常规路径：首个循环迭代出首帧并显示窗口。
+// Run 的帧循环是示例程序的常规路径：首个循环迭代出首帧并显示窗口。
 func TestRunShowsWindowOnFirstFrame(t *testing.T) {
 	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
 	defer os.Unsetenv("SDL_VIDEO_DRIVER")

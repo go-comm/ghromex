@@ -32,9 +32,9 @@ func TestSelectPopupLCDTextLegible(t *testing.T) {
 	defer os.Unsetenv("SDL_VIDEO_DRIVER")
 	t.Setenv("GHROMEX_LCD", "1") // 文本默认灰度 AA，本测试专锁 LCD 路径，显式开启
 
-	html, err := os.ReadFile(filepath.Join("..", "..", "demo", "form-ua.html"))
+	html, err := os.ReadFile(filepath.Join("..", "..", "examples", "ua", "index.html"))
 	if err != nil {
-		t.Fatalf("read form-ua: %v", err)
+		t.Fatalf("read examples/ua/index.html: %v", err)
 	}
 
 	win, err := NewWindow(400, 700, "select-lcd")
@@ -137,7 +137,7 @@ func TestSelectPopupLCDTextLegible(t *testing.T) {
 	isWhite := func(r, g, b uint8) bool { return r == 255 && g == 255 && b == 255 }
 	isBlue := func(r, g, b uint8) bool { return r == 0x19 && g == 0x67 && b == 0xD2 }
 
-	// form-ua：option 序 bj/sh/gz，sh 选中 → option[1] 为蓝底白字行。
+	// ua 示例：option 序 bj/sh/gz，sh 选中 → option[1] 为蓝底白字行。
 	opts := doc.QuerySelectorAll("option")
 	if len(opts) != 3 {
 		t.Fatalf("option 数=%d, want 3", len(opts))

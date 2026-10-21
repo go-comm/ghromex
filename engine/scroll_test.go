@@ -435,9 +435,9 @@ body{margin:0}
 // 回归用户报告："滚动 textarea 时整个 document 也在滚动"（边界处剩余
 // 位移经 scroll chaining 落到文档级滚动）。
 func TestWheelOverTextareaNeverScrollsDocument(t *testing.T) {
-	data, err := os.ReadFile("../demo/scroll.html")
+	data, err := os.ReadFile("../examples/scroll/index.html")
 	if err != nil {
-		t.Fatalf("read demo/scroll.html: %v", err)
+		t.Fatalf("read examples/scroll/index.html: %v", err)
 	}
 	doc, _ := openScrollDoc(t, 1024, 720, string(data))
 	root := inner(doc)
@@ -446,7 +446,7 @@ func TestWheelOverTextareaNeverScrollsDocument(t *testing.T) {
 	}
 	ta := doc.QuerySelector("#ta")
 	if ta == nil {
-		t.Fatal("demo 页缺少 #ta textarea")
+		t.Fatal("examples/scroll 页缺少 #ta textarea")
 	}
 	base := inner(ta)
 	r := ta.GetBoundingClientRect()
