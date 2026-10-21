@@ -56,3 +56,52 @@ func TestDrawSpriteBlendAndFormat(t *testing.T) {
 		t.Fatalf("精灵外像素 = %v，期望白底", bg)
 	}
 }
+
+// 同一个精灵画多次，纹理只应上传一次。
+//
+// 精灵像素创建后不变（引擎按「半径+颜色」缓存复用同一份），所以纹理可以
+// 只上传一次：每次绘制都 SDL_UpdateTexture 的话，一帧几百次纹理上传会吃掉
+// 大半帧时间（实测门户页 300 次/帧 ≈ 2ms）——240Hz 屏幕的帧预算只有
+// 4.2ms，超支就掉帧、滚动发顿。
+func TestSpriteTextureUploadedOnce(t *testing.T) {
+	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
+	defer os.Unsetenv("SDL_VIDEO_DRIVER")
+
+	win, err := NewWindow(64, 64, "sprite-cache")
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	defer win.Close()
+	g := win.g
+	g.Clear(255, 255, 255, 255)
+
+	pix := make([]byte, 4*4*4)
+	for i := 0; i < 16; i++ {
+		pix[i*4+0] = 0xFF
+		pix[i*4+1] = 0x4D
+		pix[i*4+2] = 0x00
+		pix[i*4+3] = 0x80
+	}
+	sprite := &core.Sprite{W: 4, H: 4, Pix: pix}
+	// 先画一次：像素应是半透明橙（与白底混合）。
+	g.DrawSprite(10, 10, sprite)
+	raw, _, _, _, err := win.Screenshot()
+	if err != nil {
+		t.Fatalf("Screenshot: %v", err)
+	}
+	i := (12*64 + 12) * 4
+	got := [3]uint8{raw[i], raw[i+1], raw[i+2]}
+	if got[0] < 250 || got[1] < 150 || got[1] > 180 || got[2] < 110 || got[2] > 145 {
+		t.Fatalf("精灵像素 = %v，期望约 (255,166,127)", got)
+	}
+	// 再画 49 次：纹理不该重传（叠加会让颜色变实，这是预期的）。
+	for i := 0; i < 49; i++ {
+		g.DrawSprite(10, 10, sprite)
+	}
+	if g.spriteUploads != 1 {
+		t.Errorf("纹理上传次数 = %d, want 1（精灵像素不变，不该每次绘制都重传）", g.spriteUploads)
+	}
+	if len(g.sprites) != 1 {
+		t.Errorf("精灵纹理缓存条目 = %d, want 1", len(g.sprites))
+	}
+}

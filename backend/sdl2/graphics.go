@@ -224,6 +224,9 @@ type Graphics struct {
 	// sprites 是位图精灵的纹理缓存（键是引擎侧缓存的精灵指针）。精灵
 	// 像素只随「半径+颜色」变，引擎侧已缓存，这里按指针复用纹理即可。
 	sprites map[*core.Sprite]uintptr
+	// spriteUploads 统计纹理上传次数（测试用）：精灵像素不变，纹理只该
+	// 上传一次——每次绘制都上传会把帧预算吃光（实测 300 次/帧 ≈ 2ms）。
+	spriteUploads int
 
 	// env* 是文本渲染相关的环境变量取值，每帧刷新一次（见 refreshEnv）。
 	envLCD      bool
@@ -949,14 +952,19 @@ func (g *Graphics) DrawSprite(x, y int, s *core.Sprite) {
 			return
 		}
 		sdlSetTextureBlendMode(tex, uintptr(blendModeBlend))
+		// 精灵的像素创建后不变（引擎按「半径+颜色」缓存复用同一份，见
+		// engine 的 spriteCache），所以纹理**只上传一次**：每次绘制都
+		// UpdateTexture 的话，一帧几百次纹理上传会吃掉大半帧时间——实测
+		// 门户页 300 次/帧 ≈ 2ms，240Hz 屏幕（帧预算 4.2ms）直接超支，
+		// 滚动就掉帧。
+		rect := sdlRect{0, 0, int32(s.W), int32(s.H)}
+		if sdlUpdateTexture(tex, uintptr(unsafe.Pointer(&rect)),
+			uintptr(unsafe.Pointer(&s.Pix[0])), uintptr(s.W*4)) != 0 {
+			checkDraw("SDL_UpdateTexture", 0)
+			return
+		}
 		g.sprites[s] = tex
-	}
-	// 灌像素：矩形参数为 NULL 表示整块。RGBA32 的行距 = W*4。
-	rect := sdlRect{0, 0, int32(s.W), int32(s.H)}
-	if sdlUpdateTexture(tex, uintptr(unsafe.Pointer(&rect)),
-		uintptr(unsafe.Pointer(&s.Pix[0])), uintptr(s.W*4)) != 0 {
-		checkDraw("SDL_UpdateTexture", 0)
-		return
+		g.spriteUploads++
 	}
 	dst := sdlRect{int32(x), int32(y), int32(s.W), int32(s.H)}
 	checkDraw("SDL_RenderCopy", sdlRenderCopy(g.renderer, tex, 0, uintptr(unsafe.Pointer(&dst))))
