@@ -396,6 +396,11 @@ func (win *Window) Run() error {
 				win.lastChange = c
 				win.dirty = true
 			}
+			// 滚动动画：只平移已布局的盒子，不重排（滚动偏移与盒模型无关，
+			// 每帧一次全量级联+布局足以让大页面滚动发顿）。
+			if engine.TickScroll(doc) {
+				win.dirty = true
+			}
 			if win.dirty {
 				win.clearCanvas()
 				engine.RenderNode(win.g, doc)
@@ -405,7 +410,7 @@ func (win *Window) Run() error {
 			// 布局期可能又标记了变更（滚动动画的下一帧）：此时不能睡 10ms，
 			// 否则每帧白等 10ms，120ms 的动画会被拖到 200ms 以上；空闲时仍
 			// 保留 10ms 休眠省 CPU（present 有 vsync 时本就会自然限帧）。
-			pending = doc.ChangeCount() != win.lastChange
+			pending = doc.ChangeCount() != win.lastChange || engine.ScrollAnimating(doc)
 		}
 
 		if !pending {

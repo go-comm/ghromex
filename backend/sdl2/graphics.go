@@ -215,9 +215,12 @@ type Graphics struct {
 	// 列表、查表、stat 多个候选，而同一份 CSS 的 family 字符串在每帧重排/重绘
 	// 中反复出现；结果只依赖本 Graphics 的 standardFont，故按实例缓存。
 	familyPaths map[string]string
-	// texOrder 记录纹理插入顺序（FIFO 淘汰用）；缓存无上限会让动态文本
-	// 页面（计数/时间戳）的显存单调增长，长跑必然耗尽。
-	texOrder []texKey
+	// texClock 是纹理使用的单调时钟（LRU 淘汰用），texPixels 是当前缓存的
+	// 纹理像素总数（显存占用估算）。缓存无上限会让动态文本页面
+	// （计数/时间戳）的显存单调增长，长跑必然耗尽，故按"条数 + 像素"双上限
+	// 淘汰最近最少使用的纹理。
+	texClock  uint64
+	texPixels int
 
 	// env* 是文本渲染相关的环境变量取值，每帧刷新一次（见 refreshEnv）。
 	envLCD      bool
@@ -329,6 +332,10 @@ type texInfo struct {
 	w      int
 	h      int
 	ascent int32 // 该 face 当前样式的基线（TTF_FontAscent），0 表示不可用
+	// lastUsed 是最近一次命中时的时钟值（LRU 淘汰用）。FIFO 淘汰会把
+	// "被复用最多"的纹理（页面上反复出现的分隔符、价签等）先淘汰掉，
+	// 工作集略大于缓存上限时每帧全部重渲染（缓存颠簸）。
+	lastUsed uint64
 }
 
 // NewGraphics 创建渲染上下文。renderer 为 SDL_Renderer 句柄；
@@ -791,7 +798,11 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 			key.br, key.bg, key.bb = br, bg, bb
 		}
 		info, ok := g.textures[key]
-		if !ok {
+		if ok {
+			// 命中：刷新 LRU 时钟（写回 map 才能更新 lastUsed）。
+			info.lastUsed = g.nextTexClock()
+			g.textures[key] = info
+		} else {
 			f := g.face(path, size, bold)
 			if f == nil {
 				continue
@@ -844,9 +855,10 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 				mode = blendModeNone
 			}
 			sdlSetTextureBlendMode(tex, uintptr(mode))
-			info = texInfo{tex: tex, w: int(tw), h: int(th), ascent: asc}
+			info = texInfo{tex: tex, w: int(tw), h: int(th), ascent: asc,
+				lastUsed: g.nextTexClock()}
 			g.textures[key] = info
-			g.texOrder = append(g.texOrder, key)
+			g.texPixels += int(tw) * int(th)
 			g.evictTexturesIfNeeded()
 		}
 		if drawDebug {
@@ -974,27 +986,56 @@ func (g *Graphics) CloseFonts() {
 		}
 	}
 	g.textures = make(map[texKey]texInfo)
-	g.texOrder = nil
+	g.texPixels = 0
 }
 
-// maxCachedTextures 是文本纹理缓存上限。缓存此前只增不减：每个新的
-// (文本,字号,粗体,颜色) 组合都新建一张 SDL_Texture，计数/时间戳这类
-// 动态文本的页面显存单调增长，长跑必然耗尽。超出后按插入顺序淘汰最旧的。
-const maxCachedTextures = 512
+// maxCachedTextures 是文本纹理缓存的条数上限，maxCachedTexPixels 是像素
+// 上限（显存占用上限，纹理按 4 字节/像素估）。超出后按**最近最少使用**
+// 淘汰。
+//
+// 淘汰策略必须是 LRU 而非 FIFO：FIFO 按插入顺序淘汰，会把页面上复用最多的
+// 纹理（分隔符、价签、图标文字等）先淘汰掉——工作集略大于上限时每帧都要
+// 重新渲染全部文本（缓存颠簸），实测 portal 页 774 段文本 / 上限 512 时
+// 单帧绘制从 52ms 涨到 149ms，滚动肉眼可见地"一卡一卡"。
+const (
+	maxCachedTextures  = 4096
+	maxCachedTexPixels = 8 << 20 // 8M 像素 ≈ 32MB
+)
 
-// evictTexturesIfNeeded 超出缓存上限时按插入顺序（FIFO）淘汰最旧的纹理。
+// evictTexturesIfNeeded 超出缓存上限（条数或像素）时淘汰最近最少使用的纹理。
 func (g *Graphics) evictTexturesIfNeeded() {
-	for len(g.texOrder) > maxCachedTextures {
-		old := g.texOrder[0]
-		// 头移出后拷贝剩余部分（回收被移出的数组槽位，避免底层数组无限增长）
-		g.texOrder = append(g.texOrder[:0], g.texOrder[1:]...)
+	for len(g.textures) > maxCachedTextures || g.texPixels > maxCachedTexPixels {
+		old, ok := g.lruTexture()
+		if !ok {
+			return
+		}
 		if info, ok := g.textures[old]; ok {
 			if info.tex != 0 {
 				sdlDestroyTexture(info.tex)
 			}
+			g.texPixels -= info.w * info.h
 			delete(g.textures, old)
 		}
 	}
+}
+
+// lruTexture 找出最近最少使用的纹理键。
+func (g *Graphics) lruTexture() (texKey, bool) {
+	var old texKey
+	found := false
+	var oldest uint64
+	for k, info := range g.textures {
+		if !found || info.lastUsed < oldest {
+			old, oldest, found = k, info.lastUsed, true
+		}
+	}
+	return old, found
+}
+
+// nextTexClock 返回单调递增的纹理使用时钟（LRU 序）。
+func (g *Graphics) nextTexClock() uint64 {
+	g.texClock++
+	return g.texClock
 }
 
 // hasTTF 判断 TTF 符号是否已绑定（Load 之后为 true）。

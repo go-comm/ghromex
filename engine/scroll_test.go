@@ -162,15 +162,19 @@ body{margin:0}
 	}
 }
 
-// settleScroll 反复布局直到滚动动画收敛（平滑滚动按时间分帧推进，Chrome 同）。
+// settleScroll 反复推进直到滚动动画收敛（平滑滚动按时间分帧推进，Chrome 同）。
 // 以被观察元素的视口顶端为收敛判据：连续两次不变**且动画已结束**才返回；
 // 只看"两帧不变"会在缓动尾段误判（尾段几帧的取整位置相同但动画仍在途）。
+//
+// 动画由 TickScroll 推进（滚动偏移只是布局后的平移，动画帧不必重排），
+// 故这里每轮 = 一次布局 + 一次 tick。
 func settleScroll(t *testing.T, doc HTMLDocument, sel string) {
 	t.Helper()
 	root := inner(doc)
 	prev := -1 << 30
 	for i := 0; i < 24; i++ {
 		LayoutDocument(doc)
+		TickScroll(doc)
 		cur := 0
 		if e := doc.QuerySelector(sel); e != nil {
 			cur = e.GetBoundingClientRect().Top().Pixel()
@@ -196,8 +200,10 @@ func TestDocumentScrollAnimation(t *testing.T) {
 	if root.scrollTop != 40 {
 		t.Fatalf("滚动目标 = %d, want 40", root.scrollTop)
 	}
-	// 首轮布局：只推进一部分（不是整档跳到目标）
+	// 首轮：只推进一部分（不是整档跳到目标）。动画由 TickScroll 推进，
+	// 布局只负责把盒子摆好（滚动偏移是布局之后的平移）。
 	LayoutDocument(doc)
+	TickScroll(doc)
 	first := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel()
 	if first == 0 || first <= -40 {
 		t.Errorf("首帧应部分推进，实际 top=%d（-40 < first < 0）", first)
@@ -205,13 +211,53 @@ func TestDocumentScrollAnimation(t *testing.T) {
 	// 动画按时间推进（120ms）：8 帧 × 16ms（名义帧长）必须收敛。
 	// 旧的"每帧推进剩余距离 1/3"要 13 帧以上，正是滚动手感"慢吞吞"的来源。
 	for i := 0; i < 8; i++ {
-		LayoutDocument(doc)
+		TickScroll(doc)
 	}
 	if top := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel(); top != -40 {
 		t.Errorf("8 帧后滚动动画未收敛：top=%d, want -40", top)
 	}
 	if root.scrollAnimOn {
 		t.Error("收敛后动画应结束")
+	}
+}
+
+// TestScrollTickMovesWithoutRelayout 滚动动画帧只做平移、不重排：
+// TickScroll 之后元素视口位置变化，但期间没有调用过 LayoutDocument。
+// 这是滚动顺滑的关键（大页面每帧一次全量级联+布局足以让滚动发顿）。
+func TestScrollTickMovesWithoutRelayout(t *testing.T) {
+	const src = `<!doctype html><html><head><style>
+	body{margin:0}
+	#page{height:1000px;background-color:#2563EB}
+	</style></head><body><div id="page">content</div></body></html>`
+	doc, _ := openScrollDoc(t, 200, 200, src)
+
+	OnDocumentWheel(doc, 100, 100, 0, 40)
+	LayoutDocument(doc)
+	before := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel()
+
+	// 只推进动画（不重排）：内容应当移动。
+	if !TickScroll(doc) {
+		t.Fatal("TickScroll 未报告内容移动")
+	}
+	after := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel()
+	if after == before {
+		t.Fatalf("tick 后内容未移动（top=%d）", after)
+	}
+	if after >= 0 || after <= -40 {
+		t.Fatalf("tick 后 top=%d，应在 (-40, 0) 之间（部分推进）", after)
+	}
+	if !ScrollAnimating(doc) {
+		t.Fatal("动画进行中，ScrollAnimating 应为 true")
+	}
+	// 推进到收敛：内容落在目标上，动画结束。
+	for i := 0; i < 8; i++ {
+		TickScroll(doc)
+	}
+	if top := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel(); top != -40 {
+		t.Fatalf("收敛后 top=%d, want -40", top)
+	}
+	if ScrollAnimating(doc) {
+		t.Fatal("收敛后动画应结束")
 	}
 }
 
@@ -244,8 +290,9 @@ body{margin:0}
 			got.Type, got.DeltaX, got.DeltaY, got.X, got.Y)
 	}
 
-	// 平滑滚动：视觉位置分帧推进（Chrome 同），多轮布局后收敛到目标
+	// 平滑滚动：视觉位置分帧推进（Chrome 同），多轮推进后收敛到目标
 	LayoutDocument(doc)
+	TickScroll(doc)
 	if top := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel(); top == 0 {
 		t.Fatalf("文档滚动未平移内容（top=%d）", top)
 	}

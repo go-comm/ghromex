@@ -124,8 +124,9 @@ engine/            渲染引擎（纯 Go，不依赖任何图形后端）
   graphics.go        Graphics 接口 / FakeGraphics / BufferGraphics
   svg_dump.go        布局结果导出 SVG
   element_registry.go 标签原型注册表（自定义元素）
-backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓存、
-                   剪贴板读写（Ctrl+C 写 / Ctrl+V 读，引擎只管文本）
+backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓存（LRU + 像素双上限，
+                   页面文本段数超限时不再逐帧重渲染）、剪贴板读写（Ctrl+C 写 /
+                   Ctrl+V 读，引擎只管文本）
 examples/          可独立运行的示例（每个目录 main.go + index.html）：
   login/             登录页（按钮交互、状态文本）
   form/              常规表单（员工登记表：布局特性 + 可输入控件）
@@ -222,7 +223,7 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 
 ## 已知限制
 
-- 布局为块级 + 行内/inline-block 流式布局 + 定位子集；无 flex/grid；滚动仅滚轮驱动（无滚动条 UI、无拖拽滚动、无 PageUp/PageDown 翻页键、无触控板惯性），wheel 步长 100px/档（与 Chrome/Windows 一致）；文档级滚动为**动画式**：按真实时间 120ms ease-out 推进（不按固定帧数，避免排版慢时把一档滚轮拖成几百毫秒），滚动只平移子树；字体路径解析与文本度量已缓存（文本度量按「文本+字号+粗细+family」），examples/ua 单次重排约 1~2ms。但滚动偏移无对外 DOM API（`scrollTop`/`scrollLeft` 未导出，仅由 wheel 与 textarea 光标跟随内部驱动），亦无 `scroll`/`wheel` 之外的滚动事件
+- 布局为块级 + 行内/inline-block 流式布局 + 定位子集；无 flex/grid；滚动仅滚轮驱动（无滚动条 UI、无拖拽滚动、无 PageUp/PageDown 翻页键、无触控板惯性），wheel 步长 100px/档（与 Chrome/Windows 一致）；文档级滚动为**动画式**：按真实时间 120ms ease-out 推进（不按固定帧数，避免排版慢时把一档滚轮拖成几百毫秒），滚动只平移子树——**动画帧不重排**（`engine.TickScroll` 按增量平移已布局的盒子，级联与布局只在内容变化时跑）；字体路径解析与文本度量已缓存（文本度量按「文本+字号+粗细+family」），examples/ua 单次重排约 1~2ms。但滚动偏移无对外 DOM API（`scrollTop`/`scrollLeft` 未导出，仅由 wheel 与 textarea 光标跟随内部驱动），亦无 `scroll`/`wheel` 之外的滚动事件
 - position v1 边界：absolute 双锚（left+right 同给）时 auto 宽按内容收缩而非拉伸；未实现嵌套层叠上下文（opacity/transform 成组、负 z-index 压至祖先背景之下）；命中测试未按 z-index 取最上层元素（select 选项浮层例外，按浮层层序优先）
 - `<input>` 可编辑仅支持 text/password 类型；radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate / 表单重置；无剪切（Ctrl+X）、无按词扩展选区（Ctrl+Shift+方向键）
 - `<select>` 仅鼠标交互（展开/收起/选中），无键盘上下键选择、无 multiple、无 optgroup；选项浮层不随视口裁剪（超出视口的选项画到窗口外）；收起态按内容收缩（文字 + 箭头位 16px，与 Chrome 同口径）
@@ -254,7 +255,7 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 - 列表：缩进/外边距/标记已实现并与 Chrome 对齐（ul 的 •、ol 的序号；标记位置按内容左缘 −0.75em 近似）；仍无 `display:list-item` 与 `list-style-type`（作者自定义标记类型不生效）
 - 无 `vertical-align`（作者声明的垂直对齐不生效；`sub`/`sup` 的基线位移是 layout
   内置行为）；`white-space` 仅 `pre` 一个关键字；无 `line-height` 属性
-- 级联为每次重排全量重算：逐元素重跑全部规则匹配并排序（元素数 × 规则数 × 祖先深度）——大样式表 + 大文档时每次输入都会触发一次全量级联，尚未做规则索引/失效缓存（字体路径与文本度量已有缓存，见「滚动」条）
+- 级联为每次重排全量重算：逐元素重跑全部规则匹配并排序（元素数 × 规则数 × 祖先深度）——大样式表 + 大文档时每次输入都会触发一次全量级联，尚未做规则索引/失效缓存（字体路径与文本度量已有缓存，见「滚动」条；类名匹配已改为零分配扫描）
 - 灰度 AA（默认）无横向子像素分解，竖笔边缘锐度低于 LCD/ClearType（物理极限）；
   软硬由 hinting/tone 曲线档位决定（`GHROMEX_HINT` 默认 normal、`GHROMEX_CONTRAST`
   默认关，可联调取点，见渲染段），保真度探针证实管线忠实（见上文渲染段；

@@ -140,6 +140,10 @@ type htmlElement struct {
 	// 在 scrollTop/scrollLeft，实际位移由每轮布局按时间推进（Chrome 的
 	// 动画式滚动；引擎此前整档跳变，观感生硬）。scrollAnimOn 表示动画在途。
 	scrollAnimTop, scrollAnimLeft int
+	// scrollShiftTop/scrollShiftLeft 是**已施加到子树上的滚动平移量**。
+	// 布局后按绝对偏移平移一次，动画推进时只按增量平移（见
+	// applyScrollDeltas）——滚动动画帧因此不必重排。
+	scrollShiftTop, scrollShiftLeft int
 	// scrollAnimFromTop/FromLeft 是本次动画的起点（滚动中途再来一档滚轮时
 	// 从当前视觉位置重新起算，避免跳变）；scrollAnimProgress 为 0..1 的
 	// 时间进度，scrollAnimLastNs 是上一帧的时间戳（用于算实际帧间隔）。
@@ -506,13 +510,35 @@ func hasClass(e HTMLElement, name string) bool {
 	return containsWord(e.GetAttribute("class"), name)
 }
 
+// containsWord 判断空格分隔的词表里是否含 word（等价于 strings.Fields 后
+// 逐个比较，但**不分配**）。
+//
+// 类名匹配在级联里是热路径：每个元素 × 每条规则 × 每个类选择器都要调一次，
+// strings.Fields 的拆分与切片分配曾占整页重排耗时的四分之一（profile:
+// strings.Fields 25.8%、containsWord 26.8%）。这里改为按字节扫描空白。
 func containsWord(list, word string) bool {
-	for _, p := range strings.Fields(list) {
-		if p == word {
+	if word == "" {
+		return false
+	}
+	i := 0
+	for i < len(list) {
+		for i < len(list) && isASCIISpace(list[i]) {
+			i++
+		}
+		start := i
+		for i < len(list) && !isASCIISpace(list[i]) {
+			i++
+		}
+		if i > start && list[start:i] == word {
 			return true
 		}
 	}
 	return false
+}
+
+// isASCIISpace 判断是否为 CSS 词表分隔用的空白（ASCII 空白集）。
+func isASCIISpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' || c == '\f'
 }
 
 func (element *htmlElement) QuerySelector(query string) HTMLElement {

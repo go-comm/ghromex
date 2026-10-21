@@ -85,11 +85,26 @@ func isClippingBox(el *htmlElement) bool {
 		el.computed.OverflowY() != OverflowVisible
 }
 
+// scrollVisualOffset 返回容器当前应显示的偏移：动画在途取视觉位置
+// （scrollAnimTop/Left），否则取滚动目标（scrollTop/Left）。
+func scrollVisualOffset(base *htmlElement) (int, int) {
+	if base == nil {
+		return 0, 0
+	}
+	if base.scrollAnimOn {
+		return base.scrollAnimLeft, base.scrollAnimTop
+	}
+	return base.scrollLeft, base.scrollTop
+}
+
 // applyScrollOffsets 在布局完成后对滚动容器的子树施加滚动偏移，
 // 并按当前内容/盒尺寸夹紧偏移量（内容变小后自动回弹到可滚范围）。
 // 根元素以视口 (vw, vh) 为滚动盒，实现文档级页面滚动。
 // 必须在 layoutPositioned 之后、layoutSelectPopups 之前调用：
 // 前者产出的定位坐标一并平移，后者按平移后的 select 坐标定位浮层。
+//
+// 这里按**绝对**偏移平移并记录已施加量（scrollShift*）；动画逐帧推进时
+// 由 applyScrollDeltas 按增量平移，不必重排。
 func applyScrollOffsets(g Graphics, root HTMLElement, vw, vh int) {
 	var walk func(e HTMLElement, isRoot bool)
 	walk = func(e HTMLElement, isRoot bool) {
@@ -117,16 +132,7 @@ func applyScrollOffsets(g Graphics, root HTMLElement, vw, vh int) {
 		if cy := clampInt(base.scrollTop, 0, maxY); cy != base.scrollTop {
 			base.scrollTop = cy
 		}
-		ox, oy := base.scrollLeft, base.scrollTop
-		if isRoot && base.scrollAnimOn {
-			// 平滑滚动：视觉位置按**时间**从起点缓动到目标（见
-			// scrollAnimDuration 的注释）。推进中标记变更 → 后端下一帧继续。
-			advanceScrollAnim(base)
-			ox, oy = base.scrollAnimLeft, base.scrollAnimTop
-			if base.scrollAnimOn {
-				base.onChanged() // 推进下一帧
-			}
-		}
+		ox, oy := scrollVisualOffset(base)
 		ox = clampInt(ox, 0, maxX)
 		oy = clampInt(oy, 0, maxY)
 		// 注意：此处**不再**把 ox/oy 写回 scrollLeft/scrollTop——那是滚动
@@ -138,11 +144,93 @@ func applyScrollOffsets(g Graphics, root HTMLElement, vw, vh int) {
 				shiftBox(c, -ox, -oy)
 			}
 		}
+		base.scrollShiftLeft, base.scrollShiftTop = ox, oy
 		for _, c := range base.children {
 			walk(c, false)
 		}
 	}
 	walk(root, true)
+}
+
+// applyScrollDeltas 把滚动视觉位置的**增量**平移到已布局的盒子上（不重排）。
+//
+// 滚动偏移只是布局之后的一次平移，与盒模型无关：动画逐帧推进时重跑全量
+// 级联+布局是纯浪费（portal 页一帧 5ms+，滚动肉眼可见地发顿）。这里只
+// 按"新视觉位置 - 已施加量"平移，返回是否有内容移动。
+func applyScrollDeltas(g Graphics, root HTMLElement, vw, vh int) bool {
+	moved := false
+	var walk func(e HTMLElement, isRoot bool)
+	walk = func(e HTMLElement, isRoot bool) {
+		base := inner(e)
+		if base == nil || base.computed == nil || base.computed.Display() == DisplayNone {
+			return
+		}
+		if !isRoot && isAtomicFormControl(base) {
+			return // 原子控件无子树可平移（见 applyScrollOffsets）
+		}
+		boxW, boxH := base.width, base.height
+		if isRoot {
+			boxW, boxH = vw, vh
+		}
+		maxX, maxY := scrollMax(base, boxW, boxH, isRoot)
+		ox, oy := scrollVisualOffset(base)
+		ox = clampInt(ox, 0, maxX)
+		oy = clampInt(oy, 0, maxY)
+		dx := ox - base.scrollShiftLeft
+		dy := oy - base.scrollShiftTop
+		if dx != 0 || dy != 0 {
+			for _, c := range base.children {
+				shiftBox(c, -dx, -dy)
+			}
+			base.scrollShiftLeft, base.scrollShiftTop = ox, oy
+			moved = true
+		}
+		for _, c := range base.children {
+			walk(c, false)
+		}
+	}
+	walk(root, true)
+	return moved
+}
+
+// TickScroll 推进文档级滚动动画一帧，并把视觉位置的增量平移到已布局的
+// 盒子上。返回是否有内容移动（调用方需要重绘，但**不必重排**）。
+//
+// 动画按真实时间推进（见 scrollAnimDuration），故帧率波动不会拖慢滚动
+// 速度；每帧只做一次平移，代价与页面元素数线性相关、与样式表规模无关。
+//
+// 引擎不自带帧循环：后端每帧调一次本函数即可（backend/sdl2 的事件循环
+// 已接上）。不调则动画停在起点（滚动目标仍然生效，只是不做补间）。
+func TickScroll(doc HTMLDocument) bool {
+	d, ok := doc.(*htmlDocument)
+	if !ok {
+		return false
+	}
+	base := inner(d)
+	if base == nil || !base.scrollAnimOn {
+		return false
+	}
+	vw, vh := 0, 0
+	if v := doc.Viewport(); v != nil {
+		vw, vh = v.ViewportWidth(), v.ViewportHeight()
+	}
+	g := docGraphics(doc)
+	advanceScrollAnim(base)
+	moved := applyScrollDeltas(g, doc, vw, vh)
+	// select 浮层按平移后的坐标定位：滚动时展开的浮层要跟着走。
+	layoutSelectPopups(g, base, vw, vh)
+	return moved
+}
+
+// ScrollAnimating 报告文档里是否有滚动动画在途（调用方据此不休眠，
+// 否则动画会被 10ms 的空闲休眠切成一段一段的台阶）。
+func ScrollAnimating(doc HTMLDocument) bool {
+	d, ok := doc.(*htmlDocument)
+	if !ok {
+		return false
+	}
+	base := inner(d)
+	return base != nil && base.scrollAnimOn
 }
 
 // scrollBy 按轴滚动一个普通容器，返回未能消费的剩余位移（0 = 全部消费）。
