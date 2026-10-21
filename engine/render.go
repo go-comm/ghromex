@@ -155,12 +155,77 @@ func RenderNode(g Graphics, node HTMLElement) {
 func paintPositioned(g Graphics, e HTMLElement, focus HTMLElement) {
 	n := pushAncestorClips(g, e)
 	renderNode(g, e, nil, focus)
+	// 定位元素画完后，给它最近的「圆角 + 裁剪」祖先补盖四角：定位内容
+	// 是在定位 pass 里画的（主 pass 早已补盖过一次），不补盖就会盖回
+	// 圆角（大黑卡的右上角被溢出到角外的圆形装饰盖成方角）。
+	// 只在定位元素确实压到角区时才补（否则每个定位元素都要多画一遍）。
+	if box := nearestRoundedClipAncestor(e); box != nil && overlapsCornerAreas(e, box) {
+		drawClipCornerMask(g, box, false)
+	}
 	if createsStackingContext(e) {
 		for _, pb := range collectPositioned(e) {
 			paintPositioned(g, pb.e, focus)
 		}
 	}
 	popClips(g, n)
+}
+
+// nearestRoundedClipAncestor 返回最近的「圆角 + 裁剪」祖先（overflow 非
+// visible 且 border-radius > 0）。定位内容溢出到它的圆角外时需要补盖。
+func nearestRoundedClipAncestor(e HTMLElement) *htmlElement {
+	for p := e.ParentElement(); p != nil; p = p.ParentElement() {
+		b := inner(p)
+		if b == nil || b.computed == nil || !isClippingBox(b) {
+			continue
+		}
+		pd, bd := resolvedEdges(b, b.computed)
+		bw := b.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
+		bh := b.height + pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom]
+		if resolveRadius(b.computed, bw, bh) > 0 {
+			return b
+		}
+	}
+	return nil
+}
+
+// overlapsCornerAreas 判断元素是否压到裁剪盒的圆角区域（四角 r×r 的方块）。
+// 只压到中间直线段的不用补盖。
+func overlapsCornerAreas(e HTMLElement, box *htmlElement) bool {
+	b := inner(e)
+	if b == nil || box == nil || box.computed == nil {
+		return false
+	}
+	pd, bd := resolvedEdges(box, box.computed)
+	bx := box.x - pd[eLeft] - bd[eLeft]
+	by := box.y - pd[eTop] - bd[eTop]
+	bw := box.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
+	bh := box.height + pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom]
+	r := resolveRadius(box.computed, bw, bh)
+	if r <= 0 {
+		return false
+	}
+	// 元素盒（边框盒）
+	epd, ebd := resolvedEdges(b, b.computed)
+	ex := b.x - epd[eLeft] - ebd[eLeft]
+	ey := b.y - epd[eTop] - ebd[eTop]
+	ew := b.width + epd[eLeft] + epd[eRight] + ebd[eLeft] + ebd[eRight]
+	eh := b.height + epd[eTop] + epd[eBottom] + ebd[eTop] + ebd[eBottom]
+	if ew <= 0 || eh <= 0 {
+		return false
+	}
+	// 四个角区（r×r）
+	corners := [4][4]int{
+		{bx, by, r, r},
+		{bx + bw - r, by, r, r},
+		{bx, by + bh - r, r, r},
+		{bx + bw - r, by + bh - r, r, r},
+	}
+	for _, c := range corners {
+		if ex < c[0]+c[2] && ex+ew > c[0] && ey < c[1]+c[3] && ey+eh > c[1] {
+			return true
+		}
+	}
+	return false
 }
 
 // pushAncestorClips 沿父链为定位元素压入全部 overflow 裁剪盒，
@@ -271,15 +336,21 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 	// 属于盒子自身外观，不应被裁掉；真正要裁的是控件内容与子树。
 	clipped := false
 
+	// 圆角裁剪盒的补盖需要这些值（画完子树后用）：盒的边框盒几何、圆角
+	// 半径、边框四边宽。
+	var bx, by, bw, bh, r int
+	var bd edges
+
 	// 元素：背景与边框（外扩到边框盒）
 	if comp != nil {
-		pd, bd := resolvedEdges(base, comp)
-		bx := base.x - pd[eLeft] - bd[eLeft]
-		by := base.y - pd[eTop] - bd[eTop]
-		bw := base.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
-		bh := base.height + pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom]
+		pd, bde := resolvedEdges(base, comp)
+		bx = base.x - pd[eLeft] - bde[eLeft]
+		by = base.y - pd[eTop] - bde[eTop]
+		bw = base.width + pd[eLeft] + pd[eRight] + bde[eLeft] + bde[eRight]
+		bh = base.height + pd[eTop] + pd[eBottom] + bde[eTop] + bde[eBottom]
+		bd = bde
 
-		r := resolveRadius(comp, bw, bh)
+		r = resolveRadius(comp, bw, bh)
 		// radio 原生外观恒为正圆：UA 的 7px 半径只适配 13px 默认尺寸，
 		// 作者改写宽高后仍按圆绘制（Chrome 同口径），也与选中标记的圆形几何一致。
 		// 取「半宽向上取整」而非 min/2：13px → 7 与原 UA 值一致（r 略大于半宽
@@ -402,8 +473,100 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		renderNodeTextColor(g, child, p, focus, textColor)
 	}
 	if clipped {
+		// 圆角裁剪盒：把四角"圆角形状之外"的部分用元素背后的底色盖掉，
+		// 等效于按 border-radius 裁剪（详见 clipCornerMask 的说明）。
+		if r > 0 {
+			drawClipCornerMask(g, base, focused)
+		}
 		popClip(g)
 	}
+}
+
+// drawClipCornerMask 给圆角裁剪盒补盖四角（见 clipCornerMask 的说明）。
+//
+// focused 为真时额外补画聚焦框：聚焦框沿圆角形状画在边框盒上，被盖掉的
+// 角要补回来。定位 pass 里的补盖不补聚焦框（聚焦框画在主 pass，
+// 定位 pass 的补盖只影响定位内容覆盖到的那几块角）。
+func drawClipCornerMask(g Graphics, base *htmlElement, focused bool) {
+	comp := base.computed
+	if comp == nil {
+		return
+	}
+	pd, bd := resolvedEdges(base, comp)
+	bx := base.x - pd[eLeft] - bd[eLeft]
+	by := base.y - pd[eTop] - bd[eTop]
+	bw := base.width + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
+	bh := base.height + pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom]
+	clipCornerMask(g, base, bx, by, bw, bh, resolveRadius(comp, bw, bh), bd, comp, focused)
+}
+
+// clipCornerMask 把圆角裁剪盒四角"圆角形状之外"的部分盖掉。
+//
+// 引擎的裁剪栈是矩形（SDL_RenderSetClipRect 只能给矩形），而 CSS 语义是
+// 裁到 border-radius 的形状：子元素（圆形装饰、图标等）溢出到圆角外时，
+// 浏览器按圆角形状裁掉，引擎的矩形裁剪会让它们盖住圆角（大黑卡的右上角
+// 变成方角）。这里在画完内容后，用**元素背后的底色**盖掉那几块区域，
+// 等效于按圆角形状裁剪（背后不是纯色时是近似）。
+//
+// 盖完要把边框/聚焦框补画一次：它们沿着圆角形状，角上被盖掉的部分要回来。
+func clipCornerMask(g Graphics, base *htmlElement, bx, by, bw, bh, r int,
+	bd edges, comp CSSStyleDeclaration, focused bool) {
+	// 裁剪区是 padding 盒（CSS 语义），圆角按内半径 = 外半径 − 边框宽。
+	padTop := bd[eTop]
+	padLeft := bd[eLeft]
+	px, py := bx+padLeft, by+padTop
+	pw, ph := bw-padLeft-bd[eRight], bh-padTop-bd[eBottom]
+	ir := r - maxInt(maxInt(bd[eLeft], bd[eRight]), maxInt(bd[eTop], bd[eBottom]))
+	if ir <= 0 || pw <= 0 || ph <= 0 {
+		return // 无圆角（或圆角被边框吃掉）→ 矩形裁剪已足够
+	}
+	bg := behindBackground(base)
+	if bg == nil {
+		return // 背后底色未知：宁可不动（矩形裁剪）
+	}
+	// 四角的"圆角之外"区域：角标精灵的覆盖率取反（四个角互为镜像）。
+	sd, ok := g.(SpriteDrawer)
+	if !ok {
+		return // 后端不支持精灵 blit：保持矩形裁剪（画面略逊但不报错）
+	}
+	sd.DrawSprite(px, py, cornerMaskSprite(ir, bg, false, false))           // 左上
+	sd.DrawSprite(px+pw-ir, py, cornerMaskSprite(ir, bg, true, false))      // 右上
+	sd.DrawSprite(px, py+ph-ir, cornerMaskSprite(ir, bg, false, true))      // 左下
+	sd.DrawSprite(px+pw-ir, py+ph-ir, cornerMaskSprite(ir, bg, true, true)) // 右下
+
+	// 边框/聚焦框沿圆角形状，角上被盖掉的部分补回来。
+	if comp != nil {
+		if bc := comp.BorderColor(); bc != nil && comp.BorderStyle() != BorderStyleNone && bw > 0 && bh > 0 {
+			strokeRoundedRect(g, bx, by, bw, bh, r, bd, bc)
+		}
+	}
+	if focused && isFormControl(base) && bw > 0 && bh > 0 && checkKind(base) == "" {
+		strokeRoundedRect(g, bx, by, bw, bh, r, edges{1, 1, 1, 1}, focusBlue)
+	}
+}
+
+// behindBackground 返回元素背后应显示的底色：最近的祖先里不透明的背景色；
+// 都没有则用画布底色（CSS canvas propagation），再没有就白底。
+//
+// 圆角裁剪盒的角上应透出"背后"（浏览器如此），引擎只能近似成一块纯色。
+func behindBackground(e HTMLElement) Color {
+	for p := e.ParentElement(); p != nil; p = p.ParentElement() {
+		b := inner(p)
+		if b == nil || b.computed == nil {
+			continue
+		}
+		if bg := b.computed.BackgroundColor(); bg != nil {
+			if _, _, _, a := bg.RGBA(); a >= 250 {
+				return bg
+			}
+		}
+	}
+	if d, ok := docOf(e).(*htmlDocument); ok && d != nil {
+		if bg := CanvasBackground(d); bg != nil {
+			return bg
+		}
+	}
+	return NewColor(0xFF, 0xFF, 0xFF, 0xFF)
 }
 
 // ---------------------------------------------------------------------------
@@ -607,11 +770,13 @@ func cornerCov(r, u, v int) float64 {
 // 圆角角标精灵
 // ---------------------------------------------------------------------------
 
-// spriteKey 是角标精灵的缓存键：半径 + 颜色 + 镜像方向。
+// spriteKey 是角标精灵的缓存键：半径 + 颜色 + 镜像方向（mask 标记的是
+// "圆角之外"的补盖精灵，与普通角标图案不同）。
 type spriteKey struct {
 	r              int
 	cr, cg, cb, ca uint8
 	fx, fy         bool
+	mask           bool
 }
 
 // spriteCache 缓存角标精灵。精灵只与（半径,颜色,镜像）有关，与盒的大小
@@ -631,6 +796,47 @@ type ringSpriteKey struct {
 
 // ringSpriteCache 缓存圆角边框环的角标精灵。
 var ringSpriteCache = map[ringSpriteKey]*Sprite{}
+
+// cornerMaskSprite 返回"圆角形状之外"的角标精灵（覆盖率取反），颜色是底色。
+//
+// 用于圆角裁剪盒的四角补盖：盖掉圆角之外的部分，等效于按 border-radius
+// 裁剪（见 clipCornerMask）。四个角是同一图案的镜像，故按 (fx,fy) 分别
+// 缓存。
+func cornerMaskSprite(r int, c Color, fx, fy bool) *Sprite {
+	cr, cg, cb, ca := c.RGBA()
+	key := spriteKey{r: r, cr: cr, cg: cg, cb: cb, ca: ca, fx: fx, fy: fy, mask: true}
+	if s, ok := spriteCache[key]; ok {
+		return s
+	}
+	pix := make([]byte, r*r*4)
+	for v := 0; v < r; v++ {
+		for u := 0; u < r; u++ {
+			su, sv := u, v
+			if fx {
+				su = r - 1 - u
+			}
+			if fy {
+				sv = r - 1 - v
+			}
+			out := 1 - cornerCov(r, su, sv) // 圆角之外的部分
+			if out <= 0 {
+				continue
+			}
+			na := uint32(float64(ca)*out + 0.5)
+			if na == 0 {
+				continue
+			}
+			if na > 255 {
+				na = 255
+			}
+			i := (v*r + u) * 4
+			pix[i+0], pix[i+1], pix[i+2], pix[i+3] = cr, cg, cb, uint8(na)
+		}
+	}
+	s := &Sprite{W: r, H: r, Pix: pix}
+	spriteCache[key] = s
+	return s
+}
 
 // ringCornerSprite 返回圆角边框环在某个角上的精灵（r×r 的 RGBA8888）。
 //

@@ -2,6 +2,8 @@ package engine_test
 
 import (
 	"testing"
+
+	"github.com/go-comm/ghromex/engine"
 )
 
 // 填充圆角 AA：白底上弧边像素呈分数覆盖的半透明红，
@@ -35,6 +37,36 @@ func TestFillRadiusAntialiasing(t *testing.T) {
 	}
 	if r, g, b, _ := colorAt(t, buf, 0, 20); r != 255 || g != 0 || b != 0 {
 		t.Fatalf("(0,20) = %02X%02X%02X, want FF0000", r, g, b)
+	}
+}
+
+// 圆角裁剪盒的裁剪要按 border-radius 的形状（浏览器语义）：子元素溢出到
+// 角外时，角上应透出盒背后的底色，而不是像矩形裁剪那样被溢出内容盖成
+// 方角（portal 页的大黑卡右上角就是这样）。
+func TestRoundedClipCornerMask(t *testing.T) {
+	const src = `<!doctype html><html><head><style>
+	body { margin: 0; background-color: #F1F5F9; }
+	#box { position: relative; left: 20px; top: 20px; width: 100px; height: 60px;
+		background-color: #0B1220; border-radius: 12px; overflow: hidden; }
+	#orb { position: absolute; right: -30px; top: -30px; width: 60px; height: 60px;
+		background-color: #123A6B; border-radius: 30px; }
+	</style></head><body><div id="box"><div id="orb"></div></div></body></html>`
+	doc := openDoc(t, 200, 120, src)
+	buf := engine.NewBufferGraphics(200, 120)
+	engine.RenderNode(buf, doc)
+
+	// 盒的右上角（盒 = 20,20 起 100×60，r=12）：角上的最外像素应透出
+	// 页面底色 #F1F5F9，而不是溢出到角外的蓝球 #123A6B。
+	if r, g, b, _ := colorAt(t, buf, 119, 20); r != 0xF1 || g != 0xF5 || b != 0xF9 {
+		t.Errorf("右上角 (119,20) = %02X%02X%02X，want F1F5F9（角外应透出底色）", r, g, b)
+	}
+	// 盒内（圆角形状以内）仍是蓝球：补盖只动角外那几块。
+	if r, g, b, _ := colorAt(t, buf, 100, 40); r != 0x12 || g != 0x3A || b != 0x6B {
+		t.Errorf("盒内 (100,40) = %02X%02X%02X，want 123A6B（补盖不应影响盒内）", r, g, b)
+	}
+	// 盒内左下的黑底仍在（盒自身背景不被补盖吃掉）。
+	if r, g, b, _ := colorAt(t, buf, 30, 70); r != 0x0B || g != 0x12 || b != 0x20 {
+		t.Errorf("盒内左下 (30,70) = %02X%02X%02X，want 0B1220", r, g, b)
 	}
 }
 
