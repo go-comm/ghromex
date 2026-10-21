@@ -42,7 +42,7 @@
 | `examples/scroll` | `go run ./examples/scroll` | 滚动/裁剪：文档级滚动、overflow 容器、textarea 滚轮、`OnWheel` 回显 |
 | `examples/browser` | `go run ./examples/browser` | 迷你本地浏览器：顶部常驻地址栏与后退/前进/刷新/首页按钮、底部常驻状态栏（页标题 + 说明，换页后仍在），地址栏可打开本地路径（相对路径/`file://`），支持 `about:home`/`about:back`/`about:forward`，外部链接与缺失文件显示提示页；需在仓库内运行 |
 | `examples/portal` | `go run ./examples/portal` | 购物门户：fixed 工具条/品牌头/导航、层叠上下文、分类栏、秒杀与商品网格、搜索提示和购物车计数交互 |
-| `examples/notepad` | `go run ./examples/notepad` | 仿 Windows 记事本：菜单栏（文件/编辑/视图/帮助）、原生「打开/另存为/选择文件夹」对话框、路径栏、铺满窗口的多行编辑区、状态栏（文件名/行列/字符数）；`-file` 启动时打开文件 |
+| `examples/notepad` | `go run ./examples/notepad` | 仿 Windows 记事本：真菜单（文件/编辑/格式/视图/帮助，点标签弹出浮层菜单）、工具栏（新建/打开/保存/另存为/撤销/重做）、原生「打开/另存为/选择文件夹」对话框、查找替换栏、铺满窗口的多行编辑区、状态栏（文件名/行列/字符数）；`-file` 启动时打开文件 |
 
 每个示例都支持同一组调试参数：
 
@@ -53,7 +53,7 @@ go run ./examples/ua -dump-svg out.svg  # 无头导出 SVG（不需要显示器�
 
 窗口交互示例：`examples/login` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘；`examples/form` 覆盖 11 项布局特性（负 inset 角标、fixed 底条、水印、包含块链锚定、z-index 层序、box-sizing 跨内核一致等），可点击输入框直接键入文字；`examples/scroll` 演示滚轮滚动（文档级长页、overflow 容器横/纵滚动、overflow:hidden 裁剪、textarea 滚轮、`OnWheel` 事件位移回显）；`examples/browser` 用 `SetOnNavigate` 接管链接点击：读取目标 HTML 并在同一窗口重新 `OpenDocument`，每次换页后把 `position:fixed` 的地址栏、导航按钮与底部状态栏重新注入文档（引擎没有独立的窗口 chrome 层；让位用插在页面内容之前的占位块，既不改页面自己的 padding，也不动 body 的 margin——后者会让固定工具条掉出 body 的命中区），浏览历史支持后退/前进/刷新/首页（没有可后退的页面时按钮置灰），未知协议与读取失败会生成带返回链接的提示页；`examples/portal` 用固定顶栏 + 绝对定位侧栏组成购物门户，搜索框聚焦后显示热门提示，所有「加入购物车」按钮共享一个计数徽标。
 
-`examples/notepad` 是最"应用"的一个：它把引擎当桌面 UI 框架用——下拉菜单借 `<select>` 的选项浮层实现（引擎没有通用弹层），编辑区几何由程序按窗口尺寸算出（CSS 没有 `calc`），撤销栈由应用层在变更回调里维护（引擎不内置撤销），文件读写与剪贴板走平台能力（`runtime/dialog` 的原生文件对话框 / `runtime/clipboard` 的系统剪贴板）。
+`examples/notepad` 是最"应用"的一个：它把引擎当桌面 UI 框架用——菜单用「菜单栏标签 + 绝对定位的浮层面板」实现（引擎没有通用弹层；浮层要放在 body 最后，命中测试按 DOM 顺序后者胜出，排前面会被同名按钮截胡），编辑区几何由程序按窗口尺寸算出（CSS 没有 `calc`），撤销/重做栈由应用层在变更回调里维护（引擎不内置撤销），文件读写与剪贴板走平台能力（`runtime/dialog` 的原生文件对话框 / `runtime/clipboard` 的系统剪贴板）。
 
 ## 代码示例
 
@@ -185,8 +185,8 @@ examples/          可独立运行的示例（每个目录 main.go + index.html�
   scroll/            滚动/裁剪（文档级滚动、overflow、textarea、wheel 事件）
   browser/           迷你本地浏览器（常驻工具条 + 状态栏、历史/刷新、链接导航、错误提示页）
   portal/            购物门户（fixed 顶栏、层叠上下文、商品网格、秒杀、购物车交互）
-  notepad/           仿 Windows 记事本（菜单栏/路径栏/编辑区/状态栏、文件读写、
-                     撤销栈、剪贴板）
+  notepad/           仿 Windows 记事本（菜单栏+浮层菜单/工具栏/查找替换栏/
+                     编辑区/状态栏、文件读写、撤销重做栈、剪贴板）
 libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll，见 libs/README.md）
 ```
 

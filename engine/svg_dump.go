@@ -483,5 +483,9 @@ func escapeXML(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
+	// 属性值里的双引号也要转义：font-family 常带引号
+	//（font-family="Microsoft YaHei", "Segoe UI"），不转义导出的就不是
+	// 合法 XML，浏览器直接拒绝渲染。
+	s = strings.ReplaceAll(s, "\"", "&quot;")
 	return s
 }

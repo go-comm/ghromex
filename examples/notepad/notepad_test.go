@@ -9,10 +9,10 @@ import (
 	"github.com/go-comm/ghromex/engine"
 )
 
-// 记事本示例的无头回归：界面排版、文件读写、撤销栈、菜单机制。
+// 记事本示例的无头回归：界面排版、文件读写、撤销/重做、菜单机制。
 //
-// 交互一律走引擎的公开入口（点击/选项浮层），不直接调应用内部方法，
-// 这样菜单「点标题→弹选项→选中」这条链路也在覆盖范围内。
+// 交互一律走引擎的公开入口（点击命中测试），不直接调应用内部方法，这样
+// 「点菜单标签→浮层展开→点菜单项」这条链路也在覆盖范围内。
 
 func newTestNotepad(t *testing.T) *notepad {
 	t.Helper()
@@ -36,45 +36,54 @@ func clickAt(t *testing.T, doc engine.HTMLDocument, x, y int) {
 	engine.OnDocumentClick(doc, x, y)
 }
 
-// clickOption 点开 <select> 并选中 value 匹配的选项（走真实菜单链路：
-// 先点 select 展开浮层，再点选项触发 change）。
-func clickOption(t *testing.T, doc engine.HTMLDocument, selID, value string) {
+// clickMenu 走真实菜单链路：点菜单栏标签 → 浮层面板展开 → 点菜单项。
+func clickMenu(t *testing.T, np *notepad, title, label string) {
 	t.Helper()
-	sel := doc.QuerySelector(selID)
-	if sel == nil {
-		t.Fatalf("找不到 %s", selID)
+	np.doc.Refresh()
+
+	var head engine.HTMLElement
+	for _, l := range np.menuLabels {
+		if l.InnerText() == title {
+			head = l
+			break
+		}
 	}
-	r := sel.GetBoundingClientRect()
-	clickAt(t, doc, r.Left().Pixel()+2, r.Top().Pixel()+2)
-	// 选项浮层的位置在布局期算：展开后要重排一次，选项才有可点的盒子。
-	doc.Refresh()
-	for _, o := range doc.GetElementsByTagName("option") {
-		if o.GetAttribute("value") != value {
+	if head == nil {
+		t.Fatalf("菜单栏里没有 %q", title)
+	}
+	r := head.GetBoundingClientRect()
+	clickAt(t, np.doc, r.Left().Pixel()+2, r.Top().Pixel()+2)
+
+	// 浮层里的菜单项：展开后要重排一次，项才有可点的盒子。
+	np.doc.Refresh()
+	for _, item := range np.menuPop.Children() {
+		if item.InnerText() != label {
 			continue
 		}
-		or := o.GetBoundingClientRect()
-		if or.Right().Pixel() <= or.Left().Pixel() {
-			t.Fatalf("选项 %q 没有布局盒（选项浮层未展开？）", value)
+		ir := item.GetBoundingClientRect()
+		if ir.Right().Pixel() <= ir.Left().Pixel() {
+			t.Fatalf("菜单项 %q 没有布局盒（浮层未展开？）", label)
 		}
-		clickAt(t, doc, (or.Left().Pixel()+or.Right().Pixel())/2,
-			(or.Top().Pixel()+or.Bottom().Pixel())/2)
+		clickAt(t, np.doc, (ir.Left().Pixel()+ir.Right().Pixel())/2,
+			(ir.Top().Pixel()+ir.Bottom().Pixel())/2)
 		return
 	}
-	t.Fatalf("找不到值为 %q 的选项", value)
+	t.Fatalf("菜单 %q 里没有 %q", title, label)
 }
 
-// 编辑区铺满「视口 - 菜单栏 - 路径栏 - 状态栏」：引擎的 CSS 没有 calc，
+// 编辑区铺满「视口 - 菜单栏 - 工具栏 - 状态栏」：引擎的 CSS 没有 calc，
 // 几何由应用层算并写进内联样式。
 func TestEditorFillsWindow(t *testing.T) {
 	np := newTestNotepad(t)
 	r := np.editor.GetBoundingClientRect()
-	if got := r.Top().Pixel(); got != editorY {
-		t.Fatalf("编辑区上沿 = %d, want %d", got, editorY)
+	top := menuH + toolH
+	if got := r.Top().Pixel(); got != top {
+		t.Fatalf("编辑区上沿 = %d, want %d", got, top)
 	}
 	if got := r.Right().Pixel() - r.Left().Pixel(); got != 900 {
 		t.Fatalf("编辑区宽 = %d, want 900", got)
 	}
-	wantH := 620 - editorY - statusH
+	wantH := 620 - top - statusH
 	if got := r.Bottom().Pixel() - r.Top().Pixel(); got != wantH {
 		t.Fatalf("编辑区高 = %d, want %d", got, wantH)
 	}
@@ -102,12 +111,13 @@ func TestEditorFollowsViewportResize(t *testing.T) {
 	if got := r.Right().Pixel() - r.Left().Pixel(); got != 640 {
 		t.Fatalf("缩放后编辑区宽 = %d, want 640", got)
 	}
-	if got := r.Bottom().Pixel() - r.Top().Pixel(); got != 400-editorY-statusH {
-		t.Fatalf("缩放后编辑区高 = %d, want %d", got, 400-editorY-statusH)
+	wantH := 400 - (menuH + toolH) - statusH
+	if got := r.Bottom().Pixel() - r.Top().Pixel(); got != wantH {
+		t.Fatalf("缩放后编辑区高 = %d, want %d", got, wantH)
 	}
 }
 
-// 文件打开/保存：路径栏代替原生文件对话框。
+// 文件打开/保存：走原生对话框之外的路径（应用层的 loadFile/writeFile）。
 func TestOpenAndSaveFile(t *testing.T) {
 	np := newTestNotepad(t)
 	dir := t.TempDir()
@@ -125,9 +135,6 @@ func TestOpenAndSaveFile(t *testing.T) {
 	}
 	if np.dirty {
 		t.Fatal("刚打开的文件不应标记为已修改")
-	}
-	if got := np.pathIn.GetAttribute("value"); got != path {
-		t.Fatalf("路径栏 = %q, want %q", got, path)
 	}
 
 	// 改内容 → 标记已修改 → 保存后落盘。
@@ -174,62 +181,146 @@ func TestUndoRestoresPreviousText(t *testing.T) {
 	}
 }
 
-// 菜单链路：点「文件」→ 弹选项 → 选「新建」→ 编辑区清空；
-// 菜单随后复位成标题（下次点击仍是标题态）。
+// 重做：撤销之后能把内容恢复回去；新的改动会让重做栈作废。
+func TestRedoRestoresUndoneText(t *testing.T) {
+	np := newTestNotepad(t)
+	np.editor.SetAttribute("value", "abc")
+	np.undoEdit()
+	if got := np.editor.GetAttribute("value"); got != "" {
+		t.Fatalf("撤销后编辑区 = %q, want 空", got)
+	}
+	np.redoEdit()
+	if got := np.editor.GetAttribute("value"); got != "abc" {
+		t.Fatalf("重做后编辑区 = %q, want %q", got, "abc")
+	}
+
+	// 撤销之后又有新改动：重做栈作废。
+	np.editor.SetAttribute("value", "xyz")
+	np.undoEdit()
+	np.editor.SetAttribute("value", "new")
+	np.redoEdit()
+	if got := np.editor.GetAttribute("value"); got != "new" {
+		t.Fatalf("新改动后重做 = %q, want new（重做栈应已作废）", got)
+	}
+}
+
+// 菜单链路：点「文件」→ 浮层展开 → 点「新建」→ 编辑区清空。
 func TestMenuActionClearsEditor(t *testing.T) {
 	np := newTestNotepad(t)
 	np.editor.SetAttribute("value", "old text")
 
-	clickOption(t, np.doc, "#m-file", "new")
+	clickMenu(t, np, "文件", "新建")
 	if got := np.editor.GetAttribute("value"); got != "" {
 		t.Fatalf("「新建」后编辑区 = %q, want 空", got)
 	}
-	if sel := np.doc.QuerySelector("#m-file"); engine.SelectValue(sel) != "" {
-		t.Fatalf("菜单未复位，select 值 = %q", engine.SelectValue(sel))
+}
+
+// 菜单浮层：点标签打开、点菜单项执行后关闭、点别处也关闭。
+func TestMenuPopupOpensAndCloses(t *testing.T) {
+	np := newTestNotepad(t)
+
+	// 点菜单栏标签：浮层展开。
+	np.doc.Refresh()
+	head := np.menuLabels[0]
+	hr := head.GetBoundingClientRect()
+	clickAt(t, np.doc, hr.Left().Pixel()+2, hr.Top().Pixel()+2)
+	np.doc.Refresh()
+	if !np.menuOpen {
+		t.Fatal("点菜单标签后浮层没有打开")
+	}
+	if got := np.menuPop.GetAttribute("style"); !strings.Contains(got, "display:block") {
+		t.Fatalf("浮层样式 = %q, want 含 display:block", got)
+	}
+
+	// 点菜单项：动作执行、浮层收起。
+	clickMenu(t, np, "编辑", "全选")
+	if np.menuOpen {
+		t.Fatal("点菜单项后浮层没有关闭")
+	}
+	if got := np.menuPop.GetAttribute("style"); !strings.Contains(got, "display:none") {
+		t.Fatalf("浮层样式 = %q, want 含 display:none", got)
+	}
+
+	// 点浮层之外（编辑区）也应关闭菜单。
+	np.doc.Refresh()
+	head = np.menuLabels[0]
+	hr = head.GetBoundingClientRect()
+	clickAt(t, np.doc, hr.Left().Pixel()+2, hr.Top().Pixel()+2)
+	if !np.menuOpen {
+		t.Fatal("浮层没有再次打开")
+	}
+	r := np.editor.GetBoundingClientRect()
+	clickAt(t, np.doc, r.Left().Pixel()+10, r.Top().Pixel()+10)
+	if np.menuOpen {
+		t.Fatal("点浮层之外后菜单没有关闭")
 	}
 }
 
-// 无头模式没有原生对话框：「打开」退回路径栏输入的路径。
-func TestHeadlessOpenFallsBackToPathBar(t *testing.T) {
+// 无头模式没有原生对话框：「打开」要在状态栏说明白，而不是静默无反应。
+func TestHeadlessOpenExplainsNoDialog(t *testing.T) {
 	np := newTestNotepad(t)
-	dir := t.TempDir()
-	path := filepath.Join(dir, "note.txt")
-	if err := os.WriteFile(path, []byte("hello"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	np.pathIn.SetAttribute("value", path)
-
-	clickOption(t, np.doc, "#m-file", "open")
-	if got := np.editor.GetAttribute("value"); got != "hello" {
-		t.Fatalf("打开后编辑区 = %q, want hello", got)
-	}
-	if np.path != path {
-		t.Fatalf("当前文件 = %q, want %q", np.path, path)
+	clickMenu(t, np, "文件", "打开…")
+	if msg := np.stMsg.InnerText(); !strings.Contains(msg, "原生窗口") {
+		t.Errorf("状态栏提示 = %q, want 含「原生窗口」", msg)
 	}
 }
 
-// 无头模式的「选择文件夹」没有原生对话框可用：状态栏要说明白，而不是
-// 静默无反应。
-func TestHeadlessOpenDirExplainsFallback(t *testing.T) {
+// 格式 → 放大字号：改的是内联样式里的 font-size。
+func TestFormatZoomChangesFontSize(t *testing.T) {
 	np := newTestNotepad(t)
-	clickOption(t, np.doc, "#m-file", "opendir")
-	if msg := np.stMsg.InnerText(); !strings.Contains(msg, "路径栏") {
-		t.Errorf("状态栏提示 = %q, want 含「路径栏」", msg)
-	}
-}
-
-// 视图 → 放大字号：改的是内联样式里的 font-size。
-func TestViewZoomChangesFontSize(t *testing.T) {
-	np := newTestNotepad(t)
-	clickOption(t, np.doc, "#m-view", "zoomin")
+	clickMenu(t, np, "格式", "放大字号")
 	if np.font != baseFont+1 {
 		t.Fatalf("放大后字号 = %d, want %d", np.font, baseFont+1)
 	}
 	if got := np.editor.GetAttribute("style"); !strings.Contains(got, "font-size:15px") {
 		t.Fatalf("编辑区内联样式 = %q, want 含 font-size:15px", got)
 	}
-	clickOption(t, np.doc, "#m-view", "zoomreset")
+	clickMenu(t, np, "格式", "默认字号")
 	if np.font != baseFont {
 		t.Fatalf("复位后字号 = %d, want %d", np.font, baseFont)
+	}
+}
+
+// 查找/替换：查找报出位置，替换改文本，全部替换改所有匹配。
+func TestFindAndReplace(t *testing.T) {
+	np := newTestNotepad(t)
+	np.editor.SetAttribute("value", "hello world hello")
+
+	np.findIn.SetAttribute("value", "hello")
+	np.findNext()
+	if np.matchAt != 0 {
+		t.Fatalf("第一次查找位置 = %d, want 0", np.matchAt)
+	}
+	if msg := np.stMsg.InnerText(); !strings.Contains(msg, "第 1 处") {
+		t.Errorf("状态栏提示 = %q, want 含「第 1 处」", msg)
+	}
+
+	np.replaceIn.SetAttribute("value", "HI")
+	np.replaceCurrent()
+	if got := np.editor.GetAttribute("value"); got != "HI world hello" {
+		t.Fatalf("替换一处后 = %q, want %q", got, "HI world hello")
+	}
+
+	np.replaceAll()
+	if got := np.editor.GetAttribute("value"); got != "HI world HI" {
+		t.Fatalf("全部替换后 = %q, want %q", got, "HI world HI")
+	}
+}
+
+// 视图 → 显示状态栏：状态栏可隐藏，编辑区相应变高。
+func TestToggleStatusBar(t *testing.T) {
+	np := newTestNotepad(t)
+	before := np.editor.GetBoundingClientRect().Bottom().Pixel() -
+		np.editor.GetBoundingClientRect().Top().Pixel()
+
+	clickMenu(t, np, "视图", "显示状态栏")
+	np.doc.Refresh()
+	r := np.editor.GetBoundingClientRect()
+	got := r.Bottom().Pixel() - r.Top().Pixel()
+	if got != before+statusH {
+		t.Fatalf("隐藏状态栏后编辑区高 = %d, want %d", got, before+statusH)
+	}
+	if got := np.stBar.GetAttribute("style"); !strings.Contains(got, "display:none") {
+		t.Fatalf("状态栏样式 = %q, want 含 display:none", got)
 	}
 }

@@ -1,83 +1,102 @@
 <!doctype html>
+<!--
+  记事本示例界面：菜单栏 / 工具栏 / 编辑区 / 状态栏（+ 查找替换栏）。
+
+  菜单：引擎没有通用弹层，菜单用「菜单栏标签 + 浮层面板」实现——面板绝对
+  定位、盖在内容上（与 <select> 的选项浮层同理）：点标签打开菜单，点菜单项
+  执行动作，点别处关闭。
+
+  编辑区与查找替换栏的几何由示例程序按窗口尺寸计算（内联样式），CSS 只给
+  外观。引擎不支持 flex/grid、line-height、:hover 与单边 border，因此菜单
+  项的分隔线用一条 1px 高的 div，文字垂直位置用 padding 补。
+-->
 <html>
 <head>
 <meta charset="utf-8">
 <title>记事本</title>
 <style>
-	/* 记事本界面：菜单栏 / 路径栏 / 编辑区 / 状态栏。
-	   编辑区的几何由示例程序按窗口尺寸计算（内联样式），CSS 只给外观。 */
 	html { height: 100%; background-color: #FFFFFF; }
 	body { margin: 0; padding: 0; height: 100%; color: #1F1F1F;
 		font-family: "Microsoft YaHei", "Segoe UI", system-ui, sans-serif; font-size: 13px; }
 
-	#menubar { position: absolute; left: 0; top: 0; width: 100%; height: 28px;
-		box-sizing: border-box; background-color: #F3F3F3; border-bottom: 1px solid #DCDCDC; }
-	#menubar select { position: absolute; top: 3px; height: 22px; width: 78px;
-		box-sizing: border-box; padding: 0 4px; border: 1px solid #F3F3F3;
-		background-color: #F3F3F3; color: #1F1F1F; font-size: 13px; }
+	/* ── 菜单栏 ───────────────────────────────────────────────── */
+	#menubar { position: absolute; left: 0; top: 0; width: 100%; height: 30px;
+		box-sizing: border-box; background-color: #F7F7F7; border-bottom: 1px solid #E4E4E4; }
+	#menubar .menu { position: absolute; top: 0; height: 30px; padding: 7px 12px 0 12px;
+		color: #1F1F1F; font-size: 13px; box-sizing: border-box; }
+	#menubar .menu-open { background-color: #E4EDFB; color: #1A4FA0; }
 
-	#pathbar { position: absolute; left: 0; top: 28px; width: 100%; height: 34px;
-		box-sizing: border-box; background-color: #FAFAFA; border-bottom: 1px solid #E5E5E5; }
-	#pathbar button { position: absolute; top: 6px; height: 22px; width: 56px;
-		box-sizing: border-box; padding: 0 4px; font-size: 13px; }
-	#path { position: absolute; top: 6px; height: 22px;
-		box-sizing: border-box; padding: 1px 6px; font-size: 13px; }
+	/* 菜单浮层：盖在内容之上（z-index 高于编辑区） */
+	#menupop { position: absolute; left: 0; top: 30px; width: 184px; display: none;
+		background-color: #FFFFFF; border: 1px solid #CFCFCF; border-radius: 6px;
+		box-sizing: border-box; z-index: 100; }
+	#menupop .menu-item { padding: 6px 14px 0 14px; color: #1F1F1F; font-size: 13px; }
+	#menupop .menu-sep { height: 1px; margin: 5px 10px; background-color: #E6E6E6; }
 
-	/* 编辑区：几何（left/top/width/height）由示例程序按窗口尺寸写入内联样式。 */
-	#editor { position: absolute; left: 0; top: 62px; width: 100%; height: 100%;
-		box-sizing: border-box; border: none; padding: 4px 6px; background-color: #FFFFFF;
+	/* ── 工具栏 ───────────────────────────────────────────────── */
+	#toolbar { position: absolute; left: 0; top: 30px; width: 100%; height: 36px;
+		box-sizing: border-box; background-color: #FAFAFA; border-bottom: 1px solid #E8E8E8; }
+	#toolbar button { position: absolute; top: 7px; height: 22px; padding: 0 10px;
+		font-size: 13px; }
+	#btn-new { left: 8px; }
+	#btn-open { left: 66px; }
+	#btn-save { left: 124px; }
+	#btn-saveas { left: 182px; }
+	#btn-undo { left: 268px; }
+	#btn-redo { left: 326px; }
+
+	/* ── 查找替换栏（默认隐藏，显示时挤在工具栏下面） ───────────── */
+	#findbar { position: absolute; left: 0; top: 66px; width: 100%; height: 32px;
+		display: none; box-sizing: border-box; background-color: #F4F8FE;
+		border-bottom: 1px solid #D8E3F5; }
+	#findbar input { position: absolute; top: 6px; height: 20px; width: 170px;
+		box-sizing: border-box; padding: 0 6px; font-size: 12px; }
+	#findbar button { position: absolute; top: 5px; height: 22px; padding: 0 10px;
+		font-size: 12px; }
+	#find-text { left: 12px; }
+	#btn-find-next { left: 190px; }
+	#replace-text { left: 296px; }
+	#btn-replace { left: 474px; }
+	#btn-replace-all { left: 546px; }
+	#btn-find-close { left: 634px; }
+
+	/* ── 编辑区（几何由示例程序按窗口尺寸写入内联样式） ─────────── */
+	#editor { position: absolute; left: 0; top: 66px; width: 100%; height: 100%;
+		box-sizing: border-box; border: none; padding: 6px 8px; background-color: #FFFFFF;
 		color: #1F1F1F; font-family: Consolas, "Courier New", monospace; font-size: 14px; }
 
+	/* ── 状态栏 ───────────────────────────────────────────────── */
 	#statusbar { position: absolute; left: 0; bottom: 0; width: 100%; height: 24px;
 		box-sizing: border-box; background-color: #F3F3F3; border-top: 1px solid #DCDCDC; }
-	#statusbar span { position: absolute; top: 4px; height: 16px; line-height: 16px;
-		color: #444444; font-size: 12px; }
-	#st-name { left: 8px; width: 260px; }
-	#st-pos { left: 280px; width: 110px; }
-	#st-count { left: 400px; width: 120px; }
-	#st-msg { left: 530px; }
+	#statusbar span { position: absolute; top: 4px; height: 16px; color: #444444; font-size: 12px; }
+	#st-name { left: 8px; width: 200px; }
+	#st-pos { left: 216px; width: 110px; }
+	#st-count { left: 332px; width: 110px; }
+	#st-msg { left: 450px; }
 </style>
 </head>
 <body>
-	<!-- 菜单栏：引擎没有通用弹层，下拉菜单借 <select> 的选项浮层实现
-	     （点开 → 选项浮层 → 选中触发 change → 示例程序执行动作）。 -->
-	<div id="menubar">
-		<select id="m-file" style="left:4px">
-			<option value="">文件</option>
-			<option value="new">新建</option>
-			<option value="open">打开…</option>
-			<option value="opendir">选择文件夹…</option>
-			<option value="save">保存</option>
-			<option value="saveas">另存为…</option>
-			<option value="exit">退出</option>
-		</select>
-		<select id="m-edit" style="left:86px">
-			<option value="">编辑</option>
-			<option value="undo">撤销</option>
-			<option value="cut">剪切</option>
-			<option value="copy">复制</option>
-			<option value="paste">粘贴</option>
-			<option value="selectall">全选</option>
-			<option value="time">时间/日期</option>
-		</select>
-		<select id="m-view" style="left:168px">
-			<option value="">视图</option>
-			<option value="zoomin">放大字号</option>
-			<option value="zoomout">缩小字号</option>
-			<option value="zoomreset">默认字号</option>
-		</select>
-		<select id="m-help" style="left:250px">
-			<option value="">帮助</option>
-			<option value="about">关于</option>
-		</select>
+	<!-- 菜单栏的标签由示例程序生成（菜单项会随功能增减）。菜单浮层放在
+	     body 的最后：引擎的命中测试按 DOM 顺序「后者胜出」，浮层若排在
+	     工具栏之前，点菜单项会命中工具栏上的同名按钮。 -->
+	<div id="menubar"></div>
+
+	<div id="toolbar">
+		<button id="btn-new">新建</button>
+		<button id="btn-open">打开</button>
+		<button id="btn-save">保存</button>
+		<button id="btn-saveas">另存为</button>
+		<button id="btn-undo">撤销</button>
+		<button id="btn-redo">重做</button>
 	</div>
 
-	<!-- 路径栏：真实窗口下「打开/另存为」用原生文件对话框，路径栏可以直接
-	     输入路径（无头模式没有原生对话框，也用它）。 -->
-	<div id="pathbar">
-		<button id="btn-open" style="left:8px">打开</button>
-		<button id="btn-save" style="left:70px">保存</button>
-		<input id="path" style="left:132px" value="">
+	<div id="findbar">
+		<input id="find-text" value="">
+		<button id="btn-find-next">查找下一个</button>
+		<input id="replace-text" value="">
+		<button id="btn-replace">替换</button>
+		<button id="btn-replace-all">全部替换</button>
+		<button id="btn-find-close">关闭</button>
 	</div>
 
 	<textarea id="editor" spellcheck="false"></textarea>
@@ -88,5 +107,8 @@
 		<span id="st-count">0 个字符</span>
 		<span id="st-msg"></span>
 	</div>
+
+	<!-- 菜单浮层：绝对定位盖在内容上，放在 body 最后（见上面的说明）。 -->
+	<div id="menupop"></div>
 </body>
 </html>
