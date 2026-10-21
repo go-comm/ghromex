@@ -437,10 +437,11 @@ func setClipboardText(text string) {
 	runtime.KeepAlive(buf)
 }
 
-// SetClipboardText 把 UTF-8 文本写入系统剪贴板（应用层接口）。
+// SetClipboardText 把 UTF-8 文本写入系统剪贴板。
 //
-// 引擎只负责选区文本，剪贴板读写属平台能力，故放在后端：应用经
-// browser.SetClipboardText 落盘，engine 保持纯 Go、无平台依赖。
+// 引擎只负责选区文本，剪贴板读写属平台能力：应用经 runtime/clipboard
+// （通用入口）→ backend/clipboard（平台实现）落盘，engine 保持纯 Go、
+// 无平台依赖。
 func SetClipboardText(text string) { setClipboardText(text) }
 
 // ClipboardText 读取系统剪贴板文本（UTF-8）。剪贴板为空或 SDL 未导出

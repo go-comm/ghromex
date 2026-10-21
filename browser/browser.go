@@ -74,11 +74,4 @@ func (win *Window) NativeHandle() (uintptr, error) {
 	return win.sdl.NativeHandle()
 }
 
-// ClipboardText 读取系统剪贴板文本（UTF-8）。剪贴板属平台能力：引擎只
-// 给出选区文本，读写由后端完成。非 Windows 平台返回空串。
-func ClipboardText() string { return sdl2.ClipboardText() }
-
-// SetClipboardText 把 UTF-8 文本写入系统剪贴板。非 Windows 平台为空操作。
-func SetClipboardText(text string) { sdl2.SetClipboardText(text) }
-
 var _ engine.Viewport = (*Window)(nil)

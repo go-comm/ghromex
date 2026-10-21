@@ -14,7 +14,7 @@
 - 表单与链接控件：`<select>`/`<option>` 下拉（点击展开选项浮层，点选项选中并派发 `change`，下方放不下且上方放得下时整组上移，浮层压过流内容与定位层、命中测试同层序）；`<button>` 内容按 HTML 规范垂直居中（Chrome/Edge 同款，定高按钮尤其明显）、`<a href>` 链接（UA 蓝色 + 下划线，`SetOnNavigate` 注册导航回调，导航在 click 冒泡之后执行）
 - 勾选控件：`<input type=radio|checkbox>` 点击切换选中（`checked` 布尔属性按存在性判定，API `IsChecked` / `SetChecked`）；选中态绘制强调色方块 + 白色对勾、强调色圆环 + 实心圆（Chrome 口径），radio 盒恒为正圆；radio 仅 name 非空且相同的项互斥（实测无 name / `name=""` 各自独立）；点 label（包裹其控件或 `for` 指向）等效点该控件
 - DOM 式 API：`QuerySelector` / `GetBoundingClientRect` / `SetText` / `OnClick` / `IsChecked` / `SetChecked` 等；内容变化自动触发重排重绘
-- 应用层底座：`SetOnChanged` 变更回调（内容或**视口尺寸**变化都会通知——窗口缩放不改文档内容，只靠内容变更收不到信号）；失焦只停画、**不丢编辑状态**（光标与选区保留，页内菜单动作可作用于失焦的编辑区）；`CaretPosition` 查光标行列；`browser.ClipboardText` / `browser.SetClipboardText` 读写系统剪贴板；`browser.RequestClose` 关窗
+- 应用层底座：`SetOnChanged` 变更回调（内容或**视口尺寸**变化都会通知——窗口缩放不改文档内容，只靠内容变更收不到信号）；失焦只停画、**不丢编辑状态**（光标与选区保留，页内菜单动作可作用于失焦的编辑区）；`CaretPosition` 查光标行列；`clipboard.Text` / `clipboard.SetText`（`runtime/clipboard`）读写系统剪贴板；`browser.RequestClose` 关窗
 - 事件冒泡：命中测试找到最深元素，沿父链依次派发 `click` / `change` / `wheel`，随后执行引擎默认动作（select 展开/选中、勾选切换、链接导航）
 - 滚动与裁剪：`overflow(visible/hidden/clip/scroll/auto，单值两轴、两值 x y、overflow-x/overflow-y 分轴)` 滚动容器（滚轮驱动、子树平移 + padding 盒裁剪，被裁内容不可命中）、**圆角裁剪按 border-radius 的形状**（`overflow:hidden` 的圆角盒，溢出到角外的子元素按圆角裁掉，角上透出盒后底色）、文档级页面滚动（根元素以视口为滚动盒，长页面/宽页面均可滚）、`wheel` 事件（`OnWheel` 注册、`MouseEvent.DeltaX/DeltaY` 像素位移、冒泡派发）、Shift+滚轮 转横向滚动、textarea 滚轮滚动（与光标跟随同夹紧口径，全量吸收纵向滚轮、撞边界不带动页面）；裁剪经 `Graphics` 可选 `Clipper`（`PushClip`/`PopClip`，逐层求交）落地：`BufferGraphics` 像素断言、SDL2 `SDL_RenderSetClipRect`，SVG 导出同步生成 `clipPath`
 - 可插拔图形后端：`engine.Graphics` 接口（DrawText / DrawColor / DrawImage / MeasureText），内置 `FakeGraphics`（计数）、`BufferGraphics`（软件光栅化到 RGBA 缓冲，可 `SavePNG`）供无显示器测试；圆角抗锯齿走**角标精灵**（可选扩展 `SpriteDrawer`：整块圆角一次 blit，替掉逐像素的半透明小方块）——绘制调用数是 GPU 路径上的主要开销，portal 页一帧从 31840 次降到 2500 次、单帧绘制 149ms → 8.7ms（软件渲染器实测），滚动动画才不会被切成几帧
@@ -26,7 +26,7 @@
 - Go 1.20+（go.mod 基线，作库供其他项目引用，1.20 以上工具链均可构建；无需 CGO）
 - 渲染后端目前提供 Windows 实现（`backend/sdl2`，加载 `SDL2.dll` 2.28 与 `SDL2_ttf.dll`）
 - 把 `SDL2.dll`、`SDL2_ttf.dll`（及 `zlib1.dll`）放到工程根目录 `libs/`，或保证系统可搜索到它们
-- 平台边界：`engine` 包是纯 Go、可移植的；`backend/sdl2` 是渲染后端——Windows 提供 SDL2 实现，其它平台 `NewWindow` 返回 `ErrUnsupported`；`runtime/` 是平台能力（原生对话框、消息框），Windows 用纯 Win32 调用实现，其它平台返回 `ErrUnsupported`；`browser` 与 `examples/` 都不带构建标签，任意平台 `go build ./...` / `go test ./...` 都能通过，非 Windows 启动窗口时会打印明确提示
+- 平台边界：`engine` 包是纯 Go、可移植的；`backend/sdl2` 是渲染后端——Windows 提供 SDL2 实现，其它平台 `NewWindow` 返回 `ErrUnsupported`；`runtime/` 是平台能力的通用调用入口（`runtime/dialog` 原生对话框、`runtime/clipboard` 系统剪贴板），平台实现在 `backend/dialog`、`backend/clipboard`；Windows 用纯 Win32 / SDL2 调用实现，其它平台返回 `ErrUnsupported` 或空操作；`browser` 与 `examples/` 都不带构建标签，任意平台 `go build ./...` / `go test ./...` 都能通过，非 Windows 启动窗口时会打印明确提示
 
 ## 快速开始
 
@@ -53,7 +53,7 @@ go run ./examples/ua -dump-svg out.svg  # 无头导出 SVG（不需要显示器�
 
 窗口交互示例：`examples/login` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘；`examples/form` 覆盖 11 项布局特性（负 inset 角标、fixed 底条、水印、包含块链锚定、z-index 层序、box-sizing 跨内核一致等），可点击输入框直接键入文字；`examples/scroll` 演示滚轮滚动（文档级长页、overflow 容器横/纵滚动、overflow:hidden 裁剪、textarea 滚轮、`OnWheel` 事件位移回显）；`examples/browser` 用 `SetOnNavigate` 接管链接点击：读取目标 HTML 并在同一窗口重新 `OpenDocument`，每次换页后把 `position:fixed` 的地址栏与导航按钮重新注入文档（引擎没有独立的窗口 chrome 层），浏览历史支持后退/前进/刷新/首页，未知协议与读取失败会生成带返回链接的提示页；`examples/portal` 用固定顶栏 + 绝对定位侧栏组成购物门户，搜索框聚焦后显示热门提示，所有「加入购物车」按钮共享一个计数徽标。
 
-`examples/notepad` 是最"应用"的一个：它把引擎当桌面 UI 框架用——下拉菜单借 `<select>` 的选项浮层实现（引擎没有通用弹层），编辑区几何由程序按窗口尺寸算出（CSS 没有 `calc`），撤销栈由应用层在变更回调里维护（引擎不内置撤销），文件读写与剪贴板走平台能力（原生文件对话框 / `browser.ClipboardText` / `browser.SetClipboardText`）。
+`examples/notepad` 是最"应用"的一个：它把引擎当桌面 UI 框架用——下拉菜单借 `<select>` 的选项浮层实现（引擎没有通用弹层），编辑区几何由程序按窗口尺寸算出（CSS 没有 `calc`），撤销栈由应用层在变更回调里维护（引擎不内置撤销），文件读写与剪贴板走平台能力（`runtime/dialog` 的原生文件对话框 / `runtime/clipboard` 的系统剪贴板）。
 
 ## 代码示例
 
@@ -172,9 +172,12 @@ backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓
                    原生窗口句柄（NativeHandle，供原生对话框当父窗口）
 runtime/dialog/     原生对话框的通用调用入口（平台无关的类型 + 五个对话框：
                    打开文件 / 打开多个文件 / 选择文件夹 / 另存为 / 消息框）
+runtime/clipboard/   系统剪贴板的通用调用入口（Text / SetText）
 backend/dialog/     原生对话框的平台实现（Windows）：文件对话框走 Shell
                    IFileDialog（纯 Win32 COM，无 CGO），消息框走 user32
                    MessageBoxW（不需要 COM）。父窗口句柄由调用方传入
+backend/clipboard/   剪贴板的平台实现（复用 SDL2 的剪贴板接口——引擎内部的
+                   Ctrl+C / Ctrl+V 走的是同一条路径）
 examples/          可独立运行的示例（每个目录 main.go + index.html）：
   login/             登录页（按钮交互、状态文本）
   form/              常规表单（员工登记表：布局特性 + 可输入控件）

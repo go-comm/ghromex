@@ -27,7 +27,9 @@
 | 包 | 做什么 | 平台 |
 | --- | --- | --- |
 | `runtime/dialog` | 原生对话框的通用入口：打开文件 / 打开多个文件 / 选择文件夹 / 另存为 / 消息框 | 平台无关的类型；Windows 走下面的实现，其它平台返回 `ErrUnsupported` |
+| `runtime/clipboard` | 系统剪贴板的通用入口：Text / SetText | 平台无关的接口；Windows 走下面的实现，其它平台是空操作 |
 | `backend/dialog` | 原生对话框的平台实现 | Windows：Shell `IFileDialog`（纯 Win32 COM，无 CGO）与 user32 `MessageBoxW` |
+| `backend/clipboard` | 剪贴板的平台实现 | 复用 SDL2 的剪贴板接口（与引擎内部 Ctrl+C/Ctrl+V 同一条路径） |
 
 ## 约定
 

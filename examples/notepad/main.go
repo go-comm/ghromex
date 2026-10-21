@@ -36,6 +36,7 @@ import (
 
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/runtime/clipboard"
 	"github.com/go-comm/ghromex/runtime/dialog"
 )
 
@@ -584,7 +585,7 @@ func (n *notepad) copySelection() {
 		n.message("没有选中的内容")
 		return
 	}
-	browser.SetClipboardText(txt)
+	clipboard.SetText(txt)
 	n.message("已复制 " + strconv.Itoa(len([]rune(txt))) + " 个字符")
 }
 
@@ -596,7 +597,7 @@ func (n *notepad) cut() {
 		n.message("没有选中的内容")
 		return
 	}
-	browser.SetClipboardText(txt)
+	clipboard.SetText(txt)
 	engine.OnDocumentKeyDown(n.doc, engine.KeyDelete)
 	n.message("已剪切 " + strconv.Itoa(len([]rune(txt))) + " 个字符")
 }
@@ -604,7 +605,7 @@ func (n *notepad) cut() {
 // paste 从系统剪贴板粘贴到光标处（有选区则替换选区）。
 func (n *notepad) paste() {
 	n.focusEditor()
-	txt := browser.ClipboardText()
+	txt := clipboard.Text()
 	if txt == "" {
 		n.message("剪贴板是空的")
 		return

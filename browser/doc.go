@@ -34,9 +34,9 @@
 //	// ...绑定事件、注册 doc.SetOnChanged...
 //	err = win.Run()
 //
-// 窗口标题、关窗、剪贴板等平台能力也由本层转发（SetTitle / RequestClose
-// / ClipboardText / SetClipboardText）——引擎只管文本，剪贴板读写留在
-// 平台侧（engine 保持纯 Go、可在无显示环境测试）。
+// 窗口标题、关窗等平台能力也由本层转发（SetTitle / RequestClose）——
+// 引擎只管文本，剪贴板读写留在平台侧（runtime/clipboard，engine 保持
+// 纯 Go、可在无显示环境测试）。
 //
 // # 原生对话框
 //
