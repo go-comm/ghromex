@@ -193,3 +193,140 @@ func TestTextareaCtrlASelectsAcrossLines(t *testing.T) {
 		t.Errorf("textarea 跨行选区未逐行导出高亮:\n%s", svg)
 	}
 }
+
+// Shift+方向键扩展选区：锚点不动、活动端随按键移动（浏览器 base/extent
+// 模型）。聚焦后光标落在值末尾，Shift+Left 逐字向左扩选。
+func TestShiftArrowExtendsSelection(t *testing.T) {
+	const src = `<!doctype html><html><head><style>
+	body { margin: 0; }
+	#i { width: 300px; font-size: 16px; }
+	</style></head><body><input id="i" value="hello"></body></html>`
+	doc := openDoc(t, 420, 200, src)
+	in := mustEl(t, doc, "#i")
+
+	engine.SetFocusedElement(doc, in) // 光标在值末尾
+	if !engine.OnDocumentKeyDownMods(doc, engine.KeyLeft, engine.ModShift) {
+		t.Fatal("Shift+Left 未消费")
+	}
+	if got, ok := engine.SelectedText(doc); !ok || got != "o" {
+		t.Fatalf("Shift+Left 一次 = %q, ok=%v，want %q", got, ok, "o")
+	}
+	engine.OnDocumentKeyDownMods(doc, engine.KeyLeft, engine.ModShift)
+	if got, ok := engine.SelectedText(doc); !ok || got != "lo" {
+		t.Fatalf("Shift+Left 两次 = %q, ok=%v，want %q", got, ok, "lo")
+	}
+	// 选区高亮必须进入 SVG 导出（无头环境只能验证状态、看不到几何）。
+	if svg := doc.DumpSVG(); !strings.Contains(svg, `fill-opacity="0.51"`) {
+		t.Errorf("Shift 扩选未导出选区高亮:\n%s", svg)
+	}
+}
+
+// Shift+方向键作用于已有选区：活动端沿按键方向移动（选区随之伸缩），
+// 越过锚点后选区反向。
+func TestShiftArrowShrinksAndCrossesAnchor(t *testing.T) {
+	const src = `<!doctype html><html><head><style>
+	body { margin: 0; }
+	#i { width: 300px; font-size: 16px; }
+	</style></head><body><input id="i" value="hello"></body></html>`
+	doc := openDoc(t, 420, 200, src)
+	in := mustEl(t, doc, "#i")
+	engine.SetFocusedElement(doc, in)
+
+	// 全选 → Shift+Left：右端左移一格，选区缩短。
+	engine.OnDocumentKeyDownMods(doc, 'a', engine.ModCtrl)
+	if !engine.OnDocumentKeyDownMods(doc, engine.KeyLeft, engine.ModShift) {
+		t.Fatal("Shift+Left 未消费")
+	}
+	if got, ok := engine.SelectedText(doc); !ok || got != "hell" {
+		t.Fatalf("全选后 Shift+Left = %q, ok=%v，want %q", got, ok, "hell")
+	}
+	// 继续左移到锚点：选区折叠（无选区）。
+	for i := 0; i < 4; i++ {
+		engine.OnDocumentKeyDownMods(doc, engine.KeyLeft, engine.ModShift)
+	}
+	if _, ok := engine.SelectedText(doc); ok {
+		t.Fatal("移回锚点后选区未折叠")
+	}
+	// 再向右：越过锚点后从锚点右侧重新扩选。
+	engine.OnDocumentKeyDownMods(doc, engine.KeyRight, engine.ModShift)
+	if got, ok := engine.SelectedText(doc); !ok || got != "h" {
+		t.Fatalf("越过锚点后 Shift+Right = %q, ok=%v，want %q", got, ok, "h")
+	}
+}
+
+// Shift+Home/End 扩选到行首/行尾；textarea 里按行计算。
+func TestShiftHomeEndExtendsSelection(t *testing.T) {
+	const src = `<!doctype html><html><head><style>
+	body { margin: 0; }
+	#i { width: 300px; font-size: 16px; }
+	#t { width: 200px; height: 80px; font-size: 16px; }
+	</style></head><body>
+	<input id="i" value="hello">
+	<textarea id="t"></textarea>
+	</body></html>`
+	doc := openDoc(t, 420, 240, src)
+	in := mustEl(t, doc, "#i")
+	engine.SetFocusedElement(doc, in)
+	// 单行 input：整条值就是一行 —— Shift+Home 扩选到值首。
+	if !engine.OnDocumentKeyDownMods(doc, engine.KeyHome, engine.ModShift) {
+		t.Fatal("Shift+Home 未消费")
+	}
+	if got, ok := engine.SelectedText(doc); !ok || got != "hello" {
+		t.Fatalf("Shift+Home = %q, ok=%v，want %q", got, ok, "hello")
+	}
+
+	ta := mustEl(t, doc, "#t")
+	engine.SetValue(ta, "abc\ndef")
+	engine.SetFocusedElement(doc, ta) // 光标在末尾（第二行行尾）
+	if !engine.OnDocumentKeyDownMods(doc, engine.KeyHome, engine.ModShift) {
+		t.Fatal("textarea Shift+Home 未消费")
+	}
+	if got, ok := engine.SelectedText(doc); !ok || got != "def" {
+		t.Fatalf("textarea Shift+Home = %q, ok=%v，want %q", got, ok, "def")
+	}
+}
+
+// Shift+上下键跨行扩选（textarea）：活动端按目标行的同一列落位。
+func TestShiftUpDownExtendsAcrossLines(t *testing.T) {
+	const src = `<!doctype html><html><head><style>
+	body { margin: 0; }
+	#t { width: 200px; height: 80px; font-size: 16px; }
+	</style></head><body><textarea id="t"></textarea></body></html>`
+	doc := openDoc(t, 420, 240, src)
+	ta := mustEl(t, doc, "#t")
+	engine.SetValue(ta, "abc\ndef")
+	engine.SetFocusedElement(doc, ta) // 光标在末尾（第二行行尾）
+
+	if !engine.OnDocumentKeyDownMods(doc, engine.KeyUp, engine.ModShift) {
+		t.Fatal("Shift+Up 未消费")
+	}
+	// 第一行行尾（索引 3）到第二行行尾（索引 7）：选中 "\ndef"。
+	if got, ok := engine.SelectedText(doc); !ok || got != "\ndef" {
+		t.Fatalf("Shift+Up = %q, ok=%v，want %q", got, ok, "\ndef")
+	}
+	// 再向下：活动端回到原位，选区折叠。
+	engine.OnDocumentKeyDownMods(doc, engine.KeyDown, engine.ModShift)
+	if _, ok := engine.SelectedText(doc); ok {
+		t.Fatal("Shift+Down 回到锚点后选区未折叠")
+	}
+}
+
+// Shift+方向键不得破坏「输入替换选区」的语义：选区仍在时输入替换整段。
+func TestShiftSelectionReplacedByInput(t *testing.T) {
+	const src = `<!doctype html><html><head><style>
+	body { margin: 0; }
+	#i { width: 300px; font-size: 16px; }
+	</style></head><body><input id="i" value="hello"></body></html>`
+	doc := openDoc(t, 420, 200, src)
+	in := mustEl(t, doc, "#i")
+	engine.SetFocusedElement(doc, in)
+	engine.OnDocumentKeyDownMods(doc, engine.KeyLeft, engine.ModShift)
+	engine.OnDocumentKeyDownMods(doc, engine.KeyLeft, engine.ModShift)
+
+	if !engine.OnDocumentTextInput(doc, "X") {
+		t.Fatal("文本输入未消费")
+	}
+	if v := in.GetAttribute("value"); v != "helX" {
+		t.Fatalf("输入替换选区后 value = %q, want %q", v, "helX")
+	}
+}

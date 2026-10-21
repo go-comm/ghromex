@@ -291,13 +291,28 @@ func (win *Window) Run() error {
 							setClipboardText(text)
 						}
 					}
+					// Ctrl+V：读系统剪贴板，交给引擎粘贴（引擎不碰平台
+					// 剪贴板，只负责在光标处落文本）。
+					if ev.mod&kmodCtrl != 0 && (ev.sym == 'v' || ev.sym == 'V') {
+						if text := readClipboardText(); text != "" {
+							engine.OnDocumentPaste(win.doc, text)
+						}
+					}
 					// 控制键（Backspace/Tab/Enter/方向键/Home/End）、Ctrl+A
-					// 全选；value/焦点变化经 markChanged 触发 changed → 下方
-					// 重排+重绘链路，无需手动置 dirty。
+					// 全选、Shift+方向键扩选；value/焦点变化经 markChanged
+					// 触发 changed → 下方重排+重绘链路，无需手动置 dirty。
 					engine.OnDocumentKeyDownMods(win.doc, int(ev.sym), ev.mod)
 				}
 			case eventTextInput:
 				if win.doc != nil && ev.text != "" {
+					// 带 Ctrl 的"文本"不是打字：Windows 把 Ctrl+V 之类的
+					// 组合键以控制码（0x16 等）送进文本通道，照单插入会在
+					// 输入框里留下不可见控制字符。带 Ctrl 且不带 Alt 时丢弃
+					//（AltGr 组合仍需放行——部分布局用 Ctrl+Alt 打字）。
+					mods := sdlGetModState()
+					if mods&kmodCtrl != 0 && mods&kmodAlt == 0 {
+						break
+					}
 					engine.OnDocumentTextInput(win.doc, ev.text)
 				}
 			case eventMouseButtonDown:
@@ -414,6 +429,27 @@ func setClipboardText(text string) {
 	buf, ptr := cBytes(text)
 	sdlSetClipboardText(ptr)
 	runtime.KeepAlive(buf)
+}
+
+// readClipboardText 读取系统剪贴板文本（UTF-8），供 Ctrl+V 粘贴。
+//
+// SDL_GetClipboardText 返回 **SDL 分配的** C 字符串，必须用 SDL_free
+// 释放——否则每次粘贴都漏一块堆内存。两个符号都按可选绑定处理：
+// SDL 未导出（或尚未 Load）时返回空串，粘贴退化为「无内容可粘」。
+func readClipboardText() string {
+	if !hasGetClipboardText {
+		return ""
+	}
+	ptr := sdlGetClipboardText()
+	if ptr == 0 {
+		return ""
+	}
+	// 剪贴板内容可能远长于错误信息，上限给到 8MB。
+	s := goCString(ptr, 8<<20)
+	if hasSDLFree {
+		sdlFree(ptr)
+	}
+	return s
 }
 
 // Close 释放窗口资源。幂等：重复调用直接返回——重复 SDL_Destroy* 会对已

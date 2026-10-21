@@ -75,7 +75,14 @@ var (
 	sdlGetModState              nativeCall
 	// SDL_SetClipboardText（SDL_clipboard.h）：UTF-8 NUL 结尾，0 成功。
 	// 引擎只给出选区文本，写系统剪贴板这一平台动作留在后端。
-	sdlSetClipboardText     nativeCall
+	sdlSetClipboardText nativeCall
+	// SDL_GetClipboardText：返回 SDL 分配的 UTF-8 NUL 结尾字符串（读取
+	// 剪贴板内容，粘贴用），必须用 SDL_free 释放。两者都走 bindProbe：
+	// 缺失时按「剪贴板不可用」降级，不影响窗口创建。
+	sdlGetClipboardText     nativeCall
+	sdlFree                 nativeCall
+	hasGetClipboardText     bool
+	hasSDLFree              bool
 	sdlQueryTexture         nativeCall
 	sdlRenderReadPixels     nativeCall
 	sdlGetWindowPixelFormat nativeCall
@@ -147,8 +154,11 @@ const (
 	// SDL_Keymod 枚举原文），Shift+滚轮 换算横向滚动用。
 	kmodShift = 0x0003
 	// KMOD_CTRL = KMOD_LCTRL(0x0040) | KMOD_RCTRL(0x0080)：Ctrl+A 全选、
-	// Ctrl+C 复制。
+	// Ctrl+C 复制、Ctrl+V 粘贴。
 	kmodCtrl = 0x00C0
+	// KMOD_ALT = KMOD_LALT(0x0100) | KMOD_RALT(0x0200)：AltGr（部分布局
+	// 用 Ctrl+Alt 组合）打字时必须放行文本输入，故 Ctrl 过滤要排除 Alt。
+	kmodAlt = 0x0300
 
 	// wheelStepPx 是每档滚轮位移的像素数。Chrome（Windows）每档约 100px
 	// （3 行 × 约 33px），引擎此前取 40px —— 同样的滚轮在引擎里要滚 2.5 倍
@@ -242,6 +252,11 @@ func doLoad() error {
 	// 位掩码，按事件逐次查询，无需自行跟踪 KEYDOWN/KEYUP。
 	sdlGetModState = bindSdl("SDL_GetModState")
 	sdlSetClipboardText = bindSdl("SDL_SetClipboardText")
+	// 剪贴板读取（粘贴用）：SDL_GetClipboardText 返回 SDL 分配的字符串，
+	// 需用 SDL_free 释放。两个符号都按可选绑定处理——缺失时粘贴退化为
+	// 「无内容可粘」，不影响窗口与其它功能。
+	sdlGetClipboardText, hasGetClipboardText = bindProbe(dllSDL, "SDL_GetClipboardText")
+	sdlFree, hasSDLFree = bindProbe(dllSDL, "SDL_free")
 	sdlQueryTexture = bindSdl("SDL_QueryTexture")
 	sdlRenderReadPixels = bindProcOpt(dllSDL, "SDL_RenderReadPixels")
 	// 截图回读用的像素格式查询：SDL2 的对应 API 是 SDL_GetWindowPixelFormat。
@@ -353,20 +368,27 @@ func cBytes(s string) ([]byte, uintptr) {
 // unsafe.Pointer(ptr) 会被 go vet 的 unsafeptr 检查误报，这里采用
 // 内存重解释（按位读取局部变量的值）绕过误报，语义完全等价。
 func goString(uptr uintptr) string {
-	if uptr == 0 {
+	return goCString(uptr, 4096)
+}
+
+// goCString 从 C 侧 char* 读回 UTF-8 字符串，最多读 max 字节（超出按
+// 截断处理）。goString 的 4096 字节上限只适合短串（如错误信息）；
+// 剪贴板内容可能很长，需按更大的上限读取——否则长文本会被截断成
+// 前 4096 字节（goString 找不到 NUL 时返回已读到的部分）。
+func goCString(uptr uintptr, max int) string {
+	if uptr == 0 || max <= 0 {
 		return ""
 	}
 	base := *(*unsafe.Pointer)(unsafe.Pointer(&uptr))
-	for n := 0; n < 4096; n++ {
-		if *(*byte)(unsafe.Add(base, n)) == 0 {
-			buf := make([]byte, n)
-			for i := 0; i < n; i++ {
-				buf[i] = *(*byte)(unsafe.Add(base, uintptr(i)))
-			}
-			return string(buf)
+	buf := make([]byte, 0, 256)
+	for n := 0; n < max; n++ {
+		c := *(*byte)(unsafe.Add(base, uintptr(n)))
+		if c == 0 {
+			break
 		}
+		buf = append(buf, c)
 	}
-	return ""
+	return string(buf)
 }
 
 func lastError() string {

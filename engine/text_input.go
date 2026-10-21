@@ -124,6 +124,10 @@ func focusTargets(doc HTMLDocument) []HTMLElement {
 // 中文等 IME 组合完成的字符串走 SDL_TEXTINPUT 到这里）。插入点为当前
 // 光标位置（默认值末尾），随后光标后移；若有选区则先删除选区再插入
 // （浏览器同语义）。返回是否被消费。
+//
+// 控制字符（<0x20 与 0x7F）被丢弃：Windows 会把 Ctrl+C / Ctrl+V 这类
+// 组合键以控制码（0x03 / 0x16）的形式送进文本输入通道，不过滤的话
+// 剪贴板操作会在输入框里留下一个看不见的控制字符。
 func OnDocumentTextInput(doc HTMLDocument, s string) bool {
 	f := FocusedElement(doc)
 	if f == nil || s == "" {
@@ -133,15 +137,53 @@ func OnDocumentTextInput(doc HTMLDocument, s string) bool {
 	if b == nil {
 		return false
 	}
+	s = stripControlChars(s)
+	if s == "" {
+		return false
+	}
+	insertTextAtCaret(doc, b, s)
+	return true
+}
+
+// OnDocumentPaste 向聚焦输入粘贴文本（Ctrl+V 的引擎侧入口）。
+//
+// 剪贴板读取属平台能力，由后端（SDL2）读出后调用本函数——引擎不碰
+// 系统剪贴板，保持纯 Go、无显示环境可测（与 Ctrl+C 的分工一致：
+// 引擎给文本，后端写/读剪贴板）。
+//
+// 语义对齐浏览器：
+//   - 在光标处插入；若有选区则先删除选区（粘贴替换选区）；
+//   - 单行 input 粘贴多行文本时折成单行（换行折成空格，连续换行只留
+//     一个空格）；
+//   - textarea 保留换行（多行粘贴即多行文本）。
+//
+// 返回是否被消费（无焦点 / 无可粘贴内容时不消费）。
+func OnDocumentPaste(doc HTMLDocument, text string) bool {
+	f := FocusedElement(doc)
+	if f == nil || text == "" {
+		return false
+	}
+	b := inner(f)
+	if b == nil {
+		return false
+	}
+	if !strings.EqualFold(b.tagName, "textarea") {
+		text = stripLineBreaks(text)
+	}
+	if text == "" {
+		return false
+	}
+	insertTextAtCaret(doc, b, text)
+	return true
+}
+
+// insertTextAtCaret 在光标处插入文本：有选区则先删除选区内容（浏览器
+// 「输入/粘贴替换选区」语义），插入后光标落在插入文本末尾、选区折叠。
+func insertTextAtCaret(doc HTMLDocument, b *htmlElement, s string) {
 	r := []rune(b.GetAttribute("value"))
+	n := len(r)
 	lo, hi, hasSel := selectionRange(b)
-	c := b.caret
-	if c < 0 {
-		c = 0
-	}
-	if c > len(r) {
-		c = len(r)
-	}
+	c := clampCaret(b.caret, n)
 	if hasSel {
 		c = lo
 	} else {
@@ -149,7 +191,78 @@ func OnDocumentTextInput(doc HTMLDocument, s string) bool {
 	}
 	b.SetAttribute("value", string(r[:c])+s+string(r[hi:]))
 	setCaret(doc, b, c+len([]rune(s)))
-	return true
+}
+
+// stripControlChars 丢弃控制字符（<0x20 与 0x7F）。文本输入通道理论上
+// 只送可打印字符，但 Windows 的 Ctrl+C/Ctrl+V 会以控制码混入。
+func stripControlChars(s string) string {
+	clean := true
+	for _, r := range s {
+		if r < 0x20 || r == 0x7F {
+			clean = false
+			break
+		}
+	}
+	if clean {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if r < 0x20 || r == 0x7F {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// stripLineBreaks 把多行文本折成单行：每个换行符折成一个空格，连续
+// 换行只留一个空格，行首换行不留空格（对齐 Chrome 往单行 input 粘贴
+// 多行文本的口径）。
+func stripLineBreaks(s string) string {
+	runes := []rune(s)
+	hasBreak := false
+	for _, r := range runes {
+		if r == '\n' || r == '\r' {
+			hasBreak = true
+			break
+		}
+	}
+	if !hasBreak {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	last := rune(0) // 已输出的最后一个字符（0 = 还没有输出）
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		if r != '\n' && r != '\r' {
+			b.WriteRune(r)
+			last = r
+			continue
+		}
+		if r == '\r' && i+1 < len(runes) && runes[i+1] == '\n' {
+			i++ // \r\n 视作一个换行
+		}
+		if last == 0 || last == ' ' {
+			continue // 行首或已是空格：不重复补
+		}
+		b.WriteRune(' ')
+		last = ' '
+	}
+	return b.String()
+}
+
+// clampCaret 把光标/锚点下标夹到 [0, n]（n 为 value 的 rune 长度）。
+func clampCaret(v, n int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > n {
+		return n
+	}
+	return v
 }
 
 // OnDocumentKeyDown 向聚焦输入派发一个控制键（key 为 SDL keysym 值）。
@@ -161,8 +274,8 @@ func OnDocumentKeyDown(doc HTMLDocument, key int) bool {
 }
 
 // OnDocumentKeyDownMods 处理带修饰键的按键：Ctrl+A 全选、Ctrl+C 表示
-// 「有选区可复制」（真正的剪贴板写入由后端完成——引擎不依赖 SDL）。
-// 其余按键行为与 OnDocumentKeyDown 相同。
+// 「有选区可复制」（真正的剪贴板写入由后端完成——引擎不依赖 SDL）、
+// Shift+方向键/Home/End 扩展选区。其余按键行为与 OnDocumentKeyDown 相同。
 func OnDocumentKeyDownMods(doc HTMLDocument, key int, mods uint16) bool {
 	f := FocusedElement(doc)
 	if f == nil {
@@ -183,7 +296,56 @@ func OnDocumentKeyDownMods(doc HTMLDocument, key int, mods uint16) bool {
 			return ok
 		}
 	}
+	// Shift+方向键：扩展选区（锚点不动，活动端随按键移动）。
+	// 带 Ctrl 时不走本分支——Ctrl+Shift+方向键是「按词扩展」，引擎未
+	// 实现，按词会被降级成按字符；此处让 Ctrl+组合沿用无修饰键的折叠
+	// 行为，至少不产生「按词」的错觉。
+	if mods&ModShift != 0 && mods&ModCtrl == 0 {
+		if onShiftSelectKey(doc, b, key) {
+			return true
+		}
+	}
 	return onDocumentKeyDown(doc, key)
+}
+
+// onShiftSelectKey 处理 Shift+方向键/Home/End：把选区活动端（caret）
+// 按按键方向移动，锚点（selAnchor）保持不动。
+//
+// 语义对齐浏览器（Blink 的 base/extent 模型）：
+//   - 无选区：锚点即光标，按键从光标向该方向扩选一格；
+//   - 已有选区：活动端沿按键方向移动一格（选区随之伸缩）；越过锚点
+//     后选区反向（selectionRange 按 min/max 归一化，方向不丢）。
+//
+// 单行 input 没有上下行，Shift+Up/Down 不改变选区（按键仍被消费）。
+func onShiftSelectKey(doc HTMLDocument, b *htmlElement, key int) bool {
+	n := len([]rune(b.GetAttribute("value")))
+	caret := clampCaret(b.caret, n)
+	anchor := clampCaret(b.selAnchor, n)
+	var target int
+	switch key {
+	case KeyLeft:
+		target = caret - 1
+		if target < 0 {
+			target = 0
+		}
+	case KeyRight:
+		target = caret + 1
+		if target > n {
+			target = n
+		}
+	case KeyUp:
+		target = caretVerticalTarget(doc, b, -1, caret)
+	case KeyDown:
+		target = caretVerticalTarget(doc, b, 1, caret)
+	case KeyHome:
+		target = caretLineEdgeTarget(doc, b, true, caret)
+	case KeyEnd:
+		target = caretLineEdgeTarget(doc, b, false, caret)
+	default:
+		return false
+	}
+	setSelection(doc, b, anchor, target)
+	return true
 }
 
 func onDocumentKeyDown(doc HTMLDocument, key int) bool {
@@ -337,31 +499,47 @@ func controlLayout(doc HTMLDocument, b *htmlElement) textareaLayout {
 	return textareaLayout{x: b.x, y: b.y, w: b.width, h: b.height, lh: lh, lines: lines}
 }
 
-// moveCaretToLineEdge 把光标移到本行行首/行尾。start=true 为行首。
-func moveCaretToLineEdge(doc HTMLDocument, b *htmlElement, start bool) bool {
+// caretLineEdgeTarget 返回光标所在行的行首/行尾下标（start=true 为行首）。
+//
+// 单行 input：整条 value 就是一行 —— 行首/行尾即值首/值尾。不能取
+// controlLayout 给的行首：那是被可见窗口裁掉的前缀起点，超宽输入按它
+// 算会把光标送到看不见的区间（Home 键尤其明显）。
+func caretLineEdgeTarget(doc HTMLDocument, b *htmlElement, start bool, caret int) int {
+	if !strings.EqualFold(b.tagName, "textarea") {
+		n := len([]rune(b.GetAttribute("value")))
+		if start {
+			return 0
+		}
+		return n
+	}
 	l := controlLayout(doc, b)
 	if len(l.lines) == 0 {
-		return true
+		return caret
 	}
-	row := caretRow(l.lines, b.caret)
-	c := l.lines[row].start
-	if !start {
-		c = l.lines[row].end
+	row := caretRow(l.lines, caret)
+	if start {
+		return l.lines[row].start
 	}
-	setCaret(doc, b, c)
+	return l.lines[row].end
+}
+
+// moveCaretToLineEdge 把光标移到本行行首/行尾。start=true 为行首。
+func moveCaretToLineEdge(doc HTMLDocument, b *htmlElement, start bool) bool {
+	n := len([]rune(b.GetAttribute("value")))
+	setCaret(doc, b, caretLineEdgeTarget(doc, b, start, clampCaret(b.caret, n)))
 	return true
 }
 
-// moveCaretVertical 上/下移动一行：保持列位置，越界时贴边。
-// 单行输入没有可移动的行，直接消费不改光标。
-func moveCaretVertical(doc HTMLDocument, b *htmlElement, dy int) bool {
+// caretVerticalTarget 计算上/下移动一行后的光标下标（保持列位置，越界
+// 时贴边）。单行输入没有可移动的行，返回原光标。
+func caretVerticalTarget(doc HTMLDocument, b *htmlElement, dy, caret int) int {
 	g := docGraphics(doc)
 	l := controlLayout(doc, b)
 	if len(l.lines) == 0 {
-		return true
+		return caret
 	}
 	px, bold, family := fontOf(b.computed)
-	row := caretRow(l.lines, b.caret)
+	row := caretRow(l.lines, caret)
 	target := row + dy
 	if target < 0 {
 		target = 0
@@ -370,12 +548,18 @@ func moveCaretVertical(doc HTMLDocument, b *htmlElement, dy int) bool {
 		target = len(l.lines) - 1
 	}
 	if target == row {
-		return true
+		return caret
 	}
 	// 以当前光标 x 为目标行反推列位
-	cx, _ := l.caretXY(g, b.caret, px, bold, family)
-	c := l.caretFromPoint(g, cx, l.y+target*l.lh, px, bold, family)
-	setCaret(doc, b, c)
+	cx, _ := l.caretXY(g, caret, px, bold, family)
+	return l.caretFromPoint(g, cx, l.y+target*l.lh, px, bold, family)
+}
+
+// moveCaretVertical 上/下移动一行：保持列位置，越界时贴边。
+// 单行输入没有可移动的行，直接消费不改光标。
+func moveCaretVertical(doc HTMLDocument, b *htmlElement, dy int) bool {
+	n := len([]rune(b.GetAttribute("value")))
+	setCaret(doc, b, caretVerticalTarget(doc, b, dy, clampCaret(b.caret, n)))
 	return true
 }
 

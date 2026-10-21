@@ -151,6 +151,96 @@ func TestRunConsumesSelectionKeys(t *testing.T) {
 	}
 }
 
+// 端到端：Ctrl+V 粘贴 —— 系统剪贴板 → SDL_GetClipboardText → 引擎
+// OnDocumentPaste → value。覆盖"平台剪贴板读写"这一段引擎测不到的链路。
+func TestRunConsumesInjectedPaste(t *testing.T) {
+	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
+	defer os.Unsetenv("SDL_VIDEO_DRIVER")
+
+	win, err := NewWindow(320, 200, "paste-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer win.Close()
+
+	prev := clipboardText()
+	defer writeClipboardRaw(prev)
+	writeClipboardRaw("pasted text")
+	if !hasGetClipboardText || !hasSDLFree {
+		t.Fatal("SDL2 未导出 SDL_GetClipboardText/SDL_free：剪贴板不可用，粘贴无法实现")
+	}
+
+	const src = `<!doctype html><html><head><style>` +
+		`body{margin:0}` +
+		`.in{display:inline-block;width:260px;padding:6px;border:1px solid #CBD5E1;font-size:16px}` +
+		`</style></head><body><div><input class="in" id="a" type="text"></div></body></html>`
+	doc, err := win.OpenDocument(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := doc.QuerySelector("#a")
+	if input == nil {
+		t.Fatal("input not found")
+	}
+	r := input.GetBoundingClientRect()
+	cx := (r.Left().Pixel() + r.Right().Pixel()) / 2
+	cy := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
+
+	pushMouseButtonUp(cx, cy) // 先聚焦
+	pushKeyDownMods('v', kmodCtrl)
+
+	win.SetAutoExit(250 * time.Millisecond)
+	if err := win.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	if v := input.GetAttribute("value"); v != "pasted text" {
+		t.Fatalf("粘贴后 value = %q, want %q（剪贴板读取/引擎粘贴链路断链）", v, "pasted text")
+	}
+}
+
+// 端到端：Shift+方向键扩展选区（KEYDOWN 的 mod 位 → 引擎按键处理）。
+func TestRunConsumesInjectedShiftArrow(t *testing.T) {
+	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
+	defer os.Unsetenv("SDL_VIDEO_DRIVER")
+
+	win, err := NewWindow(320, 200, "shift-arrow-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer win.Close()
+
+	const src = `<!doctype html><html><head><style>` +
+		`body{margin:0}` +
+		`.in{display:inline-block;width:260px;padding:6px;border:1px solid #CBD5E1;font-size:16px}` +
+		`</style></head><body><div><input class="in" id="a" type="text" value="hello"></div></body></html>`
+	doc, err := win.OpenDocument(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := doc.QuerySelector("#a")
+	if input == nil {
+		t.Fatal("input not found")
+	}
+	r := input.GetBoundingClientRect()
+	cx := (r.Left().Pixel() + r.Right().Pixel()) / 2
+	cy := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
+
+	pushMouseButtonUp(cx, cy)              // 聚焦
+	pushKeyDownMods('a', kmodCtrl)         // 全选（建立选区）
+	pushKeyDownMods(0x40000050, kmodShift) // Shift+Left：SDLK_LEFT
+
+	win.SetAutoExit(250 * time.Millisecond)
+	if err := win.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := engine.SelectedText(doc)
+	if !ok || got != "hell" {
+		t.Fatalf("Shift+Left 后选区 = %q, ok=%v, want %q（mod 位未解码或扩展逻辑未生效）", got, ok, "hell")
+	}
+}
+
 func pushEvent(buf *[eventBufferSize]byte) {
 	// SDL_PushEvent（SDL_events.h 文档）：返回 1=成功、0=被事件过滤器丢弃、
 	// 负数=失败。Windows x64 下 int 返回值只保证低 32 位有效，先截 int32 判。
@@ -213,19 +303,10 @@ func pushKeyDownMods(sym uint32, mod uint16) {
 	pushEvent(&buf)
 }
 
-// clipboardText 读回系统剪贴板（测试用）。SDL_GetClipboardText 返回
-// SDL 分配的 C 字符串，必须用 SDL_free 释放；两个符号只测试用，故
-// 走 bindProcOpt，不污染生产符号表。
+// clipboardText 读回系统剪贴板（测试用）。走生产的 readClipboardText：
+// SDL_GetClipboardText 返回 SDL 分配的 C 字符串，必须用 SDL_free 释放。
 func clipboardText() string {
-	get := bindProcOpt(dllSDL, "SDL_GetClipboardText")
-	free := bindProcOpt(dllSDL, "SDL_free")
-	ptr := get()
-	if ptr == 0 {
-		return ""
-	}
-	s := goString(ptr)
-	free(ptr)
-	return s
+	return readClipboardText()
 }
 
 // writeClipboardRaw 写入任意文本（含空串），用于测试结束后恢复用户剪贴板。
