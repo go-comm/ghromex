@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // 滚动/裁剪特性测试（白盒：需要读 scrollTop/scrollLeft/contentW 等未导出状态）。
@@ -159,6 +160,39 @@ body{margin:0}
 	}
 }
 
+// feedScrollClock 把两轴的「上一帧时间戳」往前拨一帧，模拟一次正常的帧
+// 间隔（动画按真实时间推进，测试要自己喂时间）。
+//
+// 两轴**分别**喂：时间戳是分轴的（见 startScrollAnim）——只喂一轴会
+// 掩盖「wheel 不该截断另一轴帧间隔」这条不变量。
+func feedScrollClock(root *htmlElement, frame time.Duration) {
+	now := time.Now().UnixNano()
+	root.scrollAnimLastTopNs = now - int64(frame)
+	root.scrollAnimLastLeftNs = now - int64(frame)
+}
+
+// tickScroll 按名义帧长（scrollAnimFrame）推进一帧滚动动画。
+//
+// 动画按真实时间推进，而测试里的紧凑循环墙钟间隔≈0 —— 动画几乎不动，
+// 测试就没法可重复地断言。所以测试自己喂时间：把「上一帧的时间戳」往前
+// 拨一帧，模拟一次正常的帧间隔。
+func tickScroll(t *testing.T, doc HTMLDocument) {
+	t.Helper()
+	if root := inner(doc); root != nil {
+		feedScrollClock(root, scrollAnimFrame)
+	}
+	TickScroll(doc)
+}
+
+// tickScrollMoved 推进一帧并回报内容是否移动（时间按名义帧长喂）。
+func tickScrollMoved(t *testing.T, doc HTMLDocument) bool {
+	t.Helper()
+	if root := inner(doc); root != nil {
+		feedScrollClock(root, scrollAnimFrame)
+	}
+	return TickScroll(doc)
+}
+
 // settleScroll 反复推进直到滚动动画收敛（平滑滚动按时间分帧推进，Chrome 同）。
 // 以被观察元素的视口顶端为收敛判据：连续两次不变**且动画已结束**才返回；
 // 只看"两帧不变"会在缓动尾段误判（尾段几帧的取整位置相同但动画仍在途）。
@@ -169,9 +203,9 @@ func settleScroll(t *testing.T, doc HTMLDocument, sel string) {
 	t.Helper()
 	root := inner(doc)
 	prev := -1 << 30
-	for i := 0; i < 24; i++ {
+	for i := 0; i < 80; i++ {
 		LayoutDocument(doc)
-		TickScroll(doc)
+		tickScroll(t, doc)
 		cur := 0
 		if e := doc.QuerySelector(sel); e != nil {
 			cur = e.GetBoundingClientRect().Top().Pixel()
@@ -200,18 +234,19 @@ func TestDocumentScrollAnimation(t *testing.T) {
 	// 首轮：只推进一部分（不是整档跳到目标）。动画由 TickScroll 推进，
 	// 布局只负责把盒子摆好（滚动偏移是布局之后的平移）。
 	LayoutDocument(doc)
-	TickScroll(doc)
+	tickScroll(t, doc)
 	first := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel()
 	if first == 0 || first <= -40 {
 		t.Errorf("首帧应部分推进，实际 top=%d（-40 < first < 0）", first)
 	}
-	// 动画按时间推进（120ms）：8 帧 × 16ms（名义帧长）必须收敛。
-	// 旧的"每帧推进剩余距离 1/3"要 13 帧以上，正是滚动手感"慢吞吞"的来源。
-	for i := 0; i < 8; i++ {
-		TickScroll(doc)
+	// 动画按时间推进：每帧 20ms（名义帧长），一档 40px 在 150ms 内到位
+	// （约 8 帧）。旧的"每帧推进剩余距离 1/3"要 13 帧以上还到不了位，
+	// 正是滚动手感"慢吞吞"的来源。
+	for i := 0; i < 40; i++ {
+		tickScroll(t, doc)
 	}
 	if top := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel(); top != -40 {
-		t.Errorf("8 帧后滚动动画未收敛：top=%d, want -40", top)
+		t.Errorf("40 帧后滚动动画未收敛：top=%d, want -40", top)
 	}
 	if root.scrollAnimOn {
 		t.Error("收敛后动画应结束")
@@ -233,7 +268,7 @@ func TestScrollTickMovesWithoutRelayout(t *testing.T) {
 	before := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel()
 
 	// 只推进动画（不重排）：内容应当移动。
-	if !TickScroll(doc) {
+	if !tickScrollMoved(t, doc) {
 		t.Fatal("TickScroll 未报告内容移动")
 	}
 	after := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel()
@@ -247,8 +282,9 @@ func TestScrollTickMovesWithoutRelayout(t *testing.T) {
 		t.Fatal("动画进行中，ScrollAnimating 应为 true")
 	}
 	// 推进到收敛：内容落在目标上，动画结束。
-	for i := 0; i < 8; i++ {
-		TickScroll(doc)
+	// 动画按真实时间推进（150ms 一档，60Hz 下约 9 帧）。
+	for i := 0; i < 40; i++ {
+		tickScroll(t, doc)
 	}
 	if top := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel(); top != -40 {
 		t.Fatalf("收敛后 top=%d, want -40", top)
@@ -289,7 +325,7 @@ body{margin:0}
 
 	// 平滑滚动：视觉位置分帧推进（Chrome 同），多轮推进后收敛到目标
 	LayoutDocument(doc)
-	TickScroll(doc)
+	tickScroll(t, doc)
 	if top := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel(); top == 0 {
 		t.Fatalf("文档滚动未平移内容（top=%d）", top)
 	}

@@ -294,10 +294,10 @@ func TestRunConsumesInjectedWheel(t *testing.T) {
 	}
 
 	// 滚轮向下（y 负 = 朝用户）→ 引擎 dy>0 → scrollTop +100（每档 100px，
-	// 与 Chrome/Windows 一致）→ 内容上移 100px；平滑滚动在 300ms 内收敛。
+	// 与 Chrome/Windows 一致）→ 内容上移 100px；平滑滚动 150ms 收敛。
 	mouseWheel(win, 150, 100, 0, -1)
 
-	win.SetAutoExit(300 * time.Millisecond)
+	win.SetAutoExit(500 * time.Millisecond)
 	if err := win.Run(); err != nil {
 		t.Fatal(err)
 	}

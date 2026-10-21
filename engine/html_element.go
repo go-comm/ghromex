@@ -144,15 +144,21 @@ type htmlElement struct {
 	// 布局后按绝对偏移平移一次，动画推进时只按增量平移（见
 	// applyScrollDeltas）——滚动动画帧因此不必重排。
 	scrollShiftTop, scrollShiftLeft int
-	// scrollAnimPosTop/PosLeft 是弹簧的连续位置（亚像素），scrollAnimVelTop/
-	// VelLeft 是速度（px/s）。动画用临界阻尼弹簧推进：连续滚动时新的一档
-	// 滚轮只换目标、速度保留（见 scroll.go 的 startScrollAnim）——每档都从
-	// 静止重新起步的话，滚起来是一顿一顿的。
+	// scrollAnimPosTop/PosLeft 是视觉位置的**连续值**（亚像素）：缓动的真值。
+	// 渲染用的是整像素的 scrollAnimTop（布局按整像素平移子树）。
 	scrollAnimPosTop, scrollAnimPosLeft float64
-	scrollAnimVelTop, scrollAnimVelLeft float64
-	// scrollAnimLastNs 是上一帧的时间戳（用于算实际帧间隔）。
-	scrollAnimLastNs int64
-	scrollAnimOn     bool
+	// scrollAnimBaseTop/BaseLeft 是当前缓动段的**起点**：连续滚轮时新的一档
+	// 从当前视觉位置重新起算，位置连续、不跳（见 scroll.go 的 startScrollAnim）。
+	scrollAnimBaseTop, scrollAnimBaseLeft float64
+	// scrollAnimElapsedTopNs/ElapsedLeftNs 是本段已推进的**动画时间**：
+	// 进度 = 已推进时间 / scrollAnimDuration，与帧率无关（掉帧不会变速）。
+	scrollAnimElapsedTopNs, scrollAnimElapsedLeftNs int64
+	// scrollAnimLastTopNs/scrollAnimLastLeftNs 是上一帧的时间戳（用于算
+	// 实际帧间隔）。**两轴各自一份**：wheel 事件会重置对应轴的时间戳，
+	// 共用一份的话，一次高频 wheel 会把另一轴的帧间隔截断——触控板
+	// momentum 时 wheel 比帧还密，另一轴的动画几乎停住。
+	scrollAnimLastTopNs, scrollAnimLastLeftNs int64
+	scrollAnimOn                              bool
 	// contentW/contentH 为最近一次布局测得的未裁剪内容尺寸（常规流子
 	// 的外盒延伸量），是滚动偏移夹紧的依据；textarea 等原子控件为 0
 	//（其内容量度走各自专用路径）。
