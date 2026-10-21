@@ -1,0 +1,711 @@
+<!doctype html>
+<!--
+  Ghromex 复杂页面示例 · 购物门户（GHROMEX MARKET）
+  位置：examples/portal/index.html
+  运行：go run ./examples/portal
+  无头导出：go run ./examples/portal -dump-svg out.svg
+
+  页面目标：用引擎现有 CSS 子集拼出一个可滚动的购物门户首屏与商品区。
+  刻意使用的布局能力：
+    1. position: fixed —— 顶部工具条 / 品牌头 / 导航固定在视口顶部
+    2. position: absolute —— Hero 侧栏、主内容侧栏、商品图占位里的装饰形状
+    3. inline-block —— 分类栏、秒杀卡、商品网格、页脚四列（全部等高，避免底边错位）
+    4. 百分比宽度 —— 在 1280 宽窗口下自适应，列与列之间用 margin 留缝
+    5. 盒模型 / border-radius / text-decoration —— 价格、标签、按钮、划掉的原价
+    6. 可编辑搜索框 + button —— 由 main.go 注册点击回调，演示购物车计数更新
+
+  引擎不支持 flex/grid、float、line-height、box-shadow、渐变与单边 border，
+  因此这里用「固定高度 + absolute 装饰块 + 纯色层次」完成视觉，而不是依赖
+  浏览器里常用的布局捷径。相邻 inline-block 必须紧邻书写，否则空白文本会
+  变成一个真实的行内空格，把网格挤到下一行。
+-->
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>GHROMEX MARKET · 今日上新</title>
+	<style>
+		/* ── 全局画布 ─────────────────────────────────────────────── */
+		body {
+			margin: 0;
+			/* 顶部 fixed 区高 152px + 22px 呼吸位，内容从 174px 开始 */
+			padding: 174px 40px 0 40px;
+			background-color: #F3F5F7;
+			color: #0B1220;
+			font-family: system-ui;
+			font-size: 14px;
+		}
+
+		/* 统一的内容宽度：窗口 1280 时可用宽度 1200。
+		   引擎把 margin:auto 当 0，所以不做居中容器，直接用 body 左右 padding。 */
+		.wrap { position: relative; }
+
+		/* ── 固定顶栏：工具条 + 品牌头 + 导航 ─────────────────────── */
+		.chrome {
+			position: fixed;
+			left: 0;
+			top: 0;
+			width: 100%;
+			z-index: 100;
+			background-color: #FFFFFF;
+		}
+		.utility { height: 32px; padding: 0 40px; background-color: #0B1220; color: #94A3B8; font-size: 12px; box-sizing: border-box; }
+		.utility .wrap { height: 32px; }
+		.utility-left { display: inline-block; padding-top: 8px; }
+		.utility-right { position: absolute; right: 0; top: 8px; }
+		.utility-link { display: inline-block; margin-left: 18px; color: #CBD5E1; }
+		.utility-link.first { margin-left: 0; }
+		.utility-dot { display: inline-block; width: 6px; height: 6px; background-color: #FF4D00; border-radius: 3px; margin-right: 7px; }
+		.utility-strong { color: #FFFFFF; font-weight: bold; }
+
+		.masthead { height: 78px; padding: 0 40px; background-color: #FFFFFF; box-sizing: border-box; }
+		.masthead .wrap { height: 78px; }
+
+		/* 品牌区绝对锚定，避免 inline-block 基线把标题和方块拉歪 */
+		.brand { position: absolute; left: 0; top: 18px; width: 270px; height: 40px; }
+		.brand-mark {
+			position: absolute; left: 0; top: 0;
+			width: 40px; height: 40px;
+			background-color: #FF4D00;
+			border-radius: 9px;
+			color: #FFFFFF;
+			font-family: fantasy;
+			font-size: 24px;
+			text-align: center;
+			padding-top: 6px;
+			box-sizing: border-box;
+		}
+		.brand-copy { position: absolute; left: 52px; top: 0; }
+		.brand-name { font-size: 20px; font-weight: bold; color: #0B1220; }
+		.brand-tag { margin-top: 2px; font-family: monospace; font-size: 10px; color: #64748B; }
+
+		/* 搜索框：父级负责 2px 深色边与圆角，内部 input/button 绝对定位，
+		   这样输入框和按钮的基线差异不会把整体撑高。 */
+		.search-box {
+			position: absolute; left: 300px; top: 16px;
+			width: 520px; height: 42px;
+			border: 2px solid #0B1220;
+			border-radius: 8px;
+			background-color: #FFFFFF;
+			box-sizing: border-box;
+			overflow: hidden;
+		}
+		.search-input {
+			position: absolute; left: 0; top: 0;
+			width: 420px; height: 38px;
+			margin: 0;
+			padding: 0 14px;
+			border: 0;
+			background-color: #FFFFFF;
+			color: #0B1220;
+			font-family: system-ui;
+			font-size: 14px;
+			box-sizing: border-box;
+		}
+		.search-btn {
+			position: absolute; right: 0; top: 0;
+			width: 96px; height: 38px;
+			margin: 0;
+			padding: 0;
+			border: 0;
+			border-radius: 0;
+			background-color: #FF4D00;
+			color: #FFFFFF;
+			font-family: system-ui;
+			font-size: 14px;
+			font-weight: bold;
+			text-align: center;
+		}
+		.search-tip { position: absolute; left: 302px; top: 62px; width: 520px; font-size: 11px; color: #64748B; }
+
+		.cart {
+			position: absolute; right: 0; top: 19px;
+			width: 190px; height: 40px;
+			background-color: #0B1220;
+			border-radius: 8px;
+			color: #FFFFFF;
+		}
+		.cart-icon {
+			position: absolute; left: 9px; top: 8px;
+			width: 24px; height: 24px;
+			background-color: #FF4D00;
+			border-radius: 12px;
+			color: #FFFFFF;
+			font-family: monospace;
+			font-size: 11px;
+			text-align: center;
+			padding-top: 4px;
+			box-sizing: border-box;
+		}
+		.cart-label { position: absolute; left: 42px; top: 6px; font-size: 11px; color: #94A3B8; }
+		.cart-value { position: absolute; left: 42px; top: 19px; font-size: 13px; font-weight: bold; color: #FFFFFF; }
+		.cart-count {
+			position: absolute; right: 10px; top: 8px;
+			width: 24px; height: 24px;
+			background-color: #FF4D00;
+			border-radius: 12px;
+			color: #FFFFFF;
+			font-family: monospace;
+			font-size: 11px;
+			text-align: center;
+			padding-top: 4px;
+			box-sizing: border-box;
+		}
+
+		.navbar { height: 42px; padding: 0 40px; background-color: #F6F7F9; border: 1px solid #E2E8F0; box-sizing: border-box; }
+		.navbar .wrap { height: 40px; }
+		.nav-link { display: inline-block; margin-right: 28px; padding-top: 11px; color: #475569; font-size: 14px; }
+		.nav-link.active { color: #FF4D00; font-weight: bold; }
+		.nav-right { position: absolute; right: 0; top: 11px; font-size: 12px; color: #64748B; }
+		.nav-right-strong { color: #0B1220; font-weight: bold; }
+
+		/* ── 面包屑 ───────────────────────────────────────────────── */
+		.crumb { height: 20px; font-size: 12px; color: #64748B; }
+		.crumb-strong { color: #0B1220; font-weight: bold; }
+		.crumb-sep { color: #94A3B8; margin: 0 7px; }
+
+		/* ── Hero：深色主视觉 + 右侧秒杀卡 ──────────────────────────
+		   两块等高（360px），侧栏用 absolute 贴右，避免 inline-block 的底边基线
+		   对齐把右卡往下拖。 */
+		.hero-row { position: relative; height: 360px; margin-top: 14px; }
+		.hero {
+			position: relative;
+			width: 69%;
+			height: 360px;
+			background-color: #0B1220;
+			border-radius: 14px;
+			overflow: hidden;
+		}
+		.hero-orb {
+			position: absolute; right: -90px; top: -110px;
+			width: 310px; height: 310px;
+			background-color: #123A6B;
+			border-radius: 155px;
+		}
+		.hero-stripe {
+			position: absolute; right: 238px; bottom: -70px;
+			width: 64px; height: 250px;
+			background-color: #0F766E;
+			border-radius: 32px;
+		}
+		.hero-index {
+			position: absolute; right: 22px; top: 10px;
+			color: #1B2A45;
+			font-family: fantasy;
+			font-size: 150px;
+		}
+		.hero-copy { position: absolute; left: 38px; top: 34px; width: 56%; }
+		.hero-kicker { font-family: monospace; font-size: 11px; color: #FF8A5B; }
+		.hero-title { margin-top: 10px; color: #F8FAFC; font-size: 40px; font-weight: bold; }
+		.hero-title-accent { color: #FFB08A; margin-top: 0; }
+		.hero-sub { margin-top: 12px; color: #CBD5E1; font-size: 13px; width: 450px; }
+		.hero-actions { margin-top: 22px; }
+		.btn-primary {
+			display: inline-block;
+			height: 42px;
+			padding: 0 22px;
+			margin-right: 10px;
+			border: 0;
+			border-radius: 6px;
+			background-color: #FF4D00;
+			color: #FFFFFF;
+			font-family: system-ui;
+			font-size: 13px;
+			font-weight: bold;
+			text-align: center;
+			box-sizing: border-box;
+		}
+		.btn-ghost {
+			display: inline-block;
+			height: 42px;
+			padding: 0 22px;
+			border: 1px solid #334155;
+			border-radius: 6px;
+			background-color: #111D33;
+			color: #F8FAFC;
+			font-family: system-ui;
+			font-size: 13px;
+			text-align: center;
+			box-sizing: border-box;
+		}
+		.hero-note { margin-top: 18px; color: #94A3B8; font-size: 11px; }
+		.barcode { position: absolute; left: 38px; bottom: 22px; height: 26px; }
+		.bar { display: inline-block; height: 24px; margin-right: 3px; background-color: #64748B; }
+		.b1 { width: 3px; }
+		.b2 { width: 5px; }
+		.b3 { width: 2px; }
+		.b4 { width: 7px; }
+		.b5 { width: 3px; }
+		.b6 { width: 4px; }
+		.b7 { width: 2px; }
+		.b8 { width: 6px; }
+		.b9 { width: 3px; }
+		.b10 { width: 5px; }
+
+		.hero-side {
+			position: absolute; right: 0; top: 0;
+			width: 29.5%; height: 360px;
+			background-color: #FFFFFF;
+			border: 1px solid #DCE3EA;
+			border-radius: 14px;
+			box-sizing: border-box;
+			overflow: hidden;
+		}
+		.drop-head { padding: 16px 18px 0 18px; }
+		.drop-kicker { font-family: monospace; font-size: 10px; color: #FF4D00; }
+		.drop-title { margin-top: 3px; font-size: 20px; font-weight: bold; color: #0B1220; }
+		.drop-sub { margin-top: 1px; font-size: 11px; color: #64748B; }
+		.drop-art {
+			position: relative;
+			height: 104px;
+			margin: 10px 18px 0 18px;
+			background-color: #EFF6FF;
+			border-radius: 10px;
+			overflow: hidden;
+		}
+		.drop-tag {
+			position: absolute; left: 10px; top: 9px;
+			width: 34px; height: 18px;
+			background-color: #FF4D00;
+			border-radius: 4px;
+			color: #FFFFFF;
+			font-family: monospace;
+			font-size: 9px;
+			text-align: center;
+			padding-top: 3px;
+			box-sizing: border-box;
+		}
+		.drop-art-shape {
+			position: absolute; right: 24px; top: 28px;
+			width: 86px; height: 52px;
+			background-color: #FFFFFF;
+			border-radius: 8px;
+		}
+		.drop-art-shape2 {
+			position: absolute; right: 39px; top: 50px;
+			width: 56px; height: 10px;
+			background-color: #FF4D00;
+			border-radius: 5px;
+		}
+		.drop-art-label { position: absolute; left: 11px; bottom: 8px; font-family: monospace; font-size: 10px; color: #1D4ED8; }
+		.drop-body { padding: 10px 18px 0 18px; }
+		.price-line { position: relative; height: 30px; }
+		/* 粗体价格用 system-ui：等宽族在粗体回退下取不到 ¥ 字形，会出豆腐块。 */
+		.price-now { position: absolute; left: 0; top: 0; color: #FF4D00; font-family: system-ui; font-size: 22px; font-weight: bold; }
+		.price-old { position: absolute; left: 92px; top: 10px; color: #94A3B8; font-size: 11px; text-decoration: line-through; }
+		.drop-end { font-size: 10px; color: #64748B; }
+		.countdown {
+			display: inline-block;
+			margin-top: 3px;
+			padding: 5px 10px 4px 10px;
+			background-color: #0B1220;
+			border-radius: 6px;
+			color: #FFFFFF;
+			font-family: monospace;
+			font-size: 13px;
+		}
+		.stock-bar { height: 7px; margin-top: 8px; background-color: #E2E8F0; border-radius: 4px; overflow: hidden; }
+		.stock-fill { width: 72%; height: 7px; background-color: #FF4D00; border-radius: 4px; }
+		.stock-text { margin-top: 4px; font-size: 10px; color: #64748B; }
+		/* ── 分类栏：6 个等高小卡 ─────────────────────────────────── */
+		.cats { margin-top: 16px; }
+		.cat {
+			display: inline-block;
+			width: 15.9%;
+			height: 94px;
+			margin-right: 0.9%;
+			padding-top: 14px;
+			background-color: #FFFFFF;
+			border: 1px solid #DCE3EA;
+			border-radius: 10px;
+			box-sizing: border-box;
+			text-align: center;
+		}
+		.cat.last { margin-right: 0; }
+		.cat-icon {
+			display: inline-block;
+			width: 42px; height: 42px;
+			border-radius: 11px;
+			color: #0B1220;
+			font-size: 18px;
+			font-weight: bold;
+			text-align: center;
+			padding-top: 10px;
+			box-sizing: border-box;
+		}
+		.cat-blue { background-color: #DBEAFE; }
+		.cat-mint { background-color: #D1FAE5; }
+		.cat-amber { background-color: #FEF3C7; }
+		.cat-lilac { background-color: #EDE9FE; }
+		.cat-rose { background-color: #FCE7F3; }
+		.cat-sky { background-color: #E0F2FE; }
+		.cat-name { margin-top: 7px; font-size: 13px; font-weight: bold; color: #0B1220; }
+		.cat-sub { margin-top: 1px; font-family: monospace; font-size: 9px; color: #64748B; }
+
+		/* ── 区块标题 ─────────────────────────────────────────────── */
+		.section-head { position: relative; height: 48px; margin-bottom: 14px; }
+		.section-gap { margin-top: 28px; }
+		.section-left { position: absolute; left: 0; top: 0; }
+		.section-kicker { font-family: monospace; font-size: 10px; color: #FF4D00; }
+		.section-title { margin-top: 2px; font-size: 22px; font-weight: bold; color: #0B1220; }
+		.section-more { position: absolute; right: 0; top: 14px; font-size: 12px; color: #64748B; }
+		.sort { display: inline-block; margin-left: 16px; color: #64748B; font-size: 12px; }
+		.sort.active { color: #0B1220; font-weight: bold; }
+
+		/* ── 秒杀：3 张横卡 ───────────────────────────────────────── */
+		.deal {
+			position: relative;
+			display: inline-block;
+			width: 32.2%;
+			height: 154px;
+			margin-right: 1.4%;
+			background-color: #FFFFFF;
+			border: 1px solid #DCE3EA;
+			border-radius: 10px;
+			box-sizing: border-box;
+			overflow: hidden;
+		}
+		.deal.last { margin-right: 0; }
+		.deal-art {
+			position: absolute; left: 10px; top: 16px;
+			width: 120px; height: 120px;
+			background-color: #EFF6FF;
+			border-radius: 9px;
+			overflow: hidden;
+		}
+		.deal-art.amber { background-color: #FEF3C7; }
+		.deal-art.mint { background-color: #D1FAE5; }
+		.deal-shape {
+			position: absolute; right: 18px; bottom: 20px;
+			width: 62px; height: 48px;
+			background-color: #FFFFFF;
+			border-radius: 10px;
+		}
+		.deal-shape2 {
+			position: absolute; right: 31px; bottom: 35px;
+			width: 36px; height: 18px;
+			background-color: #FF4D00;
+			border-radius: 4px;
+		}
+		.deal-index { position: absolute; left: 9px; top: 5px; font-family: fantasy; font-size: 34px; color: #0B1220; }
+		.deal-art-label { position: absolute; left: 9px; bottom: 7px; font-family: monospace; font-size: 9px; color: #334155; }
+		.deal-copy { position: absolute; left: 144px; top: 17px; right: 12px; }
+		.deal-kicker { font-family: monospace; font-size: 9px; color: #FF4D00; }
+		.deal-name { margin-top: 4px; font-size: 14px; font-weight: bold; color: #0B1220; height: 18px; }
+		.deal-price-line { position: relative; height: 27px; margin-top: 7px; }
+		.deal-price { position: absolute; left: 0; top: 0; color: #FF4D00; font-family: system-ui; font-size: 19px; font-weight: bold; }
+		.deal-old { position: absolute; left: 90px; top: 9px; color: #94A3B8; font-size: 10px; text-decoration: line-through; }
+		.deal-stock { margin-top: 5px; font-size: 10px; color: #64748B; }
+
+		/* ── 主内容 + 侧栏 ──────────────────────────────────────────
+		   main-col 用正常流决定高度；side-col 用 absolute 贴右，避免两列高度
+		   不同时 inline-block 按底边对齐，把侧栏整体往下推。 */
+		.main-row { position: relative; margin-top: 28px; }
+		.main-col { width: 73%; }
+		.side-col { position: absolute; right: 0; top: 0; width: 25.5%; }
+
+		/* ── 商品网格：3 列 × 8 张，卡片等高 ─────────────────────── */
+		.product {
+			position: relative;
+			display: inline-block;
+			width: 32%;
+			height: 312px;
+			margin-right: 1.8%;
+			margin-bottom: 16px;
+			background-color: #FFFFFF;
+			border: 1px solid #DCE3EA;
+			border-radius: 10px;
+			box-sizing: border-box;
+			overflow: hidden;
+		}
+		.product.last { margin-right: 0; }
+		.p-art { position: relative; height: 140px; overflow: hidden; }
+		.p-art.blue { background-color: #E0F2FE; }
+		.p-art.amber { background-color: #FEF3C7; }
+		.p-art.green { background-color: #DCFCE7; }
+		.p-art.lilac { background-color: #EDE9FE; }
+		.p-art.rose { background-color: #FCE7F3; }
+		.p-art.yellow { background-color: #FEF9C3; }
+		.p-art.sky { background-color: #DBEAFE; }
+		.p-art.mint { background-color: #D1FAE5; }
+		.p-index { position: absolute; right: 11px; top: 2px; font-family: fantasy; font-size: 44px; color: #0B1220; }
+		.p-glyph { position: absolute; left: 12px; bottom: 8px; font-family: monospace; font-size: 9px; color: #334155; }
+		.p-shape {
+			position: absolute;
+			width: 58px; height: 88px;
+			right: 44px; bottom: 24px;
+			background-color: #FFFFFF;
+			border-radius: 12px;
+		}
+		.p-shape2 {
+			position: absolute;
+			width: 34px; height: 54px;
+			right: 56px; bottom: 39px;
+			background-color: #BFDBFE;
+			border-radius: 6px;
+		}
+		.art-audio .p-shape { width: 96px; height: 68px; right: 38px; bottom: 38px; border-radius: 34px; }
+		.art-audio .p-shape2 { width: 46px; height: 46px; right: 63px; bottom: 49px; border-radius: 23px; background-color: #FDE68A; }
+		.art-screen .p-shape { width: 108px; height: 64px; right: 28px; bottom: 48px; border-radius: 7px; }
+		.art-screen .p-shape2 { width: 82px; height: 42px; right: 41px; bottom: 59px; border-radius: 3px; background-color: #BAE6FD; }
+		.art-charge .p-shape { width: 58px; height: 74px; right: 46px; bottom: 30px; border-radius: 12px; }
+		.art-charge .p-shape2 { width: 26px; height: 38px; right: 62px; bottom: 48px; border-radius: 4px; background-color: #C4B5FD; }
+		.art-chair .p-shape { width: 66px; height: 70px; right: 48px; bottom: 30px; border-radius: 22px; }
+		.art-chair .p-shape2 { width: 42px; height: 24px; right: 60px; bottom: 51px; border-radius: 12px; background-color: #F9A8D4; }
+		.art-lamp .p-shape { width: 62px; height: 62px; right: 44px; bottom: 46px; border-radius: 31px; }
+		.art-lamp .p-shape2 { width: 10px; height: 42px; right: 70px; bottom: 22px; border-radius: 5px; background-color: #FDE047; }
+		.art-watch .p-shape { width: 48px; height: 72px; right: 52px; bottom: 30px; border-radius: 13px; }
+		.art-watch .p-shape2 { width: 34px; height: 34px; right: 59px; bottom: 49px; border-radius: 17px; background-color: #C4B5FD; }
+		.art-cup .p-shape { width: 44px; height: 84px; right: 54px; bottom: 26px; border-radius: 18px; }
+		.art-cup .p-shape2 { width: 24px; height: 40px; right: 64px; bottom: 42px; border-radius: 8px; background-color: #86EFAC; }
+
+		.p-body { height: 170px; padding: 10px 14px 14px 14px; box-sizing: border-box; }
+		.p-sku { height: 12px; font-family: monospace; font-size: 9px; color: #94A3B8; }
+		.p-name { margin-top: 3px; height: 18px; font-size: 14px; font-weight: bold; color: #0B1220; }
+		.p-desc { margin-top: 1px; height: 14px; font-size: 10px; color: #64748B; }
+		.p-price-line { position: relative; height: 28px; margin-top: 6px; }
+		.p-price { position: absolute; left: 0; top: 0; color: #FF4D00; font-family: system-ui; font-size: 18px; font-weight: bold; }
+		.p-old { position: absolute; left: 86px; top: 8px; color: #94A3B8; font-size: 10px; text-decoration: line-through; }
+		.p-rating { height: 15px; font-size: 11px; color: #F59E0B; }
+		.p-count { color: #94A3B8; font-size: 10px; }
+		.add {
+			display: block;
+			width: 100%; height: 30px;
+			margin-top: 7px;
+			padding: 0;
+			border: 0;
+			border-radius: 6px;
+			background-color: #0B1220;
+			color: #FFFFFF;
+			font-family: system-ui;
+			font-size: 12px;
+			font-weight: bold;
+			text-align: center;
+		}
+		/* .add 是行为标记（main.go 统一挂点击），外观仍按所在区块区分：
+		   秒杀卡要白底橙边，Hero 卡要实心橙。后写的规则特异性更高。 */
+		.deal-copy .add {
+			display: inline-block;
+			width: 100px; height: 28px;
+			margin-top: 7px;
+			border: 1px solid #FF4D00;
+			border-radius: 4px;
+			background-color: #FFFFFF;
+			color: #FF4D00;
+			font-size: 11px;
+		}
+		.drop-body .add {
+			display: block;
+			width: 100%; height: 34px;
+			margin-top: 9px;
+			border: 0;
+			border-radius: 6px;
+			background-color: #FF4D00;
+			color: #FFFFFF;
+			font-size: 12px;
+		}
+
+		/* ── 侧栏 ─────────────────────────────────────────────────── */
+		.side-panel {
+			margin-bottom: 16px;
+			padding: 16px;
+			background-color: #FFFFFF;
+			border: 1px solid #DCE3EA;
+			border-radius: 12px;
+			box-sizing: border-box;
+		}
+		.side-kicker { font-family: monospace; font-size: 10px; color: #FF4D00; }
+		.side-title { margin-top: 2px; margin-bottom: 9px; font-size: 17px; font-weight: bold; color: #0B1220; }
+		.rank-row { position: relative; height: 50px; }
+		.rank-no {
+			position: absolute; left: 0; top: 4px;
+			width: 22px; height: 22px;
+			background-color: #F1F5F9;
+			border-radius: 6px;
+			color: #0B1220;
+			font-family: fantasy;
+			font-size: 13px;
+			text-align: center;
+			padding-top: 3px;
+			box-sizing: border-box;
+		}
+		.rank-no.r1 { background-color: #FF4D00; color: #FFFFFF; }
+		.rank-no.r2 { background-color: #0F766E; color: #FFFFFF; }
+		.rank-no.r3 { background-color: #1D4ED8; color: #FFFFFF; }
+		.rank-name { position: absolute; left: 32px; top: 2px; right: 0; font-size: 12px; font-weight: bold; color: #0B1220; }
+		.rank-price { position: absolute; left: 32px; top: 21px; font-family: monospace; font-size: 10px; color: #64748B; }
+		.brand-tile {
+			display: inline-block;
+			width: 31.3%;
+			height: 36px;
+			margin-right: 2.8%;
+			margin-bottom: 8px;
+			background-color: #F1F5F9;
+			border-radius: 6px;
+			color: #334155;
+			font-family: monospace;
+			font-size: 10px;
+			text-align: center;
+			padding-top: 11px;
+			box-sizing: border-box;
+		}
+		.brand-tile.last { margin-right: 0; }
+		.member { background-color: #0B1220; border: 1px solid #0B1220; }
+		.member .side-kicker { color: #FF8A5B; }
+		.member .side-title { color: #F8FAFC; }
+		.member-text { color: #94A3B8; font-size: 12px; }
+		.cart-note { margin-top: 8px; color: #CBD5E1; font-size: 11px; }
+		.member-btn {
+			display: block;
+			width: 100%; height: 34px;
+			margin-top: 10px;
+			padding: 0;
+			border: 0;
+			border-radius: 6px;
+			background-color: #FF4D00;
+			color: #FFFFFF;
+			font-family: system-ui;
+			font-size: 12px;
+			font-weight: bold;
+			text-align: center;
+		}
+		.service { position: relative; display: inline-block; width: 47.5%; height: 38px; margin-right: 4%; margin-bottom: 8px; background-color: #F8FAFC; border-radius: 6px; box-sizing: border-box; }
+		.service.last { margin-right: 0; }
+		.service-dot { position: absolute; left: 10px; top: 15px; width: 8px; height: 8px; background-color: #0F766E; border-radius: 4px; }
+		.service-name { position: absolute; left: 24px; top: 10px; font-size: 11px; font-weight: bold; color: #0B1220; }
+		.side-quote { margin-bottom: 0; padding: 18px; background-color: #FDE68A; border: 1px solid #FCD34D; border-radius: 12px; box-sizing: border-box; }
+		.quote-kicker { font-family: monospace; font-size: 10px; color: #B45309; }
+		.quote-title { margin-top: 2px; font-size: 16px; font-weight: bold; color: #0B1220; }
+		.quote-text { margin-top: 8px; color: #422006; font-size: 12px; }
+		.quote-by { margin-top: 10px; font-family: monospace; font-size: 10px; color: #92400E; }
+
+		/* ── 页脚 ─────────────────────────────────────────────────── */
+		.footer { margin-top: 36px; padding: 34px 34px 22px 34px; background-color: #0B1220; border-radius: 14px; box-sizing: border-box; color: #94A3B8; }
+		.footer-col { display: inline-block; width: 23.2%; height: 116px; margin-right: 2.2%; }
+		.footer-col.last { margin-right: 0; }
+		.footer-brand { margin-top: 2px; color: #F8FAFC; font-family: fantasy; font-size: 22px; }
+		.footer-tag { margin-top: 6px; color: #94A3B8; font-size: 11px; }
+		.footer-small { margin-top: 14px; font-family: monospace; font-size: 9px; color: #64748B; }
+		.footer-title { color: #F8FAFC; font-size: 11px; font-weight: bold; }
+		.footer-link { display: block; margin-top: 8px; color: #94A3B8; font-size: 11px; }
+		.footer-rule { height: 1px; margin: 26px 0 16px 0; background-color: #1E293B; }
+		.footer-bottom { position: relative; height: 18px; font-size: 10px; color: #64748B; }
+		.footer-bottom-right { position: absolute; right: 0; top: 0; font-family: monospace; color: #94A3B8; }
+	</style>
+</head>
+<body>
+	<!-- 固定区：工具条 / 品牌头 / 导航。body 的 padding-top 已为它留位。 -->
+	<div class="chrome">
+		<div class="utility"><div class="wrap">
+			<div class="utility-left"><span class="utility-dot"></span>今日上海 · 晴 22°C · 全场满 299 包邮</div>
+			<div class="utility-right"><span class="utility-strong">新人首单立减 50</span><span class="utility-link first">我的订单</span><span class="utility-link">会员中心</span><span class="utility-link">客服</span></div>
+		</div></div>
+		<div class="masthead"><div class="wrap">
+			<div class="brand"><div class="brand-mark">G</div><div class="brand-copy"><div class="brand-name">GHROMEX MARKET</div><div class="brand-tag">CURATED GOODS / SHANGHAI</div></div></div>
+			<div class="search-box"><input id="search" class="search-input" type="text"><button id="search-btn" class="search-btn" type="button">搜索</button></div>
+			<div id="search-tip" class="search-tip">热门：降噪耳机 / 4K 显示器 / 机械键盘</div>
+			<div class="cart"><div class="cart-icon">C</div><div class="cart-label">购物车</div><div class="cart-value">已选好物</div><div id="cart-count" class="cart-count">3</div></div>
+		</div></div>
+		<div class="navbar"><div class="wrap">
+			<div class="nav-link active">全部商品</div><div class="nav-link">今日上新</div><div class="nav-link">桌面装备</div><div class="nav-link">影像音频</div><div class="nav-link">生活好物</div><div class="nav-link">品牌馆</div>
+			<div class="nav-right">本周编辑精选 <span class="nav-right-strong">08 件</span> · 每日 10:00 更新</div>
+		</div></div>
+	</div>
+
+	<div class="crumb">首页<span class="crumb-sep">/</span>今日上新<span class="crumb-sep">/</span><span class="crumb-strong">桌面升级专题</span></div>
+
+	<!-- Hero -->
+	<div class="hero-row">
+		<div class="hero">
+			<div class="hero-orb"></div>
+			<div class="hero-stripe"></div>
+			<div class="hero-index">07</div>
+			<div class="hero-copy">
+				<div class="hero-kicker">CURATED DROP / 2026.10</div>
+				<div class="hero-title">把桌面升级成</div>
+				<div class="hero-title hero-title-accent">你的主场。</div>
+				<div class="hero-sub">从一块好屏幕、一把好键盘开始。本周挑选 12 件桌面装备，让每天八小时的工作多一点顺手，也多一点仪式感。</div>
+				<div class="hero-actions"><button class="btn-primary" type="button">逛今日上新</button><button class="btn-ghost" type="button">领取 200 元券</button></div>
+				<div class="hero-note">已有 2,846 位玩家加入本周清单 · 顺丰包邮 · 7 天无理由</div>
+			</div>
+			<div class="barcode"><span class="bar b1"></span><span class="bar b2"></span><span class="bar b3"></span><span class="bar b4"></span><span class="bar b5"></span><span class="bar b6"></span><span class="bar b7"></span><span class="bar b8"></span><span class="bar b9"></span><span class="bar b10"></span></div>
+		</div>
+		<div class="hero-side">
+			<div class="drop-head"><div class="drop-kicker">TODAY'S DROP / 01</div><div class="drop-title">AeroKeys 75</div><div class="drop-sub">三模机械键盘 · 雾灰</div></div>
+			<div class="drop-art"><div class="drop-tag">NEW</div><div class="drop-art-shape"></div><div class="drop-art-shape2"></div><div class="drop-art-label">75% LAYOUT</div></div>
+			<div class="drop-body">
+				<div class="price-line"><div class="price-now">¥ 499</div><div class="price-old">¥ 699</div></div>
+				<div class="drop-end">距结束</div>
+				<div class="countdown">02 : 18 : 36</div>
+				<div class="stock-bar"><div class="stock-fill"></div></div>
+				<div class="stock-text">已抢 72% · 仅余 38 件</div>
+				<button class="drop-btn add" type="button">立即抢购</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- 分类 -->
+	<div class="cats">
+		<div class="cat"><div class="cat-icon cat-blue">机</div><div class="cat-name">手机数码</div><div class="cat-sub">128 ITEMS</div></div><div class="cat"><div class="cat-icon cat-mint">音</div><div class="cat-name">音频设备</div><div class="cat-sub">86 ITEMS</div></div><div class="cat"><div class="cat-icon cat-amber">影</div><div class="cat-name">影像创作</div><div class="cat-sub">54 ITEMS</div></div><div class="cat"><div class="cat-icon cat-lilac">桌</div><div class="cat-name">桌面装备</div><div class="cat-sub">212 ITEMS</div></div><div class="cat"><div class="cat-icon cat-rose">行</div><div class="cat-name">出行通勤</div><div class="cat-sub">73 ITEMS</div></div><div class="cat last"><div class="cat-icon cat-sky">家</div><div class="cat-name">生活好物</div><div class="cat-sub">164 ITEMS</div></div>
+	</div>
+
+	<!-- 秒杀 -->
+	<div class="section-head section-gap">
+		<div class="section-left"><div class="section-kicker">FLASH / 03</div><div class="section-title">限时秒杀</div></div>
+		<div class="section-more">每天 10:00 / 20:00 开抢 · 查看更多 →</div>
+	</div>
+	<div class="deals">
+		<div class="deal"><div class="deal-art"><div class="deal-shape"></div><div class="deal-shape2"></div><div class="deal-index">01</div><div class="deal-art-label">AUDIO</div></div><div class="deal-copy"><div class="deal-kicker">SAVE ¥200</div><div class="deal-name">AeroPods Pro 降噪耳机</div><div class="deal-price-line"><div class="deal-price">¥ 799</div><div class="deal-old">¥ 999</div></div><button class="deal-btn add" type="button">加入购物车</button><div class="deal-stock">已售 1,204 件</div></div></div><div class="deal"><div class="deal-art amber"><div class="deal-shape"></div><div class="deal-shape2"></div><div class="deal-index">02</div><div class="deal-art-label">DISPLAY</div></div><div class="deal-copy"><div class="deal-kicker">SAVE ¥400</div><div class="deal-name">Lumen 4K 27" 显示器</div><div class="deal-price-line"><div class="deal-price">¥ 1,899</div><div class="deal-old">¥ 2,299</div></div><button class="deal-btn add" type="button">加入购物车</button><div class="deal-stock">已售 862 件</div></div></div><div class="deal last"><div class="deal-art mint"><div class="deal-shape"></div><div class="deal-shape2"></div><div class="deal-index">03</div><div class="deal-art-label">POWER</div></div><div class="deal-copy"><div class="deal-kicker">SAVE ¥70</div><div class="deal-name">Kite 65W 氮化镓充电器</div><div class="deal-price-line"><div class="deal-price">¥ 129</div><div class="deal-old">¥ 199</div></div><button class="deal-btn add" type="button">加入购物车</button><div class="deal-stock">已售 3,401 件</div></div></div>
+	</div>
+
+	<!-- 主内容 + 侧栏 -->
+	<div class="main-row">
+		<div class="main-col">
+			<div class="section-head">
+				<div class="section-left"><div class="section-kicker">CURATED / 08</div><div class="section-title">编辑精选</div></div>
+				<div class="section-more"><span class="sort active">综合</span><span class="sort">销量</span><span class="sort">价格</span></div>
+			</div>
+			<div class="products">
+				<div class="product"><div class="p-art blue"><div class="p-shape"></div><div class="p-shape2"></div><div class="p-index">01</div><div class="p-glyph">KEYBOARD</div></div><div class="p-body"><div class="p-sku">SKU / GK-75-GY</div><div class="p-name">AeroKeys 75 三模机械键盘</div><div class="p-desc">热插拔 · 三模连接 · 雾灰</div><div class="p-price-line"><div class="p-price">¥ 499</div><div class="p-old">¥ 699</div></div><div class="p-rating">★★★★★ <span class="p-count">4.9 / 1.2k 评价</span></div><button class="add" type="button">加入购物车</button></div></div><div class="product"><div class="p-art amber art-audio"><div class="p-shape"></div><div class="p-shape2"></div><div class="p-index">02</div><div class="p-glyph">AUDIO</div></div><div class="p-body"><div class="p-sku">SKU / AP-PRO-01</div><div class="p-name">AeroPods Pro 降噪耳机</div><div class="p-desc">自适应降噪 · 30h 续航</div><div class="p-price-line"><div class="p-price">¥ 799</div><div class="p-old">¥ 999</div></div><div class="p-rating">★★★★☆ <span class="p-count">4.7 / 986 评价</span></div><button class="add" type="button">加入购物车</button></div></div><div class="product last"><div class="p-art green art-screen"><div class="p-shape"></div><div class="p-shape2"></div><div class="p-index">03</div><div class="p-glyph">DISPLAY</div></div><div class="p-body"><div class="p-sku">SKU / LM-27-4K</div><div class="p-name">Lumen 4K 27" 显示器</div><div class="p-desc">98% DCI-P3 · Type-C 90W</div><div class="p-price-line"><div class="p-price">¥ 1,899</div><div class="p-old">¥ 2,299</div></div><div class="p-rating">★★★★★ <span class="p-count">4.8 / 642 评价</span></div><button class="add" type="button">加入购物车</button></div></div><div class="product"><div class="p-art lilac art-charge"><div class="p-shape"></div><div class="p-shape2"></div><div class="p-index">04</div><div class="p-glyph">POWER</div></div><div class="p-body"><div class="p-sku">SKU / KT-65-GAN</div><div class="p-name">Kite 65W 氮化镓充电器</div><div class="p-desc">三口快充 · 可折叠插脚</div><div class="p-price-line"><div class="p-price">¥ 129</div><div class="p-old">¥ 199</div></div><div class="p-rating">★★★★☆ <span class="p-count">4.6 / 3.4k 评价</span></div><button class="add" type="button">加入购物车</button></div></div><div class="product"><div class="p-art rose art-chair"><div class="p-shape"></div><div class="p-shape2"></div><div class="p-index">05</div><div class="p-glyph">SEATING</div></div><div class="p-body"><div class="p-sku">SKU / AR-CHAIR-02</div><div class="p-name">Arc 人体工学椅</div><div class="p-desc">网布透气 · 4D 扶手</div><div class="p-price-line"><div class="p-price">¥ 1,299</div><div class="p-old">¥ 1,699</div></div><div class="p-rating">★★★★☆ <span class="p-count">4.5 / 421 评价</span></div><button class="add" type="button">加入购物车</button></div></div><div class="product last"><div class="p-art yellow art-lamp"><div class="p-shape"></div><div class="p-shape2"></div><div class="p-index">06</div><div class="p-glyph">LIGHTING</div></div><div class="p-body"><div class="p-sku">SKU / HL-LAMP-01</div><div class="p-name">Halo 无线充电台灯</div><div class="p-desc">无频闪 · 触控调光</div><div class="p-price-line"><div class="p-price">¥ 269</div><div class="p-old">¥ 399</div></div><div class="p-rating">★★★★★ <span class="p-count">4.8 / 778 评价</span></div><button class="add" type="button">加入购物车</button></div></div><div class="product"><div class="p-art sky art-watch"><div class="p-shape"></div><div class="p-shape2"></div><div class="p-index">07</div><div class="p-glyph">WEARABLE</div></div><div class="p-body"><div class="p-sku">SKU / TP-WATCH-03</div><div class="p-name">Tempo 智能手表</div><div class="p-desc">血氧监测 · 14 天续航</div><div class="p-price-line"><div class="p-price">¥ 899</div><div class="p-old">¥ 1,199</div></div><div class="p-rating">★★★★☆ <span class="p-count">4.6 / 1.1k 评价</span></div><button class="add" type="button">加入购物车</button></div></div><div class="product"><div class="p-art mint art-cup"><div class="p-shape"></div><div class="p-shape2"></div><div class="p-index">08</div><div class="p-glyph">DAILY</div></div><div class="p-body"><div class="p-sku">SKU / FL-CUP-01</div><div class="p-name">Flask 保温随行杯</div><div class="p-desc">316L 内胆 · 6h 保温</div><div class="p-price-line"><div class="p-price">¥ 159</div><div class="p-old">¥ 229</div></div><div class="p-rating">★★★★☆ <span class="p-count">4.7 / 2.0k 评价</span></div><button class="add" type="button">加入购物车</button></div></div>
+			</div>
+		</div>
+
+		<div class="side-col">
+			<div class="side-panel">
+				<div class="side-kicker">WEEKLY / TOP 05</div><div class="side-title">本周热榜</div>
+				<div class="rank-row"><div class="rank-no r1">1</div><div class="rank-name">AeroKeys 75 键盘</div><div class="rank-price">¥499 · 已售 1.2k</div></div>
+				<div class="rank-row"><div class="rank-no r2">2</div><div class="rank-name">AeroPods Pro 耳机</div><div class="rank-price">¥799 · 已售 986</div></div>
+				<div class="rank-row"><div class="rank-no r3">3</div><div class="rank-name">Lumen 4K 显示器</div><div class="rank-price">¥1899 · 已售 642</div></div>
+				<div class="rank-row"><div class="rank-no">4</div><div class="rank-name">Kite 65W 充电器</div><div class="rank-price">¥129 · 已售 3.4k</div></div>
+				<div class="rank-row"><div class="rank-no">5</div><div class="rank-name">Halo 无线台灯</div><div class="rank-price">¥269 · 已售 778</div></div>
+			</div>
+			<div class="side-panel">
+				<div class="side-kicker">BRANDS / 06</div><div class="side-title">品牌快闪</div>
+				<div class="brands"><div class="brand-tile">NOVA</div><div class="brand-tile">AERO</div><div class="brand-tile last">LUMEN</div><div class="brand-tile">KITE</div><div class="brand-tile">ARC</div><div class="brand-tile last">TEMPO</div></div>
+			</div>
+			<div class="side-panel member">
+				<div class="side-kicker">MEMBERS / 01</div><div class="side-title">加入 GHROMEX+</div>
+				<div class="member-text">会员日双倍积分，生日月专属折扣，优先购限量单品。</div>
+				<div id="cart-note" class="cart-note">购物车已有 3 件 · 满 299 包邮</div>
+				<button class="member-btn" type="button">立即加入</button>
+			</div>
+			<div class="side-panel">
+				<div class="side-kicker">SERVICE / 04</div><div class="side-title">购物保障</div>
+				<div class="service"><div class="service-dot"></div><div class="service-name">正品保障</div></div><div class="service last"><div class="service-dot"></div><div class="service-name">极速发货</div></div><div class="service"><div class="service-dot"></div><div class="service-name">7 天无理由</div></div><div class="service last"><div class="service-dot"></div><div class="service-name">全国联保</div></div>
+			</div>
+			<div class="side-quote">
+				<div class="quote-kicker">EDITOR'S NOTE / 01</div><div class="quote-title">编辑手记</div>
+				<div class="quote-text">好工具不喧哗，只在你需要的时候刚好顺手。</div>
+				<div class="quote-by">— GHROMEX 编辑组</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- 页脚 -->
+	<div class="footer">
+		<div class="footer-col"><div class="footer-brand">GHROMEX</div><div class="footer-tag">为认真生活的人挑好物。<br>上海 · 全球买手网络</div><div class="footer-small">EST. 2026 / SHANGHAI</div></div><div class="footer-col"><div class="footer-title">购物指南</div><div class="footer-link">新手帮助</div><div class="footer-link">支付方式</div><div class="footer-link">配送说明</div><div class="footer-link">售后政策</div></div><div class="footer-col"><div class="footer-title">商家服务</div><div class="footer-link">品牌入驻</div><div class="footer-link">企业采购</div><div class="footer-link">合作洽谈</div><div class="footer-link">开放平台</div></div><div class="footer-col last"><div class="footer-title">关注我们</div><div class="footer-link">微信公众号</div><div class="footer-link">小红书</div><div class="footer-link">B 站</div><div class="footer-link">客服 09:00 - 23:00</div></div>
+		<div class="footer-rule"></div>
+		<div class="footer-bottom">© 2026 GHROMEX MARKET · 本页为 Ghromex 引擎演示，商品与价格均为虚构<span class="footer-bottom-right">MADE WITH GO / NO CGO</span></div>
+	</div>
+
+</body>
+</html>

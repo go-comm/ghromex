@@ -7,7 +7,7 @@
 ## 特性
 
 - 纯 Go 渲染引擎：HTML 解析、CSS 级联、选择器（标签 / `.class` / `#id` / 简单组合，含特异度）、块级与行内（inline / inline-block）布局、文本按词/按字换行
-- 定位与层叠：`position: relative / absolute / fixed`、`top/right/bottom/left`（含负值）、`z-index`；脱流盒第二遍布局，包含块 = 最近非 static 祖先 padding box / 视口；绘制分常规层 + 定位层（z 升序，同 z 按文档序）
+- 定位与层叠：`position: relative / absolute / fixed`、`top/right/bottom/left`（含负值）、`z-index`；脱流盒第二遍布局，包含块 = 最近非 static 祖先 padding box / 视口；绘制分常规层 + 定位层（z 升序，同 z 按文档序），`z-index` 非 0 的定位元素与 `fixed` 元素建立层叠上下文，内部定位子树先局部排序再整体落层
 - 可编辑输入：点击聚焦（蓝框 + 按点击位置落光标）、键入文字（含中文输入法）、Backspace / Delete 删除、鼠标拖选 / Ctrl+A 全选、Ctrl+C 复制选区（后端写系统剪贴板）、Ctrl+V 粘贴（后端读系统剪贴板；单行 input 粘贴多行文本折成单行，textarea 保留换行）、方向键 / Home / End 移动光标、Shift+方向键 / Shift+Home/End 扩展选区（锚点不动、活动端随按键移动，越过锚点后选区反向）、输入与退格替换选区、Tab 循环切换（text / password / textarea；password 可聚焦可输入，值全程按 ● 掩码，光标与点击定位同掩码口径，明文不落画不进 SVG，但 Ctrl+C 复制真实值）；`<textarea>` 多行编辑（折行显示、Enter 换行、跨行拖选、超出盒高的行不绘制、纵向滚动跟随光标并支持滚轮）；其余 input type 按 UA 外观区分渲染：radio/checkbox 13x13 控件、submit/reset/button 按钮外观（value 居中）
 - 表单与链接控件：`<select>`/`<option>` 下拉（点击展开选项浮层，点选项选中并派发 `change`，下方放不下且上方放得下时整组上移，浮层压过流内容与定位层、命中测试同层序）、`<a href>` 链接（UA 蓝色 + 下划线，`SetOnNavigate` 注册导航回调，导航在 click 冒泡之后执行）
 - 勾选控件：`<input type=radio|checkbox>` 点击切换选中（`checked` 布尔属性按存在性判定，API `IsChecked` / `SetChecked`）；选中态绘制强调色方块 + 白色对勾、强调色圆环 + 实心圆（Chrome 口径），radio 盒恒为正圆；radio 仅 name 非空且相同的项互斥（实测无 name / `name=""` 各自独立）；点 label（包裹其控件或 `for` 指向）等效点该控件
@@ -38,6 +38,7 @@
 | `examples/ua` | `go run ./examples/ua` | 原生 UA 表单 + 常用标签：零作者 CSS，可与 Chrome/Edge 直接对照 |
 | `examples/scroll` | `go run ./examples/scroll` | 滚动/裁剪：文档级滚动、overflow 容器、textarea 滚轮、`OnWheel` 回显 |
 | `examples/browser` | `go run ./examples/browser` | 迷你本地浏览器：顶部常驻地址栏与后退/前进/刷新/首页按钮（换页后仍在），地址栏可打开本地路径（相对路径/`file://`），支持 `about:home`/`about:back`/`about:forward`，外部链接与缺失文件显示提示页；需在仓库内运行 |
+| `examples/portal` | `go run ./examples/portal` | 购物门户：fixed 工具条/品牌头/导航、层叠上下文、分类栏、秒杀与商品网格、搜索提示和购物车计数交互 |
 
 每个示例都支持同一组调试参数：
 
@@ -46,7 +47,7 @@ go run ./examples/ua -exit-after 3s     # 指定时长后自动退出（调试/C
 go run ./examples/ua -dump-svg out.svg  # 无头导出 SVG（不需要显示器）
 ```
 
-窗口交互示例：`examples/login` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘；`examples/form` 覆盖 11 项布局特性（负 inset 角标、fixed 底条、水印、包含块链锚定、z-index 层序、box-sizing 跨内核一致等），可点击输入框直接键入文字；`examples/scroll` 演示滚轮滚动（文档级长页、overflow 容器横/纵滚动、overflow:hidden 裁剪、textarea 滚轮、`OnWheel` 事件位移回显）；`examples/browser` 用 `SetOnNavigate` 接管链接点击：读取目标 HTML 并在同一窗口重新 `OpenDocument`，每次换页后把 `position:fixed` 的地址栏与导航按钮重新注入文档（引擎没有独立的窗口 chrome 层），浏览历史支持后退/前进/刷新/首页，未知协议与读取失败会生成带返回链接的提示页。
+窗口交互示例：`examples/login` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘；`examples/form` 覆盖 11 项布局特性（负 inset 角标、fixed 底条、水印、包含块链锚定、z-index 层序、box-sizing 跨内核一致等），可点击输入框直接键入文字；`examples/scroll` 演示滚轮滚动（文档级长页、overflow 容器横/纵滚动、overflow:hidden 裁剪、textarea 滚轮、`OnWheel` 事件位移回显）；`examples/browser` 用 `SetOnNavigate` 接管链接点击：读取目标 HTML 并在同一窗口重新 `OpenDocument`，每次换页后把 `position:fixed` 的地址栏与导航按钮重新注入文档（引擎没有独立的窗口 chrome 层），浏览历史支持后退/前进/刷新/首页，未知协议与读取失败会生成带返回链接的提示页；`examples/portal` 用固定顶栏 + 绝对定位侧栏组成购物门户，搜索框聚焦后显示热门提示，所有「加入购物车」按钮共享一个计数徽标。
 
 ## 代码示例
 
@@ -108,7 +109,7 @@ engine/            渲染引擎（纯 Go，不依赖任何图形后端）
   style_ua.go        UA 样式表（默认值对齐 Chrome，含表单控件 border-box）
   measure.go         盒模型布局、行盒、换行、定位布局（relative/absolute/fixed）
   scroll.go          overflow 滚动容器 + 文档级滚动（偏移夹紧/子树平移/wheel 分发）
-  render.go          绘制指令下发（背景/边框/文本片段/文本装饰/定位层/裁剪栈）
+  render.go          绘制指令下发（背景/边框/文本片段/文本装饰/定位层/层叠上下文/裁剪栈）
   text_input.go      可编辑输入焦点/光标/编辑/Tab 循环
   select.go          select 展开态、选项浮层布局、取值与点击默认动作
   textarea.go        textarea 折行、光标↔坐标映射、纵向滚动
@@ -129,6 +130,7 @@ examples/          可独立运行的示例（每个目录 main.go + index.html�
   ua/                原生 UA 表单 + 常用标签（零作者 CSS，与 Chrome 对照）
   scroll/            滚动/裁剪（文档级滚动、overflow、textarea、wheel 事件）
   browser/           迷你本地浏览器（常驻工具条、历史/刷新、链接导航、错误提示页）
+  portal/            购物门户（fixed 顶栏、层叠上下文、商品网格、秒杀、购物车交互）
 libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 ```
 
@@ -144,7 +146,7 @@ libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 `white-space(pre)`（保留空白与制表符、按换行强制断行、不软换行；UA 的 `pre`/`code` 用它，
 `nowrap`/`pre-wrap` 未实现）、
 `position(relative/absolute/fixed)`、`top/right/bottom/left`(px 与 %，支持负值；
-absolute/fixed 相对包含块锚定，right/bottom 回推)、`z-index`、
+absolute/fixed 相对包含块锚定，right/bottom 回推)、`z-index`（非 0 的定位元素与 fixed 元素建立层叠上下文；z:auto 与 z:0 暂不区分）、
 `overflow(visible/hidden/clip/scroll/auto：单值作用两轴、两值为 overflow-x overflow-y、
 overflow-x/overflow-y 分轴；hidden 只裁不滚，scroll 恒可滚，auto 溢出时可滚，
 文档级滚动不受 html overflow 关键字约束)；

@@ -26,9 +26,10 @@ func (document *htmlDocument) DumpSVG() string {
 	ctr := 0
 	dumpSVGNode(&b, document, nil, &ctr)
 	// 定位层：与 RenderNode 同一层叠模型（主 pass 已跳过 positioned 子树）；
-	// 祖先的 overflow 裁剪按父链补上（与渲染路径 pushAncestorClips 同构）。
+	// z-index/fixed 建立的层叠上下文内部再递归导出，祖先 overflow 裁剪
+	// 按父链补上（与渲染路径 pushAncestorClips 同构）。
 	for _, pb := range collectPositioned(document) {
-		dumpSVGNode(&b, pb.e, ancestorSVGClips(pb.e, &ctr), &ctr)
+		dumpSVGPositioned(&b, pb.e, &ctr)
 	}
 	// select 选项浮层最后导出（与渲染层序一致：覆盖流内容与定位层）
 	for _, sel := range collectOpenSelects(document) {
@@ -108,6 +109,17 @@ func dumpSelectPopup(b *strings.Builder, sel *htmlElement, ctr *int) {
 			dumpSVGNodeFill(b, o, nil, ctr, "#ffffff")
 		} else {
 			dumpSVGNode(b, o, nil, ctr)
+		}
+	}
+}
+
+// dumpSVGPositioned 导出定位元素；若它建立层叠上下文，再按同一模型
+// 递归导出上下文内部的定位子树。
+func dumpSVGPositioned(b *strings.Builder, e HTMLElement, ctr *int) {
+	dumpSVGNode(b, e, ancestorSVGClips(e, ctr), ctr)
+	if createsStackingContext(e) {
+		for _, pb := range collectPositioned(e) {
+			dumpSVGPositioned(b, pb.e, ctr)
 		}
 	}
 }

@@ -54,8 +54,15 @@ func isPositioned(e HTMLElement) bool {
 	return b != nil && b.computed != nil && b.computed.Position() != PositionStatic
 }
 
-// collectPositioned 按文档序收集全部非 static 后代，再按
+// collectPositioned 收集 root 当前层叠上下文里的定位元素，再按
 // (z-index 升序，文档序稳定) 排序——渲染与 SVG 导出共用同一层叠模型。
+//
+// 关键点：z-index 非 0 的定位元素（以及 fixed）会形成新的层叠上下文，
+// 其子树必须整体在祖先上下文里参与排序，不能把子元素拿到全局去和祖先的
+// 兄弟比较。否则 fixed 顶栏 z:100 里的 relative/absolute 子树会被顶栏
+// 自己的背景盖住（引擎早期就踩过这个坑）。遇到这类元素时只收集它本身，
+// 不再向下走；它的子树由 paintPositioned 在该上下文内部递归收集。
+//
 // display:none 子树整体跳过（其内定位元素也不参与层叠）。
 func collectPositioned(root HTMLElement) []positionedBox {
 	var out []positionedBox
@@ -77,6 +84,9 @@ func collectPositioned(root HTMLElement) []positionedBox {
 			if isPositioned(c) {
 				out = append(out, positionedBox{e: c, z: cb.computed.ZIndex(), order: order})
 				order++
+				if createsStackingContext(c) {
+					continue // 子树属于新的层叠上下文，由该元素自己画
+				}
 			}
 			walk(c)
 		}
@@ -91,14 +101,30 @@ func collectPositioned(root HTMLElement) []positionedBox {
 	return out
 }
 
+// createsStackingContext 判断定位元素是否建立新的层叠上下文。
+// 引擎的 z-index 解析把 auto 与 0 都存成 0，因此这里把 0 当作 auto：
+// 显式 z-index:0 的隔离少一层，但不影响常见的「顶栏 z:100 + 内部 absolute」
+// 场景。position:fixed 按 CSS 规范无条件建立上下文。
+func createsStackingContext(e HTMLElement) bool {
+	b := inner(e)
+	if b == nil || b.computed == nil {
+		return false
+	}
+	p := b.computed.Position()
+	if p == PositionFixed {
+		return true
+	}
+	return p != PositionStatic && b.computed.ZIndex() != 0
+}
+
 // RenderNode 从根节点开始绘制整棵树。g 为渲染后端。
 //
-// 层叠简化模型（对齐浏览器主案例）：常规流内容按文档序先绘；
-// 所有非 static 元素（relative/absolute/fixed，含默认 z:auto）整体盖在
-// 静态内容之上，按 collectPositioned 的 (z-index，文档序) 逐个绘制。
-// 定位子树统一由本 pass 绘制：主 pass 递归遇到 positioned 子节点直接跳过。
-// 未实现嵌套层叠上下文（opacity/transform 成组、负 z 压到背景下等细节），
-// 需要时再扩展。
+// 层叠模型（对齐浏览器主案例）：常规流内容按文档序先绘；定位元素盖在
+// 静态内容之上，按 (z-index，文档序) 排序。z-index 非 0 的定位元素与
+// fixed 元素会建立层叠上下文，其内部定位子树在该上下文内单独排序后再
+// 整体落层，避免「祖先背景盖住自己 z:auto/absolute 子元素」。
+// 定位子树由本 pass 绘制：主 pass 递归遇到 positioned 子节点直接跳过。
+// 未实现 opacity/transform 成组、负 z 压到背景下等更细规则，需要时再扩展。
 func RenderNode(g Graphics, node HTMLElement) {
 	if g == nil {
 		g = NewFakeGraphics()
@@ -109,13 +135,7 @@ func RenderNode(g Graphics, node HTMLElement) {
 	}
 	renderNode(g, node, nil, focus)
 	for _, pb := range collectPositioned(node) {
-		// paint 传 nil 无损：继承字段（color/font/text-align）在级联时已
-		// 下推到每个元素的 computed，renderNode 内部会用自身 comp 组装。
-		// 定位子树不在主 pass 递归里，祖先的 overflow 裁剪必须按父链
-		// 重新压栈，否则滚动容器里的脱流内容会画到盒外。
-		n := pushAncestorClips(g, pb.e)
-		renderNode(g, pb.e, nil, focus)
-		popClips(g, n)
+		paintPositioned(g, pb.e, focus)
 	}
 	// select 选项浮层最后绘制：它覆盖其后的流内容与定位层，
 	// 与命中测试（ElementAt 优先查展开 option）保持同一层序语义。
@@ -123,6 +143,24 @@ func RenderNode(g Graphics, node HTMLElement) {
 	for _, sel := range collectOpenSelects(node) {
 		renderSelectPopup(g, sel, focus)
 	}
+}
+
+// paintPositioned 绘制一个定位元素及其静态子树；若它建立了层叠上下文，
+// 再递归绘制其内部的定位子树。
+//
+// paint 传 nil 无损：继承字段（color/font/text-align）在级联时已下推到
+// 每个元素的 computed，renderNode 内部会用自身 comp 组装。定位子树不在
+// 主 pass 递归里，祖先的 overflow 裁剪必须按父链重新压栈，否则滚动容器
+// 里的脱流内容会画到盒外。
+func paintPositioned(g Graphics, e HTMLElement, focus HTMLElement) {
+	n := pushAncestorClips(g, e)
+	renderNode(g, e, nil, focus)
+	if createsStackingContext(e) {
+		for _, pb := range collectPositioned(e) {
+			paintPositioned(g, pb.e, focus)
+		}
+	}
+	popClips(g, n)
 }
 
 // pushAncestorClips 沿父链为定位元素压入全部 overflow 裁剪盒，
