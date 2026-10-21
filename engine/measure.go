@@ -631,6 +631,13 @@ func inlineBoxBaseline(g Graphics, che *htmlElement, outerH int) (asc, desc int)
 // layoutChildren 排布子节点。contentH 为父内容区的**可用**高度（auto 高度
 // 撑开时逐行消耗）；pctH 为子元素高度百分比的基数（父元素内容高，<0 表示
 // 包含块高度不确定 → 子的百分比高按 auto 处理）。
+// isButtonElement 判断是否是 <button> 元素。button 的内容按 HTML 规范
+// 垂直居中（Chrome/Edge 同款），定高按钮尤其明显——行盒贴在内容盒顶部
+// 时文字会偏上。
+func isButtonElement(el *htmlElement) bool {
+	return el != nil && strings.EqualFold(el.tagName, "button")
+}
+
 func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, cy int, align TextAlign) (flowW, flowH int) {
 	cursorX := cx
 	cursorY := cy
@@ -727,10 +734,21 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				desc = strutDesc
 			}
 		}
+		// <button> 的内容垂直居中（HTML 规范的 button 布局：内容盒里的行盒
+		// 居中，Chrome/Edge 同款）。定高按钮（作者给了 height）才看得出差别：
+		// 行盒按常规流贴在内容盒顶部，文字会偏上（portal 页的「加入购物车」
+		// 「立即抢购」等都是定高按钮）。行盒高度按 strut 估（单行按钮与
+		// Chrome 一致；多行按钮是近似）。
+		dy := 0
+		if len(curLine) > 0 && pctH > 0 && isButtonElement(el) {
+			if lineH := asc + desc; lineH > 0 && pctH > lineH {
+				dy = (pctH - lineH) / 2
+			}
+		}
 		for _, it := range curLine {
 			// 基线对齐：各内联盒的顶边 = 行基线 − 自身 ascent，
 			// 于是不同字号的文字共享同一基线（浏览器的行盒语义）。
-			y := it.y + (asc - it.asc)
+			y := it.y + dy + (asc - it.asc)
 			if it.tn != nil {
 				it.tn.node.runs = append(it.tn.node.runs, textRun{
 					text: it.token, x: it.x + dx, y: y, w: it.w, h: it.asc + it.desc,

@@ -40,6 +40,44 @@ func TestFillRadiusAntialiasing(t *testing.T) {
 	}
 }
 
+// <button> 的内容垂直居中（HTML 规范的 button 布局，Chrome/Edge 同款）：
+// 定高按钮的文字不能贴在内容盒顶部（否则整排按钮的文字都偏上）。
+func TestButtonContentVerticallyCentered(t *testing.T) {
+	const src = `<!doctype html><html><body style="margin:0;background-color:#FFFFFF">
+	<button id="b" style="display:inline-block;width:120px;height:40px;padding:0;
+		border:0;background-color:#000000;color:#FFFFFF;font-size:14px">居中</button>
+	</body></html>`
+	doc := openDoc(t, 200, 80, src)
+	buf := engine.NewBufferGraphics(200, 80)
+	engine.RenderNode(buf, doc)
+
+	// 按钮盒：x=0,y=0,120×40（body margin 0）。白字在黑底上，按白像素
+	// 找文字的上下留白：上下应大致相等（居中），而不是上=0（贴顶）。
+	first, last := -1, -1
+	for y := 0; y < 40; y++ {
+		for x := 0; x < 120; x++ {
+			r, g, b, _ := colorAt(t, buf, x, y)
+			if r > 200 && g > 200 && b > 200 {
+				if first < 0 {
+					first = y
+				}
+				last = y
+				break
+			}
+		}
+	}
+	if first < 0 {
+		t.Fatal("按钮内没找到白字")
+	}
+	top, bottom := first, 40-1-last
+	if top < 4 {
+		t.Errorf("文字上留白 = %dpx（贴顶了：button 内容未垂直居中）", top)
+	}
+	if diff := top - bottom; diff > 2 || diff < -2 {
+		t.Errorf("上留白 %dpx / 下留白 %dpx 相差过大（未居中）", top, bottom)
+	}
+}
+
 // 圆角裁剪盒的裁剪要按 border-radius 的形状（浏览器语义）：子元素溢出到
 // 角外时，角上应透出盒背后的底色，而不是像矩形裁剪那样被溢出内容盖成
 // 方角（portal 页的大黑卡右上角就是这样）。
