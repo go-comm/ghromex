@@ -1,5 +1,3 @@
-//go:build windows
-
 // Package browser 是面向应用层的装配门面：隐藏渲染后端
 // （当前为 backend/sdl2）的选择与直接依赖，应用只需 import
 // browser 与 engine，不再接触底层类型。
@@ -8,6 +6,9 @@
 // 后端基础（SDL 子系统引用计数、windowID 事件路由、face 缓存
 // 归属）待真实需求出现时在 backend 内解决，届时本层对外
 // 签名不变。
+//
+// 平台差异收在 backend/sdl2：非 Windows 下 NewWindow 返回
+// ErrUnsupported，本层原样透传。
 package browser
 
 import (

@@ -1,5 +1,3 @@
-//go:build windows
-
 // 示例：原生 UA 表单 + 常用标签（零作者 CSS，可与 Chrome/Edge 对照）。直接运行：
 //
 //	go run ./examples/ua

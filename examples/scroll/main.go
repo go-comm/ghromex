@@ -1,5 +1,3 @@
-//go:build windows
-
 // 示例：滚动与裁剪（文档级滚动、overflow 容器、textarea 滚轮、wheel 事件）。
 // 直接运行：
 //

@@ -1,5 +1,3 @@
-//go:build windows
-
 // 示例：登录页。直接运行：
 //
 //	go run ./examples/login

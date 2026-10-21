@@ -1,5 +1,3 @@
-//go:build windows
-
 // 示例：常规表单（员工登记表），演示定位/层叠/盒模型与可输入控件。直接运行：
 //
 //	go run ./examples/form
