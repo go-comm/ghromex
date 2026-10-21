@@ -748,7 +748,9 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		for _, it := range curLine {
 			// 基线对齐：各内联盒的顶边 = 行基线 − 自身 ascent，
 			// 于是不同字号的文字共享同一基线（浏览器的行盒语义）。
-			y := it.y + dy + (asc - it.asc)
+			// baselineAdjust 是与 Chrome 对照的全局微调（只挪基线，不动
+			// 行盒高度，故不影响行距与盒尺寸）。
+			y := it.y + dy + (asc - it.asc) + baselineAdjust
 			if it.tn != nil {
 				it.tn.node.runs = append(it.tn.node.runs, textRun{
 					text: it.token, x: it.x + dx, y: y, w: it.w, h: it.asc + it.desc,

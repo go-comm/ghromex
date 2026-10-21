@@ -1,6 +1,10 @@
 package engine
 
-import "strings"
+import (
+	"os"
+	"strconv"
+	"strings"
+)
 
 // 输入编辑用到的控制键码。ASCII 区取值对齐 SDL2 SDL_keysym.sym
 // （SDL_keyboard.h 的 SDLK_* 定义），SDL 后端可直接透传；
@@ -298,6 +302,42 @@ func clampCaret(v, n int) int {
 	}
 	return v
 }
+
+// baselineAdjust 是全局文本基线补偿（像素，正数=下移）。
+//
+// 用途：与 Chrome/DirectWrite 对照时的微调。引擎的行盒高度取自字体的
+// hhea/OS2 度量（与 Chrome 同源 ✓），但两边的**取整**不同（引擎按整数像素
+// 取整 ascent/descent，Chrome 走 DirectWrite 的 26.6 定点），同一字号下
+// 基线可差 0.5~1px。这个补偿只挪**基线**、不排行盒高度，故不影响行距
+// 与任何盒的尺寸。
+//
+// 默认 0（不动）。可用环境变量 GHROMEX_BASELINE_ADJ 设定，或调用
+// SetBaselineAdjust 运行时调整。
+var baselineAdjust = envBaselineAdjust()
+
+// envBaselineAdjust 读环境变量里的基线补偿值（非法值按 0 处理）。
+func envBaselineAdjust() int {
+	v := strings.TrimSpace(os.Getenv("GHROMEX_BASELINE_ADJ"))
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// SetBaselineAdjust 设置全局文本基线补偿（像素，正数=下移），返回设置前的
+// 值。用于与 Chrome 对照时的微调；0 = 不补偿（默认）。
+func SetBaselineAdjust(px int) int {
+	old := baselineAdjust
+	baselineAdjust = px
+	return old
+}
+
+// BaselineAdjust 返回当前全局文本基线补偿（像素）。
+func BaselineAdjust() int { return baselineAdjust }
 
 // OnDocumentKeyDown 向聚焦输入派发一个控制键（key 为 SDL keysym 值）。
 // 消费：Backspace、Delete、Enter（仅 textarea 换行）、方向键、Home/End、Tab。

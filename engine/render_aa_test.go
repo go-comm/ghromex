@@ -40,6 +40,52 @@ func TestFillRadiusAntialiasing(t *testing.T) {
 	}
 }
 
+// 基线补偿（GHROMEX_BASELINE_ADJ / SetBaselineAdjust）：与 Chrome 对照的全局
+// 微调——只挪基线，**不排行盒高度**，故行距与盒尺寸都不变。
+func TestBaselineAdjustMovesTextOnly(t *testing.T) {
+	const src = `<!doctype html><html><body style="margin:0">
+	<p id="p" style="margin:0;font-size:16px">第一行<br>第二行</p>
+	</body></html>`
+	doc := openDoc(t, 200, 120, src)
+
+	ys := func() []int {
+		engine.LayoutDocument(doc) // 基线是布局期算的，重排后再生效
+		rec := &posRecorder{Graphics: doc.Viewport().Graphics()}
+		engine.RenderNode(rec, doc)
+		return rec.ys
+	}
+	before := ys()
+	if len(before) < 2 {
+		t.Fatalf("只记到 %d 段文字", len(before))
+	}
+	engine.SetBaselineAdjust(2)
+	defer engine.SetBaselineAdjust(0)
+	after := ys()
+	if len(after) != len(before) {
+		t.Fatalf("补偿前后文字段数不同：%d → %d", len(before), len(after))
+	}
+	for i := range before {
+		if after[i]-before[i] != 2 {
+			t.Fatalf("第 %d 段文字基线移动 %dpx，want 2", i, after[i]-before[i])
+		}
+	}
+	// 行距不变：两段之间的间距应保持不变。
+	if d0, d1 := before[1]-before[0], after[1]-after[0]; d0 != d1 {
+		t.Fatalf("行距被改了：%d → %d（补偿只应挪基线）", d0, d1)
+	}
+}
+
+// posRecorder 记录 DrawText 的 y 坐标。
+type posRecorder struct {
+	engine.Graphics
+	ys []int
+}
+
+func (p *posRecorder) DrawText(x, y, w, h int, paint engine.Paint, text string) {
+	p.ys = append(p.ys, y)
+	p.Graphics.DrawText(x, y, w, h, paint, text)
+}
+
 // <button> 的内容垂直居中（HTML 规范的 button 布局，Chrome/Edge 同款）：
 // 定高按钮的文字不能贴在内容盒顶部（否则整排按钮的文字都偏上）。
 func TestButtonContentVerticallyCentered(t *testing.T) {
