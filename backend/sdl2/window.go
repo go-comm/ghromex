@@ -316,6 +316,7 @@ func (win *Window) Run() error {
 			}
 		}
 
+		pending := false
 		if doc := win.doc; doc != nil {
 			if c := doc.ChangeCount(); c != win.lastChange {
 				engine.LayoutDocument(doc)
@@ -328,9 +329,15 @@ func (win *Window) Run() error {
 				win.present()
 				win.dirty = false
 			}
+			// 布局期可能又标记了变更（滚动动画的下一帧）：此时不能睡 10ms，
+			// 否则每帧白等 10ms，120ms 的动画会被拖到 200ms 以上；空闲时仍
+			// 保留 10ms 休眠省 CPU（present 有 vsync 时本就会自然限帧）。
+			pending = doc.ChangeCount() != win.lastChange
 		}
 
-		sdlDelay(10)
+		if !pending {
+			sdlDelay(10)
+		}
 
 		if win.hasAutoExit && int32(uint32(sdlGetTicks())-exitAt) >= 0 {
 			running = false

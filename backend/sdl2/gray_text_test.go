@@ -25,8 +25,9 @@ import (
 // 两者一致（±2 内）→ 管线忠实，发虚属灰度 AA 固有；显著偏大 → 找到了可修的
 // 管线缺陷（此处会打印两边的边缘指标与偏差分布供定位）。
 //
-// 覆盖两条脚本路径：英文走 Arial（resolveFontPath），中文走 msyh 分段
-// （splitScripts → segFontPath），界面实际显示以中文为主，缺一不可。
+// 覆盖两条脚本路径：英文走 Arial、中文走 CJK 回退（splitScripts → segFontPath），
+// 界面实际显示以中文为主，缺一不可。参照字体不写死，而是从生产同一条
+// segFontPath 取得——字体映射一改，参照就跟着走，比的永远只是管线。
 // ---------------------------------------------------------------------------
 
 const (
@@ -48,31 +49,28 @@ func TestGrayscalePipelineFidelity(t *testing.T) {
 	defer os.Unsetenv("GHROMEX_LCD")
 
 	cases := []struct {
-		name string
-		text string
-		font string // "" = DefaultFontPath()
+		name   string
+		text   string
+		family string // 与生产同源："" 即引擎默认（standard = Arial）
 	}{
 		{"en-arial", grayProbeTextEN, ""},
-		{"zh-msyh", grayProbeTextZH, CJKFontPath()},
+		{"zh-cjk-fallback", grayProbeTextZH, ""},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			runGrayFidelity(t, tc.text, tc.font)
+			runGrayFidelity(t, tc.text, tc.family)
 		})
 	}
 }
 
 // runGrayFidelity 单条文本的落屏比对，见文件头注释。
-func runGrayFidelity(t *testing.T, text, fontPath string) {
+func runGrayFidelity(t *testing.T, text, family string) {
 	const (
 		size    = 13
 		originX = 8
 		originY = 24
 	)
-	if fontPath == "" {
-		fontPath = DefaultFontPath()
-	}
 	ink := [4]uint8{30, 30, 30, 255}
 
 	win, err := NewWindow(300, 80, "gray-text")
@@ -80,6 +78,12 @@ func runGrayFidelity(t *testing.T, text, fontPath string) {
 		t.Fatalf("NewWindow: %v", err)
 	}
 	defer win.Close()
+
+	// 参照字体必须与生产同源：用生产为该文本选中的那个文件（segFontPath 就是
+	// DrawText 内部的选择逻辑）。family 为空时中文落到引擎 standard（Arial）的
+	// CJK 回退字体，实测是 Noto Sans SC 而非雅黑；钉死文件名会在字体映射调整
+	// 后与生产取到不同字体，比出来的就不是管线差异了。
+	fontPath := win.g.segFontPath(splitScripts(text)[0], family)
 
 	// --- 生产路径：Graphics.DrawText 落屏 ---
 	g := win.g // 包内访问具体类型：Clear/Present 不在 engine.Graphics 接口上

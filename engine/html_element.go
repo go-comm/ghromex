@@ -128,10 +128,16 @@ type htmlElement struct {
 	// scrollLeft 为横向滚动偏移（像素），语义同 scrollTop。
 	scrollLeft int
 	// scrollAnimTop/scrollAnimLeft 是**平滑滚动的当前视觉位置**：滚动目标
-	// 在 scrollTop/scrollLeft，实际位移由每轮布局向目标推进（Chrome 的
+	// 在 scrollTop/scrollLeft，实际位移由每轮布局按时间推进（Chrome 的
 	// 动画式滚动；引擎此前整档跳变，观感生硬）。scrollAnimOn 表示动画在途。
 	scrollAnimTop, scrollAnimLeft int
-	scrollAnimOn                  bool
+	// scrollAnimFromTop/FromLeft 是本次动画的起点（滚动中途再来一档滚轮时
+	// 从当前视觉位置重新起算，避免跳变）；scrollAnimProgress 为 0..1 的
+	// 时间进度，scrollAnimLastNs 是上一帧的时间戳（用于算实际帧间隔）。
+	scrollAnimFromTop, scrollAnimFromLeft int
+	scrollAnimProgress                    float64
+	scrollAnimLastNs                      int64
+	scrollAnimOn                          bool
 	// contentW/contentH 为最近一次布局测得的未裁剪内容尺寸（常规流子
 	// 的外盒延伸量），是滚动偏移夹紧的依据；textarea 等原子控件为 0
 	//（其内容量度走各自专用路径）。

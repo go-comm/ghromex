@@ -255,6 +255,13 @@ type Graphics interface {
 	// family 传 CSS font-family 原值（可含逗号列表）；度量必须与 DrawText
 	// 使用同一字体解析规则，否则混排宽度会错位。
 	MeasureText(text string, fontSize int, bold bool, family string) (w, h int)
+	// FontMetrics 返回文本在给定字号/粗体/字族下的**行度量**：ascent 为
+	// 基线以上的像素高度，descent 为基线以下的像素高度，二者之和即行盒
+	// 高度。口径对齐浏览器 line-height:normal（Chrome 取字体 hhea 的
+	// ascender+descender+lineGap），行盒按基线对齐各内联盒。
+	// text 为空时返回主字体的度量（不含逐字回退）——用于行盒的 strut
+	// （块级自身的字体）。
+	FontMetrics(text string, fontSize int, bold bool, family string) (ascent, descent int)
 }
 
 // Clipper 是 Graphics 的可选扩展：矩形裁剪栈。overflow 非 visible 的
@@ -327,6 +334,16 @@ func (g *FakeGraphics) MeasureText(text string, fontSize int, bold bool, family 
 	}
 	h = fontSize * 13 / 10
 	return
+}
+
+// FontMetrics 实现 Graphics：给出估算的行度量（与 MeasureText 的估算
+// 行高同口径拆成基线上下两半），供布局按基线对齐行内盒。
+func (g *FakeGraphics) FontMetrics(text string, fontSize int, bold bool, family string) (int, int) {
+	if fontSize <= 0 {
+		fontSize = 16
+	}
+	h := fontSize * 13 / 10
+	return h / 2, h - h/2
 }
 
 // PushClip/PopClip 实现 Clipper（空后端无需真裁剪，但保持接口一致，
@@ -531,6 +548,15 @@ func (g *BufferGraphics) MeasureText(text string, fontSize int, bold bool, famil
 	}
 	h = fontSize * 13 / 10
 	return
+}
+
+// FontMetrics 实现 Graphics：与 FakeGraphics 相同的估算口径。
+func (g *BufferGraphics) FontMetrics(text string, fontSize int, bold bool, family string) (int, int) {
+	if fontSize <= 0 {
+		fontSize = 16
+	}
+	h := fontSize * 13 / 10
+	return h / 2, h - h/2
 }
 
 // SavePNG 把缓冲区内容导出为 PNG 文件（供人工查看渲染结果）。

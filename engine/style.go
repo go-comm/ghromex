@@ -73,6 +73,29 @@ const (
 	TextDecorationLineThrough
 )
 
+// WhiteSpace 控制空白折叠与换行（white-space）。只实现对照需要的两档：
+// normal 为 CSS 默认（连续空白折叠为一个空格、可软换行）；pre 保留空白与
+// 换行、不做软换行（<pre> 的 UA 值）。缺这一档时 <pre> 里的换行与缩进会
+// 被当成普通文本折叠掉，与浏览器视觉差一整行。
+type WhiteSpace uint8
+
+const (
+	WhiteSpaceNormal WhiteSpace = iota
+	WhiteSpacePre
+)
+
+// BorderCollapse 决定表格相邻单元格的边框是否合并（border-collapse），
+// 只被表格布局读取。separate 为 CSS 默认（单元格各自画四边边框，相邻两条各
+// 自 1px）；collapse 时相邻单元格共享一条线——浏览器把它实现成每个单元格只
+// 摊到"半个边框"（实测 Chrome：`border: 1px` + `padding: 4px 8px` 的单元格
+// 外盒 = 内容 + 16 + 1），外缘的半个边框归表格自己。
+type BorderCollapse uint8
+
+const (
+	BorderCollapseSeparate BorderCollapse = iota // 默认
+	BorderCollapseCollapse
+)
+
 type OnCSSStyleDeclarationChanged interface {
 	OnChanged()
 }
@@ -135,6 +158,13 @@ type CSSStyleDeclaration interface {
 	SetOverflowX(o Overflow) CSSStyleDeclaration
 	OverflowY() Overflow
 	SetOverflowY(o Overflow) CSSStyleDeclaration
+	// WhiteSpace 决定空白处理（normal/pre），沿父链继承。
+	WhiteSpace() WhiteSpace
+	SetWhiteSpace(w WhiteSpace) CSSStyleDeclaration
+	// BorderCollapse 决定表格相邻单元格边框是否合并（border-collapse），
+	// 不继承、仅表格布局读取。默认 separate。
+	BorderCollapse() BorderCollapse
+	SetBorderCollapse(b BorderCollapse) CSSStyleDeclaration
 }
 
 func newStyle() CSSStyleDeclaration {
@@ -172,17 +202,23 @@ type cssStyleDeclaration struct {
 	backgroundImage Image
 	color           Color
 	fontSize        Size
-	fontFamily      string
-	fontWeight      FontWeight
-	textAlign       TextAlign
-	borderRadius    Size
-	position        Position
-	inset           Rect
-	zindex          int
-	boxSizing       BoxSizing
-	textDecoration  TextDecoration
-	overflowX       Overflow
-	overflowY       Overflow
+	// fontSizeExplicit 记录字号是否来自显式 font-size 声明（含祖先继承）。
+	// Chrome 的 monospace 通用族只在字号仍是「默认值」时才用 13px 固定字号
+	// （作者显式给过 16px 时保持 16），需要这个来源标记来判断。
+	fontSizeExplicit bool
+	fontFamily       string
+	fontWeight       FontWeight
+	textAlign        TextAlign
+	borderRadius     Size
+	position         Position
+	inset            Rect
+	zindex           int
+	boxSizing        BoxSizing
+	textDecoration   TextDecoration
+	overflowX        Overflow
+	overflowY        Overflow
+	whiteSpace       WhiteSpace
+	borderCollapse   BorderCollapse
 }
 
 // copyStyle 复制样式值（不含继承字段之外的引用语义差异）。
@@ -211,6 +247,13 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetTextDecoration(s.TextDecoration())
 	c.SetOverflowX(s.OverflowX())
 	c.SetOverflowY(s.OverflowY())
+	c.SetWhiteSpace(s.WhiteSpace())
+	c.SetBorderCollapse(s.BorderCollapse())
+	if src, ok := s.(*cssStyleDeclaration); ok {
+		if dst, ok := c.(*cssStyleDeclaration); ok {
+			dst.fontSizeExplicit = src.fontSizeExplicit
+		}
+	}
 	return c
 }
 
@@ -442,5 +485,23 @@ func (style *cssStyleDeclaration) OverflowY() Overflow {
 
 func (style *cssStyleDeclaration) SetOverflowY(o Overflow) CSSStyleDeclaration {
 	style.overflowY = o
+	return style
+}
+
+func (style *cssStyleDeclaration) WhiteSpace() WhiteSpace {
+	return style.whiteSpace
+}
+
+func (style *cssStyleDeclaration) SetWhiteSpace(w WhiteSpace) CSSStyleDeclaration {
+	style.whiteSpace = w
+	return style
+}
+
+func (style *cssStyleDeclaration) BorderCollapse() BorderCollapse {
+	return style.borderCollapse
+}
+
+func (style *cssStyleDeclaration) SetBorderCollapse(b BorderCollapse) CSSStyleDeclaration {
+	style.borderCollapse = b
 	return style
 }

@@ -12,8 +12,8 @@ func TestResolveFontPathMatchesChrome(t *testing.T) {
 	cases := []struct{ family, wantSuffix string }{
 		{"serif", `times.ttf`},
 		{"SANS-SERIF", `arial.ttf`}, // 大小写不敏感
-		{"monospace", `cour.ttf`},
-		{"cursive", `comic.ttf`},
+		{"monospace", `simsun.ttc`},
+		{"cursive", `simsun.ttc`},
 		{"fantasy", `impact.ttf`},
 		{"system-ui", `segoeui.ttf`},
 		{`"Times New Roman"`, `times.ttf`}, // 带引号具名
@@ -28,6 +28,35 @@ func TestResolveFontPathMatchesChrome(t *testing.T) {
 		got := strings.ToLower(g.resolveFontPath(c.family))
 		if !strings.HasSuffix(got, strings.ToLower(c.wantSuffix)) {
 			t.Errorf("resolveFontPath(%q) = %q, want suffix %q", c.family, got, c.wantSuffix)
+		}
+	}
+}
+
+// TestMeasureTextCacheKey 文本度量缓存必须把字号/粗细/字体族都放进 key：
+// 少任何一维都会让不同请求串用同一份结果，排版宽度会系统性偏移（滚动时
+// 尤其明显——同一段文字在每帧重排里以不同上下文被测量）。
+func TestMeasureTextCacheKey(t *testing.T) {
+	g := NewGraphics(0, "")
+	w0, h0 := g.MeasureText("Abc", 16, false, "serif")
+	if w1, h1 := g.MeasureText("Abc", 16, false, "serif"); w1 != w0 || h1 != h0 {
+		t.Fatalf("同参数两次度量不一致：(%d,%d) vs (%d,%d)", w0, h0, w1, h1)
+	}
+	n := len(g.measures)
+	if n == 0 {
+		t.Skip("度量未入缓存（字体文件不可用）：无法验证缓存 key")
+	}
+	variants := []struct {
+		label string
+		run   func()
+	}{
+		{"字号", func() { g.MeasureText("Abc", 24, false, "serif") }},
+		{"粗细", func() { g.MeasureText("Abc", 16, true, "serif") }},
+		{"字体族", func() { g.MeasureText("Abc", 16, false, "sans-serif") }},
+	}
+	for i, v := range variants {
+		v.run()
+		if got := len(g.measures); got != n+i+1 {
+			t.Fatalf("「%s」未进入缓存 key：条目数 %d, want %d", v.label, got, n+i+1)
 		}
 	}
 }

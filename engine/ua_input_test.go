@@ -23,9 +23,12 @@ func TestInputTypeAppearance(t *testing.T) {
 			t.Errorf("%s 外盒 = %dx%d, want 13x13", id, w, h)
 		}
 	}
-	// radio 行内基线近似：margin-top 3px
-	if y := mustEl(t, doc, "#r").GetBoundingClientRect().Top().Pixel(); y != 3 {
-		t.Errorf("#r.Top = %d, want 3（radio 顶距）", y)
+	// radio 行内基线：radio 无内部文字，基线在底边框边（CSS 2.1 §10.8.1
+	// 的替换元素规则），故其顶边 = 行基线 − 盒高。本页最后一个 radio 是
+	// 40x40，它把整行基线抬到 40+3，前面的 radio 因此下移到 y=30——
+	// 与 Chrome 实测一致（Chrome 同页 radio 的 y 同样是 30）。
+	if y := mustEl(t, doc, "#r").GetBoundingClientRect().Top().Pixel(); y != 30 {
+		t.Errorf("#r.Top = %d, want 30（radio 基线在盒底，行内被 40x40 radio 抬基线）", y)
 	}
 
 	// submit：内容宽 = value 文本 26 + padding 1px 6px + border 1px = 40；

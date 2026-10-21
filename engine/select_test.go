@@ -338,6 +338,9 @@ func (r *paintRecorder) DrawImage(x, y, w, h int, img engine.Image) {}
 func (r *paintRecorder) MeasureText(s string, fs int, bold bool, fam string) (int, int) {
 	return len([]rune(s)) * fs * 2 / 3, fs
 }
+func (r *paintRecorder) FontMetrics(s string, fs int, bold bool, fam string) (int, int) {
+	return fs / 2, fs / 2
+}
 
 // 选中项文字 Paint 必须是白字+蓝底：LCD 后端按 paint.Background() 与落点
 // 底色合成、Background=nil 时按白底——白字配白底会渲成实心白块（用户
@@ -370,8 +373,9 @@ func TestSelectPopupTextPaintCarriesBlue(t *testing.T) {
 	if !alphaBlack {
 		t.Error("未选中项（Alpha）文字应为黑字#000000")
 	}
-	// 控件 UA 默认字体为 Arial（不再 system-ui/Segoe UI），README「字体默认语义」。
-	if alphaFam != "Arial" {
-		t.Errorf("选项文字 font-family = %q, want Arial（控件 UA 默认字体）", alphaFam)
+	// 控件 UA 默认字体首项为 Arial（不再 system-ui/Segoe UI），README「字体默认语义」。
+	// 后面附 system-ui 只为 CJK 回退档位（Chrome 控件汉字落雅黑），拉丁仍用 Arial。
+	if alphaFam != "Arial, system-ui, sans-serif" {
+		t.Errorf("选项文字 font-family = %q, want \"Arial, system-ui, sans-serif\"（控件 UA 默认字体）", alphaFam)
 	}
 }

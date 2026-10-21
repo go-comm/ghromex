@@ -11,44 +11,52 @@
     （table/ol/ul/dl/blockquote/pre/hr/figure/行内语义），逐项对照字面、
     缩进、间距与盒模型。
 
-  一致区（数值对齐 Chrome/Windows 实测）：
-  - h2/h3 字号与段距、p 段距（含相邻块与父-子 margin 折叠）、label 行内、
-    form 块级
-  - text/password 输入框外盒 177x21（password 可点击聚焦输入，值渲染为
-    ● 掩码——明文只存于 value 属性，光标/点击定位同掩码宽度）
-  - radio/checkbox 13x13 控件（radio 正圆）、点击切换选中（强调色方块 +
-    白色对勾 / 圆环 + 实心圆，首项 radio 默认 checked 便于对照）
-  - submit/reset 按钮外观，外盒高 25、value 文本居中
-  - select 外盒高 21、option 13px + 3px 6px 内边距、a 蓝色 + 下划线
-  - body 边距两侧一致（UA 默认 8px）
-  - 整页末行墨迹：引擎 674 vs 浏览器 667（引擎高约 7px；曾因无 margin 折叠膨胀 88px）
+  一致区（数值对齐 Chrome/Windows 实测；行盒/盒尺寸/纵向位置逐元素比对，
+  用注入 JS 的 getBoundingClientRect 与引擎盒几何按元素路径 diff）：
+  - 行盒采用 Chrome/DirectWrite 的字体行度量（OS/2 win，fsSelection bit7 时用
+    typo，lineGap 取 hhea）：同一字体/字号下行盒高与浏览器一致——雅黑 16px→21、
+    Noto Sans→24、Noto Serif→23、宋体→18、等宽通用族 13px→15
+  - 通用族与具名族映射（16px 行盒高，引擎 = 浏览器）：Arial 24、Times New Roman 23、
+    Segoe UI 21、Microsoft YaHei 21、SimHei 18、SimSun 18、serif 23、sans-serif 24、
+    monospace 15（13px 默认等宽字号）、cursive 18、fantasy 24
+  - 汉字回退按 generic family 分流（Chrome 在中文 Windows 上即如此）：
+    sans-serif/Arial/Segoe → Noto Sans SC、serif/Times → Noto Serif SC、
+    monospace/cursive → 新宋体、system-ui → 雅黑
+  - 零作者 CSS 的表单区：input 177x21、select 19、textarea 161x36（多行控件基线取
+    底外边距边 → 含 textarea 的段落行盒 40，与浏览器一致）、radio/checkbox 13x13、
+    submit/reset/button 外盒高 25、h2/h3 字号与段距、p 段距、label 行内、form 块级
+  - sup/sub 基线位移（上 父字号/3+1、下 父字号/5+1）、pre 的 white-space: pre
+    （空行、制表位、强制断行）、dt 不加粗、dd/ul/ol 缩进 40px、
+    blockquote/figure 缩进、body 两侧边距 8px
+  - radio/checkbox 点击切换选中（强调色 + 白色对勾/圆环实心核，按 Chrome 逐像素对齐）
+  - 中英混排的整行宽度与换行点一致（分段 fallback 与浏览器同源）
+  - 表格 `border-collapse: collapse`：列宽/行高/外盒逐项对齐（见下方「表格」条）
 
-  已知分叉（字体行高度量与 v1 边界，非 UA 规则缺失）：
-  - 行高：引擎按字形高（16px 字号 → 20px 行），浏览器 normal 随字体
-    （雅黑 ≈1.3 倍），故 p/h 的行盒高度有小差
-  - 宽度字面差：button/submit 宽 66/40 vs 浏览器 69/43（引擎 Arial 13px
-    vs 浏览器 Segoe UI 13.33px 字形度量；中文字符两侧同为雅黑已一致）
-  - 粗体：引擎用真粗体字文件（msyhbd.ttc / arialbd.ttf），与浏览器按字体族
-    选粗体一致（同页 h2 墨量比 1.01）；差异只剩字形光栅化本身
-  - 灰度 AA vs 浏览器 ClearType 子像素：中文标题锐度差（引擎渲染管线
-    v1 边界，改进方向 LCD 子像素见 fontcmp 探针，非本页 CSS 可解）
+  已知分叉（v1 边界，非 UA 规则缺失；均为 1~5px 量级）：
+  - 布局全程整数像素：浏览器的小数边距（h3 `margin: 1em` = 18.72px、h2 0.83em = 19.92px）
+    只能取整（19/20），逐段累积后整页底部漂移约 5px / 2310px；单个元素内部高度一致，
+    漂移只体现在纵向位置
+  - 边框只画单色实心：Chrome 的 input 是 2px inset、button 是 2px outset #000、
+    hr 是 1px inset（上暗 #808080、下浅 #EEEEEE）；引擎统一 solid 单色，
+    外盒尺寸一致但边框明暗与线型不同（hr 画成两行同色）
+  - 表格为最小模型：列宽取各列内容最大值（不做浏览器的自动表格布局分配）、
+    不支持 colspan/rowspan；`border-collapse: collapse` 按「半边框」实现——
+    单元格只画上/左、相邻无缝、外缘右/下由表格补画（本页表格 181x112 vs
+    浏览器 181.75x112，单元格外盒 90x30 vs 90.38x30，行高逐行一致）；
+    separate 下用 2px 间隙近似 border-spacing
+  - 等宽字体取 simsun.ttc 的 face 0（SimSun），Chrome 用的是同一文件里的新宋体
+    （NSimSun）：行高与长串宽度一致，短串与 ink 高度有微差
+    （`<code>元素</code>` 61 vs 63、ink 高 15 vs 13）
+  - 控件文字宽度：button 66 vs 69.33、submit 40 vs 42.67（引擎 Arial 13px
+    vs 浏览器控件字体 13.33px 的字形度量；中文字符两侧同为雅黑已一致）
+  - "Courier New, monospace" 混排行盒 19 vs 浏览器 20（回退字体度量微差）；
+    label 内控件的行盒 23 vs 21（同上，浏览器按 13.33px 取行高）
+  - 行内盒矩形语义：浏览器对 label 返回其**文字行内盒**（21）、对未展开的 option
+    返回 0x0，引擎返回含子控件的并集（label 23/40、option 12x6）——不影响可见布局
+  - 粗体用真粗体字文件（msyhbd.ttc / arialbd.ttf），与浏览器按字体族选字重一致
+    （同页 h2 墨量比 1.01）；灰度 AA 无 ClearType 子像素，剩余差异是字形光栅化本身
   - radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate 态
-    （点击切换、checked 标记、label 激活与 radio 分组互斥已实现）
-  - select 收起态按内容收缩（与浏览器一致：文字 + 箭头位），textarea 外盒
-    160x38（与浏览器 rows=2/cols=20 的默认一致）
-  - 选中标记：radio 为 1px 强调色细环 + 7px 强调色实心圆核、checkbox 为强调色
-    方块 + 2px 实心对勾（均按 Chrome 逐像素实测对齐；强调色取 Windows 系统
-    强调色默认值 #0078D4，Chrome 随系统配色变化）
-  - 空块自折叠未实现（父-子穿越 margin 折叠已实现：<form> 内首个 <p> 的上边距
-    与前一个 <p> 的下边距折叠为 16px，与浏览器一致）
-  - 列表：缩进/外边距/标记（ul 的 •、ol 的 1. 2. 序号）均与浏览器一致；标记
-    位置按内容左缘 −0.75em 近似（Chrome 的圆点与序号各有微差，字体 bearings
-    也不同）
-  - 表格：行按行堆叠、同列左缘对齐、列宽取各行最大值、caption 居中、th 居中
-    加粗（与浏览器一致）；不支持 colspan/rowspan 与 border-collapse
-  - 斜体/上标下标/小字号未实现（无 font-style/vertical-align 渲染，
-    small/sub/sup 只保证行内性）
-  - 预格式化未保留空白（pre 无 white-space:pre，缩进与换行按普通文本折叠）
+  - 空块自折叠未实现（父-子穿越 margin 折叠已实现）
 -->
 <html>
 <head>

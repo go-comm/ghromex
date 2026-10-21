@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"github.com/go-comm/ghromex/engine"
@@ -27,24 +28,32 @@ func checkDraw(what string, ret uintptr) {
 // 字体解析：对齐 Chrome 在 Windows 上的默认字体映射，唯一例外：
 // standard（未指定 family）默认取 sans-serif（Arial）而非 Chrome 的 Times New Roman，
 // 更贴合桌面应用 UI 习惯；serif 族仍映射 Times New Roman，不损失语义。
-//   serif → Times New Roman；sans-serif → Arial；monospace → Courier New
-//   cursive → Comic Sans MS；fantasy → Impact；system-ui → Segoe UI
-//   汉字/假名/谚文等 CJK 字符按 per-script fallback → 微软雅黑
+//   serif → Times New Roman；sans-serif → Arial；monospace/cursive → 宋体
+//   fantasy → Impact；system-ui → Segoe UI
+//   ！通用族的实际取值以 Chrome 实测为准：Chrome 在中文 Windows 上
+//   monospace/cursive 用的是新宋体（默认等宽字体），不是 Courier New /
+//   Comic Sans MS；拉丁字符在新宋体里是半角定宽，实测宽度与行高都与
+//   Chrome 逐像素一致。
+//   汉字/假名/谚文等 CJK 字符按 per-script fallback：sans-serif → Noto Sans SC、
+//   serif → Noto Serif SC、monospace/cursive → 宋体、system-ui → 微软雅黑。
 // ---------------------------------------------------------------------------
 
 const fontsDir = `C:\Windows\Fonts`
 
 // genericFamilyFiles CSS 通用族 → 字体文件名。
+// 取值来自 Chrome（中文 Windows）实测的通用族回退：monospace/cursive 都落到
+// 新宋体（16px 每字符 8px、行高 18；Chrome 的默认等宽字体就是新宋体，
+// 而非 Courier New），其余见下方注释。
 var genericFamilyFiles = map[string]string{
 	"serif":         "times.ttf",
 	"sans-serif":    "arial.ttf",
-	"monospace":     "cour.ttf",
-	"cursive":       "comic.ttf",
+	"monospace":     "simsun.ttc",
+	"cursive":       "simsun.ttc",
 	"fantasy":       "impact.ttf",
 	"system-ui":     "segoeui.ttf",
 	"ui-serif":      "times.ttf",
 	"ui-sans-serif": "segoeui.ttf",
-	"ui-monospace":  "cour.ttf",
+	"ui-monospace":  "simsun.ttc",
 	"ui-rounded":    "segoeui.ttf",
 }
 
@@ -77,21 +86,31 @@ func fontFileOr(def, first string, rest ...string) string {
 	return def
 }
 
+// fontPathCache 缓存 fontPathOf 的结果（"" = 不存在）。系统字体在进程生命周期
+// 内不会变化，而字体解析在**每次排版与绘制**都会被调用（每段文本、每帧）：
+// 不缓存时一次重排要做上万次 os.Stat（Windows 上是 GetFileAttributesEx 系统
+// 调用），实测 demo/form-ua.html 单次重排 75ms、其中约一半耗在这里；滚动动画
+// 每帧都要重排，于是滚轮手感变成"慢吞吞"。缓存后同一查询是纯内存 map 命中。
+var fontPathCache sync.Map // map[string]string
+
 // fontPathOf 把文件名或绝对路径规范为存在的完整路径；不存在返回 ""。
 func fontPathOf(name string) string {
 	if name == "" {
 		return ""
 	}
+	if v, ok := fontPathCache.Load(name); ok {
+		return v.(string)
+	}
+	p := ""
 	if filepath.IsAbs(name) {
 		if _, err := os.Stat(name); err == nil {
-			return name
+			p = name
 		}
-		return ""
+	} else if cand := filepath.Join(fontsDir, name); fileExists(cand) {
+		p = cand
 	}
-	if p := filepath.Join(fontsDir, name); fileExists(p) {
-		return p
-	}
-	return ""
+	fontPathCache.Store(name, p)
+	return p
 }
 
 func fileExists(p string) bool {
@@ -191,6 +210,11 @@ type Graphics struct {
 
 	faces    map[faceKey]*fontFace
 	textures map[texKey]texInfo
+	measures map[measureKey]measureVal
+	// familyPaths 缓存 font-family 列表 → 字体文件的解析结果。解析本身要拆分
+	// 列表、查表、stat 多个候选，而同一份 CSS 的 family 字符串在每帧重排/重绘
+	// 中反复出现；结果只依赖本 Graphics 的 standardFont，故按实例缓存。
+	familyPaths map[string]string
 	// texOrder 记录纹理插入顺序（FIFO 淘汰用）；缓存无上限会让动态文本
 	// 页面（计数/时间戳）的显存单调增长，长跑必然耗尽。
 	texOrder []texKey
@@ -320,6 +344,8 @@ func NewGraphics(renderer uintptr, fontPath string) *Graphics {
 		cjkFont:      CJKFontPath(),
 		faces:        make(map[faceKey]*fontFace),
 		textures:     make(map[texKey]texInfo),
+		measures:     make(map[measureKey]measureVal),
+		familyPaths:  make(map[string]string),
 		reuseFaces:   hasTTFSetFontSize,
 	}
 	g.refreshEnv()
@@ -338,7 +364,17 @@ func (g *Graphics) refreshEnv() {
 
 // resolveFontPath 把 CSS font-family（可含逗号分隔列表）解析为字体文件路径。
 // 逐个候选尝试：通用族 → 具名别名 → 直接文件名/绝对路径 → 家族名+常见扩展。
+// 结果按 family 缓存（见 familyPaths）：字体不能在运行中新增，重复解析没有意义。
 func (g *Graphics) resolveFontPath(family string) string {
+	if p, ok := g.familyPaths[family]; ok {
+		return p
+	}
+	p := g.resolveFontPathUncached(family)
+	g.familyPaths[family] = p
+	return p
+}
+
+func (g *Graphics) resolveFontPathUncached(family string) string {
 	for _, raw := range strings.Split(family, ",") {
 		name := strings.ToLower(strings.Trim(strings.TrimSpace(raw), `"'`))
 		if name == "" || name == "standard" {
@@ -462,13 +498,125 @@ func (g *Graphics) face(path string, size int, bold bool) *fontFace {
 // segFontPath 返回一个脚本段应使用的字体文件。
 func (g *Graphics) segFontPath(seg scriptSeg, family string) string {
 	if seg.cjk {
-		return g.cjkFont
+		return g.cjkFontPathFor(family)
 	}
 	return g.resolveFontPath(family)
 }
 
+// cjkCapableFamilies 是自带 CJK 字形的字体族（族名关键字，小写比较）。
+// 浏览器在字体含目标字形时直接用该字体、不触发逐字回退；引擎同理：显式
+// 指定 SimHei/SimSun/雅黑等中文字体时，CJK 字符应按该字体度量与绘制，
+// 否则同一行的行高会按引擎的回退字体（雅黑）算，与浏览器差 3~4px。
+var cjkCapableFamilies = map[string]bool{
+	"microsoft yahei": true, "微软雅黑": true,
+	"simhei": true, "黑体": true,
+	"simsun": true, "宋体": true, "nsimsun": true, "新宋体": true,
+	"fangsong": true, "仿宋": true, "kaiti": true, "楷体": true,
+	"msjh": true, "微軟正黑體": true, "mingliu": true, "細明體": true,
+	"dengxian": true, "等线": true,
+	"noto sans cjk": true, "noto serif cjk": true,
+	"source han sans": true, "source han serif": true,
+}
+
+// cjkFontPathFor 返回该 font-family 列表中自带 CJK 字形的字体文件；
+// 列表中没有中文字体时返回引擎的 CJK 回退字体（雅黑）。
+func (g *Graphics) cjkFontPathFor(family string) string {
+	for _, raw := range strings.Split(family, ",") {
+		name := strings.ToLower(strings.Trim(strings.TrimSpace(raw), `"'`))
+		if name == "" {
+			continue
+		}
+		if !cjkCapableFamilies[name] {
+			continue
+		}
+		if p := g.resolveFontPath(name); p != "" {
+			return p
+		}
+	}
+	// 列表里没有中文字体：按 generic family 选 Chrome 对应的系统回退字体
+	// （Chrome 实测：sans-serif→Noto Sans SC、serif→Noto Serif SC、
+	// monospace/cursive→宋体、system-ui→雅黑——同一个汉字在不同 generic
+	// 下行高不同，正是回退字体不同的结果）。
+	return g.cjkFallbackPath(cjkFallbackClass(family))
+}
+
+// cjkFallbackClass 把 font-family 列表归类到 Chrome 的 CJK 回退档位。
+// 注意 "sans-serif" 里含 "serif"：必须先判 sans-serif。
+func cjkFallbackClass(family string) string {
+	lower := strings.ToLower(family)
+	has := func(k string) bool { return strings.Contains(lower, k) }
+	switch {
+	case has("monospace"), has("courier new"), has("cursive"), has("comic sans"):
+		return "mono"
+	case has("system-ui"):
+		return "ui"
+	case has("sans-serif"), has("arial"), has("segoe"), has("verdana"), has("tahoma"):
+		return "sans"
+	case has("serif"), has("times"):
+		return "serif"
+	default:
+		return "sans"
+	}
+}
+
+var cjkFallbackPaths struct {
+	once              sync.Once
+	mono, serif, sans string
+}
+
+// cjkFallbackPath 返回该档位的回退字体文件；未安装时退回 g.cjkFont。
+// 结果缓存：segFontPath 在每次度量/绘制时都会调用，不能反复 os.Stat。
+func (g *Graphics) cjkFallbackPath(class string) string {
+	cjkFallbackPaths.once.Do(func() {
+		first := func(names ...string) string {
+			for _, n := range names {
+				if p := fontPathOf(n); p != "" {
+					return p
+				}
+			}
+			return ""
+		}
+		cjkFallbackPaths.mono = first("simsun.ttc")
+		cjkFallbackPaths.serif = first("NotoSerifSC-VF.ttf", "NotoSerifSC-Regular.otf")
+		cjkFallbackPaths.sans = first("NotoSansSC-VF.ttf", "NotoSansSC-Regular.otf")
+	})
+	p := ""
+	switch class {
+	case "mono":
+		p = cjkFallbackPaths.mono
+	case "serif":
+		p = cjkFallbackPaths.serif
+	case "sans":
+		p = cjkFallbackPaths.sans
+	}
+	if p == "" {
+		return g.cjkFont
+	}
+	return p
+}
+
 // fontPath 兼容旧调用：不带 family 信息时的 standard 解析。
 func (g *Graphics) fontPath(family string) string { return g.resolveFontPath(family) }
+
+// measureKey/measureVal 是 MeasureText 结果的缓存键值。文本度量在每帧重排中
+// 被反复请求（同一个词、同一段文本、同一份 CSS），而结果只取决于
+// （文本, 字号, 粗细, family, hinting 档位, 是否有 TTF）——字体文件在进程内
+// 不变。不缓存时每次都要走 SDL_ttf 的 TTF_SizeUTF8（CGO 调用），实测占
+// demo/form-ua.html 单次重排 80% 以上，是滚动掉帧的最后一处大头。
+// ttf 进 key：DLL 是否可用会改变度量口径（估算 vs 真实），不能串用。
+type measureKey struct {
+	text   string
+	size   int
+	bold   bool
+	family string
+	hint   uint8
+	ttf    bool
+}
+type measureVal struct{ w, h int }
+
+// maxCachedMeasures 是文本度量缓存上限。动态文本页面（计数/时间戳）的
+// 唯一字符串无上限，超出后整体清空——度量重算比无限增长安全。
+const maxCachedMeasures = 8192
 
 // MeasureText 实现 engine.Graphics。与 DrawText 同一套脚本分段与字体解析，
 // 宽度为各段之和，行高取各段最大值（近似 Chrome 的行盒语义）。
@@ -476,31 +624,98 @@ func (g *Graphics) MeasureText(text string, fontSize int, bold bool, family stri
 	if fontSize <= 0 {
 		fontSize = 16
 	}
-	if !hasTTF() {
-		return estimateText(text, fontSize)
+	key := measureKey{text: text, size: fontSize, bold: bold, family: family,
+		hint: uint8(g.envHint), ttf: hasTTF()}
+	if v, ok := g.measures[key]; ok {
+		return v.w, v.h
 	}
 	totalW, maxH := 0, 0
-	for _, seg := range splitScripts(text) {
-		path := g.segFontPath(seg, family)
-		f := g.face(path, fontSize, bold)
-		if f == nil {
-			w, h := estimateText(seg.text, fontSize)
-			totalW += w
-			if h > maxH {
-				maxH = h
+	cacheable := true
+	if !key.ttf {
+		totalW, maxH = estimateText(text, fontSize)
+	} else {
+		for _, seg := range splitScripts(text) {
+			path := g.segFontPath(seg, family)
+			f := g.face(path, fontSize, bold)
+			if f == nil {
+				// 字体句柄打开失败是暂时性的（文件被占用等）：本次按估算
+				// 返回但不入缓存，后续帧还有机会拿到真实度量。
+				cacheable = false
+				w, h := estimateText(seg.text, fontSize)
+				totalW += w
+				if h > maxH {
+					maxH = h
+				}
+				continue
 			}
-			continue
-		}
-		var w, h int32
-		b, p := cBytes(seg.text)
-		ttfSizeUTF8(f.handle, p, uintptr(unsafe.Pointer(&w)), uintptr(unsafe.Pointer(&h)))
-		runtime.KeepAlive(b)
-		totalW += int(w)
-		if int(h) > maxH {
-			maxH = int(h)
+			var w, h int32
+			b, p := cBytes(seg.text)
+			ttfSizeUTF8(f.handle, p, uintptr(unsafe.Pointer(&w)), uintptr(unsafe.Pointer(&h)))
+			runtime.KeepAlive(b)
+			totalW += int(w)
+			if int(h) > maxH {
+				maxH = int(h)
+			}
 		}
 	}
+	if len(g.measures) >= maxCachedMeasures {
+		// 清空而非淘汰最旧：度量重算代价远低于维护 LRU 的复杂度，
+		// 且正常页面（静态文本）不会触顶。
+		g.measures = make(map[measureKey]measureVal)
+	}
+	if cacheable {
+		g.measures[key] = measureVal{w: totalW, h: maxH}
+	}
 	return totalW, maxH
+}
+
+// FontMetrics 实现 engine.Graphics：返回行度量（基线以上 ascent、基线以下
+// descent）。各脚本段取最大值——与浏览器行盒口径一致：行盒高度 = 各内联盒
+// ascent 的最大者 + descent 的最大者（同基线对齐）。
+// text 为空时只取主字体（不触发 CJK 逐字回退），对应行盒的 strut。
+func (g *Graphics) FontMetrics(text string, fontSize int, bold bool, family string) (int, int) {
+	if fontSize <= 0 {
+		fontSize = 16
+	}
+	if !hasTTF() {
+		h := fontSize * 13 / 10
+		return h / 2, h - h/2
+	}
+	if text == "" {
+		asc, desc, ok := g.lineMetricsOf(g.resolveFontPath(family), fontSize, bold)
+		if !ok {
+			h := fontSize * 13 / 10
+			return h / 2, h - h/2
+		}
+		return asc, desc
+	}
+	maxAsc, maxDesc := 0, 0
+	for _, seg := range splitScripts(text) {
+		asc, desc, ok := g.lineMetricsOf(g.segFontPath(seg, family), fontSize, bold)
+		if !ok {
+			continue
+		}
+		if asc > maxAsc {
+			maxAsc = asc
+		}
+		if desc > maxDesc {
+			maxDesc = desc
+		}
+	}
+	return maxAsc, maxDesc
+}
+
+// lineMetricsOf 返回（字体文件, 字号, 粗细）下的行度量。粗体优先用真粗体
+// 字文件（与 face/绘制同源），否则布局度量与实际绘制会取到不同字体。
+func (g *Graphics) lineMetricsOf(path string, size int, bold bool) (int, int, bool) {
+	if bold {
+		if name, ok := boldVariants[strings.ToLower(filepath.Base(path))]; ok {
+			if p := fontPathOf(name); p != "" {
+				path = p
+			}
+		}
+	}
+	return fontLineMetrics(path, size)
 }
 
 // DrawText 实现 engine.Graphics：按脚本段绘制纹理，x 依次推进各段测量宽度，
@@ -634,7 +849,12 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 }
 
 // ascentOf 读取指定字体当前样式的基线（调用后 face 的 size/bold 已就位）。
+// 口径与 FontMetrics 一致（hhea 的 ascender），使绘制时的基线位置与布局
+// 计算的基线严格对齐；解析失败才退回 SDL_ttf 的 TTF_FontAscent。
 func (g *Graphics) ascentOf(path string, size int, bold bool) int32 {
+	if asc, _, ok := g.lineMetricsOf(path, size, bold); ok {
+		return int32(asc)
+	}
 	f := g.face(path, size, bold)
 	if f == nil || !hasTTFFontAscent {
 		return 0

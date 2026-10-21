@@ -133,8 +133,11 @@ libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 `box-sizing(content-box/border-box，表单控件 UA 默认 border-box 对齐 Chrome)`、
 `margin*`（相邻块级兄弟折叠：取较大者；父-子穿越/空块折叠未实现）、`padding*`、
 `border` 简写与 `border-width/color/style`、`border-radius`(四角统一，仅水平半径)、
+`border-collapse(collapse/separate，仅表格布局读取，见「已知限制」的表格模型)`、
 `background-color`/`background`、`color`、`font-size`、`font-weight(bold)`、`font-family`、
 `text-align(left/center/right)`、`text-decoration(underline/line-through/none，随父链继承)`、
+`white-space(pre)`（保留空白与制表符、按换行强制断行、不软换行；UA 的 `pre`/`code` 用它，
+`nowrap`/`pre-wrap` 未实现）、
 `position(relative/absolute/fixed)`、`top/right/bottom/left`(px 与 %，支持负值；
 absolute/fixed 相对包含块锚定，right/bottom 回推)、`z-index`、
 `overflow(visible/hidden/clip/scroll/auto：单值作用两轴、两值为 overflow-x overflow-y、
@@ -143,16 +146,34 @@ overflow-x/overflow-y 分轴；hidden 只裁不滚，scroll 恒可滚，auto 溢
 inline-block 的百分比宽度按包含块内容宽解析（而非行内剩余宽）；
 UA 默认样式表覆盖浏览器 Windows 侧的常用规则：body 外边距 8px、
 h1-h3 字号/外边距、p 段距、a 蓝色下划线、strong/b 加粗、
-em/i/code/small/sub/sup 等行内语义标签为 inline、
-ul/ol 缩进 40px、dl 的 dt 加粗与 dd 缩进、blockquote/pre/figure 外边距、
-hr 边框、form/input/select/textarea/button 的尺寸与外观；
-未实现的 UA 部分见「已知限制」（列表标记、表格模型、斜体/vertical-align）；
+em/i/code/small/sub/sup 等行内语义标签为 inline（sub/sup 另按 Chrome 实测做
+基线位移：上标 `父字号/3+1`、下标 `父字号/5+1`，字号取 smaller 的 13px）、
+dt **不加粗**（Chrome UA 实测计算权重 400；HTML4 的 UA 才加粗 dt）、
+dd 缩进 40px、ul/ol 缩进 40px、blockquote/pre/figure 外边距、
+hr 边框、form/input/select/textarea/button 的尺寸与外观（多行控件的基线按
+CSS 2.1 §10.8.1 取底外边距边——Chrome 的 textarea 计算 overflow 非 visible）；
+表格/列表标记等仍是近似模型，见「已知限制」；
 字体默认语义对齐 Chrome（Windows）并做 UI 取向调整：初始字号 16px；
 standard（未指定 family）默认 sans-serif → Arial（区别于 Chrome 的 Times，更贴桌面 UI）；
-serif → Times New Roman、monospace → Courier New、system-ui → Segoe UI；
-表单控件 UA 样式默认字体同为 Arial（引擎默认字体，桌面 UI 取向；
-Chrome 控件用系统 UI 字体 Segoe UI）；
-汉字/假名/谚文按字符级脚本分段 fallback 到微软雅黑（中英混排与 Chrome 一致）；
+serif → Times New Roman、sans-serif → Arial、system-ui → Segoe UI、fantasy → Impact、
+monospace/cursive → 新宋体（Chrome 在中文 Windows 上的默认等宽字体就是新宋体，
+实测 16px 每字符 8px、行高 18，而不是 Courier New / Comic Sans MS；引擎用 simsun.ttc）；
+表单控件 UA 默认字体 `Arial, system-ui, sans-serif`（首项 Arial = 引擎默认字体、
+桌面 UI 取向；追加 system-ui 只影响 CJK 回退档位——Chrome 控件的汉字落雅黑、
+13px 行高 17，若按 Arial 落 Noto Sans 会把按钮撑高 2px）；
+`font-family` 首项为 monospace/ui-monospace 且作者从未显式声明过 font-size 时，
+计算字号取通用族默认等宽字号 13px（Chrome 实测：body 不写字号 +
+`font-family: monospace` → 13px；祖先显式给过 16px 则保持 16px）；
+汉字/假名/谚文按字符级脚本分段 fallback，且按 generic family 分流到 Chrome
+在中文 Windows 上实际使用的系统字体：sans-serif/Arial/Segoe UI → Noto Sans SC、
+serif/Times → Noto Serif SC、monospace/cursive → 新宋体、system-ui → 微软雅黑
+（同一汉字在不同 generic 下行高不同：Noto Sans 24、Noto Serif 23、宋体 18、
+雅黑 21，正是回退字体不同的结果）；显式指定中文字体族（雅黑/黑体/宋体/等线…）
+时该字体自带 CJK 字形、不触发逐字回退；
+行盒（line-height: normal）用 Chrome/DirectWrite 口径度量：优先
+OS/2 `usWinAscent/usWinDescent`（fsSelection bit7 = USE_TYPO_METRICS 时改用
+`sTypoAscender/Descender`），lineGap 仍取 hhea；行盒高 = 各内联盒
+「基线以上高度」的最大值 + 「基线以下高度」的最大值，无内容时不加 strut；
 粗体按字体族选**真粗体字文件**（雅黑 → msyhbd.ttc、Arial → arialbd.ttf、
 Segoe UI → segoeuib.ttf），不依赖 FreeType 对常规字形的合成加粗——合成加粗
 明显更重，24px 中文标题上还会出现笔画粘连/重影（浏览器按字体族选粗体字重，
@@ -185,21 +206,39 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 
 ## 已知限制
 
-- 布局为块级 + 行内/inline-block 流式布局 + 定位子集；无 flex/grid；滚动仅滚轮驱动（无滚动条 UI、无拖拽滚动、无 PageUp/PageDown 翻页键、无触控板惯性），wheel 步长 100px/档（与 Chrome/Windows 一致）；文档级滚动为**动画式**（分帧推进 ≈70ms，Chrome ≈100ms），但滚动偏移无对外 DOM API（`scrollTop`/`scrollLeft` 未导出，仅由 wheel 与 textarea 光标跟随内部驱动），亦无 `scroll`/`wheel` 之外的滚动事件
+- 布局为块级 + 行内/inline-block 流式布局 + 定位子集；无 flex/grid；滚动仅滚轮驱动（无滚动条 UI、无拖拽滚动、无 PageUp/PageDown 翻页键、无触控板惯性），wheel 步长 100px/档（与 Chrome/Windows 一致）；文档级滚动为**动画式**：按真实时间 120ms ease-out 推进（不按固定帧数，避免排版慢时把一档滚轮拖成几百毫秒），滚动只平移子树；字体路径解析与文本度量已缓存（文本度量按「文本+字号+粗细+family」），demo 对照页单次重排约 1~2ms。但滚动偏移无对外 DOM API（`scrollTop`/`scrollLeft` 未导出，仅由 wheel 与 textarea 光标跟随内部驱动），亦无 `scroll`/`wheel` 之外的滚动事件
 - position v1 边界：absolute 双锚（left+right 同给）时 auto 宽按内容收缩而非拉伸；未实现嵌套层叠上下文（opacity/transform 成组、负 z-index 压至祖先背景之下）；命中测试未按 z-index 取最上层元素（select 选项浮层例外，按浮层层序优先）
 - `<input>` 可编辑仅支持 text 类型；radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate / 表单重置；无选区/复制粘贴
 - `<select>` 仅鼠标交互（展开/收起/选中），无键盘上下键选择、无 multiple、无 optgroup；选项浮层不随视口裁剪（超出视口的选项画到窗口外）；收起态按内容收缩（文字 + 箭头位 16px，与 Chrome 同口径）
 - `<textarea>` 无选区/复制粘贴、无按住 Shift 扩展选区；滚轮可滚动（超盒高的行随滚动偏移平移、半截行按裁剪截断；后端未实现 `Clipper` 时退化为整行丢弃）
-- 行高按字形高度量（无 line-height 属性），与浏览器 normal（随字体 ≈1.15-1.5 倍）
-  行盒高度存在小差；空块自折叠未实现（父-子穿越 margin 折叠已实现）
+- 行高（`line-height: normal`）按字体度量（OS/2 win/typo + hhea lineGap）计算，与
+  Chrome/DirectWrite 同口径；但布局全程为整数像素，浏览器的小数边距/行盒
+  （如 h3 的 `margin: 1em` = 18.72px、h2 的 0.83em = 19.92px）只能取整，
+  逐段累积后整页可漂移数像素（对照页 form-ua.html 底部约 7px / 2310px）；
+  空块自折叠未实现（父-子穿越 margin 折叠已实现）
 - `DrawImage` 尚未实现（接口已预留）
 - 裁剪仅由实现 `engine.Clipper`（`PushClip`/`PopClip`）的后端生效（当前 `BufferGraphics`、SDL2 均已实现；自定义后端未实现时静默跳过裁剪、仅不裁剪不报错）
-- 边框样式目前按单色实心绘制（dashed/dotted 等不做虚线区分）
-- 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；无 webfont 加载、无斜体渲染（font-style 仅解析不渲染）
+- 边框样式只按**单色实心**绘制：`inset/outset/groove/ridge/dashed/dotted/double`
+  都退化为 solid，且不支持四边不同颜色——Chrome 的 `input`（2px inset）、
+  `button`（2px outset #000）、`hr`（1px inset，上暗 #808080 下浅）因此只做到
+  外盒尺寸一致，明暗双色边框与线型差异保留（对照页 form-ua.html 的 hr 引擎画成
+  两行同色）
+- 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；
+  无 webfont 加载、无斜体渲染（font-style 仅解析不渲染）；
+  `monospace`/`cursive` 映射到 simsun.ttc 的 face 0（SimSun），Chrome 用的是
+  同一文件里的新宋体（NSimSun）——行高与整串宽度一致，但单字 ink 高度与
+  短串宽度有微差（对照页 `<code>元素</code>` 等宽串 61 vs Chrome 63、ink 高 15 vs 13）
+- 表格是最小模型：按行堆叠、同列左缘对齐、列宽取各行最大值、caption 居中、
+  th 居中加粗；`border-collapse: collapse` 已支持（单元格只画上/左、外缘右/下
+  由表格补画，等价于浏览器的「半边框」：实测紧贴无间隙、每行只摊 1px 线，
+  对照页表格 181×112 vs Chrome 181.75×112，单元格外盒 90×30 vs 90.38×30）；
+  仍不支持 colspan/rowspan、不做「宽者胜」的边框冲突仲裁（相邻边框取后者），
+  列宽按**内容最大值**（不做浏览器的自动表格布局分配），separate 下用 2px
+  间隙近似 border-spacing
 - 列表：缩进/外边距/标记已实现并与 Chrome 对齐（ul 的 •、ol 的序号；标记位置按内容左缘 −0.75em 近似）；仍无 `display:list-item` 与 `list-style-type`（作者自定义标记类型不生效）
-- **表格**：最小模型已实现（按行堆叠、同列左缘对齐、列宽取各行最大值、caption 居中、th 居中加粗）；不支持 colspan/rowspan、不支持 border-collapse（单元格间用 2px 间隙近似 border-spacing）、嵌套表格的列宽各自独立
-- 无 `vertical-align`（sub/sup 不升降）、无 `small` 的小字号、`white-space` 未实现（`pre` 不保留空白）、无 `line-height`
-- 级联为每次重排全量重算：逐元素重跑全部规则匹配并排序（元素数 × 规则数 × 祖先深度）——大样式表 + 大文档时每次输入都会触发一次全量级联，尚未做规则索引/失效缓存
+- 无 `vertical-align`（作者声明的垂直对齐不生效；`sub`/`sup` 的基线位移是 layout
+  内置行为）；`white-space` 仅 `pre` 一个关键字；无 `line-height` 属性
+- 级联为每次重排全量重算：逐元素重跑全部规则匹配并排序（元素数 × 规则数 × 祖先深度）——大样式表 + 大文档时每次输入都会触发一次全量级联，尚未做规则索引/失效缓存（字体路径与文本度量已有缓存，见「滚动」条）
 - 灰度 AA（默认）无横向子像素分解，竖笔边缘锐度低于 LCD/ClearType（物理极限）；
   软硬由 hinting/tone 曲线档位决定（`GHROMEX_HINT` 默认 normal、`GHROMEX_CONTRAST`
   默认关，可联调取点，见渲染段），保真度探针证实管线忠实（见上文渲染段；

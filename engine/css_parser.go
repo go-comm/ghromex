@@ -366,6 +366,22 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		comp.SetOverflowX(parseOverflow(v))
 	case "overflow-y":
 		comp.SetOverflowY(parseOverflow(v))
+	case "white-space":
+		// 只区分 pre 与其余值（normal/nowrap/…）：对照页只需要 pre 的
+		// 「保留空白 + 不软换行」，其余按 CSS 默认的 normal 处理。
+		if v == "pre" {
+			comp.SetWhiteSpace(WhiteSpacePre)
+		} else {
+			comp.SetWhiteSpace(WhiteSpaceNormal)
+		}
+	case "border-collapse":
+		// 只区分 collapse 与其余值（separate 为 CSS 默认）。语义见
+		// BorderCollapse 的注释：collapse 时每个单元格只摊到半个边框。
+		if v == "collapse" {
+			comp.SetBorderCollapse(BorderCollapseCollapse)
+		} else {
+			comp.SetBorderCollapse(BorderCollapseSeparate)
+		}
 	case "top":
 		comp.SetInset(edgeRect(comp.Inset(), edgeTop, parseLength(v)))
 	case "right":

@@ -162,10 +162,12 @@ body{margin:0}
 	}
 }
 
-// settleScroll 反复布局直到滚动动画收敛（平滑滚动分帧推进，Chrome 同）。
-// 以被观察元素的视口顶端为收敛判据：连续两次不变即认为已到位。
+// settleScroll 反复布局直到滚动动画收敛（平滑滚动按时间分帧推进，Chrome 同）。
+// 以被观察元素的视口顶端为收敛判据：连续两次不变**且动画已结束**才返回；
+// 只看"两帧不变"会在缓动尾段误判（尾段几帧的取整位置相同但动画仍在途）。
 func settleScroll(t *testing.T, doc HTMLDocument, sel string) {
 	t.Helper()
+	root := inner(doc)
 	prev := -1 << 30
 	for i := 0; i < 24; i++ {
 		LayoutDocument(doc)
@@ -173,7 +175,7 @@ func settleScroll(t *testing.T, doc HTMLDocument, sel string) {
 		if e := doc.QuerySelector(sel); e != nil {
 			cur = e.GetBoundingClientRect().Top().Pixel()
 		}
-		if cur == prev {
+		if cur == prev && (root == nil || !root.scrollAnimOn) {
 			return
 		}
 		prev = cur
@@ -200,10 +202,13 @@ func TestDocumentScrollAnimation(t *testing.T) {
 	if first == 0 || first <= -40 {
 		t.Errorf("首帧应部分推进，实际 top=%d（-40 < first < 0）", first)
 	}
-	// 多轮布局后收敛到目标
-	settleScroll(t, doc, "#page")
+	// 动画按时间推进（120ms）：8 帧 × 16ms（名义帧长）必须收敛。
+	// 旧的"每帧推进剩余距离 1/3"要 13 帧以上，正是滚动手感"慢吞吞"的来源。
+	for i := 0; i < 8; i++ {
+		LayoutDocument(doc)
+	}
 	if top := doc.QuerySelector("#page").GetBoundingClientRect().Top().Pixel(); top != -40 {
-		t.Errorf("滚动动画未收敛：top=%d, want -40", top)
+		t.Errorf("8 帧后滚动动画未收敛：top=%d, want -40", top)
 	}
 	if root.scrollAnimOn {
 		t.Error("收敛后动画应结束")

@@ -550,7 +550,82 @@ type lineItem struct {
 	x     int
 	y     int
 	w     int
-	h     int
+	asc   int // 该项基线以上的高度（字体 ascent 或原子盒的基线位置）
+	desc  int // 该项基线以下的高度
+}
+
+// inlineBoxBaseline 计算原子行内盒（inline-block 控件、行内元素等）的基线
+// 位置：返回基线以上的高度（自**外盒顶边**算起，含上外边距）与基线以下的
+// 高度。口径对齐 Chrome：
+//   - 文本类控件（input/textarea/select/button）的基线在内部文字的基线处，
+//     即 上边框+上内边距+字体 ascent；
+//   - 其余盒（行内元素、替换元素）的基线贴近盒底，即 盒高−字体 descent。
+//
+// 外盒高 outerH 为**外边距盒**高（含上下外边距），与 layoutBox 的返回值
+// 同口径。
+func inlineBoxBaseline(g Graphics, che *htmlElement, outerH int) (asc, desc int) {
+	if che == nil || che.computed == nil {
+		return outerH, 0
+	}
+	pctW := che.width
+	pd := resolveEdgeRect(che.computed.Padding(), pctW)
+	bd := resolveEdgeRect(che.computed.BorderStyleWidth(), pctW)
+	mg := resolveEdgeRect(che.computed.Margin(), pctW)
+	// 边框盒高 = 外边距盒高 − 上下外边距
+	borderH := outerH - mg[eTop] - mg[eBottom]
+	if borderH < 0 {
+		borderH = 0
+	}
+	fontPx := 16
+	if s := resolveLen(che.computed.FontSize(), 0); s > 0 {
+		fontPx = s
+	}
+	fontAsc, fontDesc := 0, 0
+	if g != nil {
+		fontAsc, fontDesc = g.FontMetrics("", fontPx, che.computed.FontWeight() == FontWeightBold, che.computed.FontFamily())
+	}
+	tag := strings.ToLower(che.tagName)
+	typ := ""
+	if tag == "input" {
+		typ = strings.ToLower(che.GetAttribute("type"))
+	}
+	switch {
+	case tag == "input" && (typ == "radio" || typ == "checkbox"):
+		// 无内部文字的替换元素：基线在底边框边（CSS 2.1 §10.8.1）。
+		// Chrome 实测：radio/checkbox 的基线即盒底，盒顶位于行基线上方
+		// （盒高）处，故其顶边比行顶低（行 ascent − 盒高）。
+		d := 0
+		return mg[eTop] + borderH, d
+	case tag == "input" || tag == "select" || tag == "button":
+		// 单行控件：内部文字在内容盒内**垂直居中**（Chrome 实测），基线 =
+		// 上边框+上内边距+(内容高−字体行高)/2+字体 ascent。
+		contentH := borderH - bd[eTop] - bd[eBottom] - pd[eTop] - pd[eBottom]
+		lineH := fontAsc + fontDesc
+		textTop := pd[eTop]
+		if contentH > lineH {
+			textTop += (contentH - lineH) / 2
+		}
+		inner := bd[eTop] + textTop + fontAsc
+		if inner > borderH {
+			inner = borderH
+		}
+		return mg[eTop] + inner, borderH - inner
+	case tag == "textarea":
+		// 多行控件：Chrome 的 textarea 计算 overflow:auto，按 CSS 2.1 §10.8.1
+		// 「inline-block 无 in-flow 行盒，或 overflow 计算值不是 visible」时基线取
+		// **底外边距边**：盒顶位于基线上方整盒高处，行盒高 = 盒高 + strut descent，
+		// 盒顶与行顶对齐。实测（Chrome，雅黑 13px）p 含 36px textarea → p 高 39、
+		// textarea 与 p 顶对齐；若按"内部文字基线"（上边框+内边距+ascent）算，
+		// 行盒会矮 2px，且控件在行内下移，与浏览器差 4px。
+		return mg[eTop] + borderH, mg[eBottom]
+	default:
+		// 替换元素/行内元素：基线在盒底附近
+		d := fontDesc
+		if d > borderH {
+			d = borderH
+		}
+		return mg[eTop] + borderH - d, d
+	}
 }
 
 // layoutChildren 排布子节点。contentH 为父内容区的**可用**高度（auto 高度
@@ -559,7 +634,11 @@ type lineItem struct {
 func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, cy int, align TextAlign) (flowW, flowH int) {
 	cursorX := cx
 	cursorY := cy
-	lineH := 0
+	// 行盒按**基线**组织（与浏览器一致）：lineAsc/lineDesc 是本行各内联盒
+	// 基线以上/以下高度的最大值，行盒高度 = 二者之和，基线位于距行顶
+	// lineAsc 处。旧的实现是"取最大墨迹高 + 垂直居中"，与浏览器的
+	// line-height:normal 口径不同，逐行累积后整页错位数十像素。
+	lineAsc, lineDesc := 0, 0
 	var curLine []lineItem
 	maxRight := cx
 	// prevBlockMB：上一个相邻块级子的 margin-bottom；-1 = 尚无
@@ -577,14 +656,23 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		family = el.computed.FontFamily()
 	}
 
+	// strut：行盒的"撑杆"——块级自身的字体。浏览器每个行盒都含 strut，
+	// 即使行内全是别的字体（或整行为空），行盒也按 strut 计高。
+	strutAsc, strutDesc := 0, 0
+	if g != nil {
+		strutAsc, strutDesc = g.FontMetrics("", fontPx, bold, family)
+	}
+
 	// 行内格式上下文里的空格：CSS 把连续空白折叠为单个空格，且只保留在
 	// 行内内容之间。tokenizeText 会丢弃首尾空白，纯空白文本节点因此整体
 	// 消失（`<span>A</span> <span>B</span>` 的空格被吞）。这里用
 	// pendingSpace 把空格延迟到"下一个行内项"再落位：遇到块级子元素则
 	// 丢弃（CSS 移除行尾空格）。
-	spaceW, spaceH := 0, 0
+	spaceW := 0
+	spaceAsc, spaceDesc := strutAsc, strutDesc
 	if g != nil {
-		spaceW, spaceH = g.MeasureText(" ", fontPx, bold, family)
+		spaceW, _ = g.MeasureText(" ", fontPx, bold, family)
+		spaceAsc, spaceDesc = g.FontMetrics(" ", fontPx, bold, family)
 	}
 	pendingSpace := false
 	pendingTN := (*textNode)(nil)
@@ -602,10 +690,13 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			return
 		}
 		curLine = append(curLine, lineItem{tn: pendingTN, token: " ",
-			x: cursorX, y: cursorY, w: spaceW, h: spaceH})
+			x: cursorX, y: cursorY, w: spaceW, asc: spaceAsc, desc: spaceDesc})
 		cursorX += spaceW
-		if spaceH > lineH {
-			lineH = spaceH
+		if spaceAsc > lineAsc {
+			lineAsc = spaceAsc
+		}
+		if spaceDesc > lineDesc {
+			lineDesc = spaceDesc
 		}
 		if cursorX > maxRight {
 			maxRight = cursorX
@@ -624,22 +715,125 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				}
 			}
 		}
-		for _, it := range curLine {
-			if it.tn != nil {
-				y := it.y + (lineH-it.h)/2
-				it.tn.node.runs = append(it.tn.node.runs, textRun{
-					text: it.token, x: it.x + dx, y: y, w: it.w, h: it.h,
-				})
-			} else if it.el != nil && dx != 0 {
-				shiftInlineX(it.el, dx)
+		// strut（块级自身字体）参与行盒高度：浏览器每个行盒都含 strut，
+		// 行内盒比 strut 矮时行盒仍按 strut 计高。空行（无任何行内内容，
+		// 例如块级子元素前后）不计 strut——那种情形浏览器也不生成行盒。
+		asc, desc := lineAsc, lineDesc
+		if len(curLine) > 0 {
+			if asc < strutAsc {
+				asc = strutAsc
+			}
+			if desc < strutDesc {
+				desc = strutDesc
 			}
 		}
-		if lineH > 0 {
-			cursorY += lineH
+		for _, it := range curLine {
+			// 基线对齐：各内联盒的顶边 = 行基线 − 自身 ascent，
+			// 于是不同字号的文字共享同一基线（浏览器的行盒语义）。
+			y := it.y + (asc - it.asc)
+			if it.tn != nil {
+				it.tn.node.runs = append(it.tn.node.runs, textRun{
+					text: it.token, x: it.x + dx, y: y, w: it.w, h: it.asc + it.desc,
+				})
+			} else if it.el != nil {
+				if dy := y - it.y; dy != 0 {
+					shiftBox(it.el, 0, dy)
+				}
+				if dx != 0 {
+					shiftInlineX(it.el, dx)
+				}
+			}
 		}
-		lineH = 0
+		if asc+desc > 0 {
+			cursorY += asc + desc
+		}
+		lineAsc, lineDesc = 0, 0
 		curLine = curLine[:0]
 		cursorX = cx
+	}
+
+	// ---- white-space: pre ----
+	// <pre> 的内容按原样排版：每个空格/制表符各占一份宽度、换行强制结束
+	// 行盒、且不做软换行（浏览器 pre 里的长行是溢出而不是折行）。普通文本
+	// 走 tokenizeText 的「折叠空白 + 按宽换行」路径，两者不能混用。
+	preMode := el.computed != nil && el.computed.WhiteSpace() == WhiteSpacePre
+	preSpaceW := 0
+	if g != nil {
+		preSpaceW, _ = g.MeasureText(" ", fontPx, bold, family)
+	}
+	// addPreToken 把一段 pre 文本落到当前行：不做换行判断（pre 不软换行）。
+	addPreToken := func(tn *textNode, tok string, w int) {
+		if w < 0 {
+			w, _ = g.MeasureText(tok, fontPx, bold, family)
+		}
+		if w < 0 {
+			w = 0
+		}
+		asc, desc := g.FontMetrics(tok, fontPx, bold, family)
+		curLine = append(curLine, lineItem{tn: tn, token: tok,
+			x: cursorX, y: cursorY, w: w, asc: asc, desc: desc})
+		cursorX += w
+		if asc > lineAsc {
+			lineAsc = asc
+		}
+		if desc > lineDesc {
+			lineDesc = desc
+		}
+		if cursorX > maxRight {
+			maxRight = cursorX
+		}
+		prevBlockMB = -1
+		lastInline = true
+	}
+	breakPreLine := func() {
+		// 连续换行之间的空行也要占一个 strut 高（浏览器 pre 的空行不是 0 高）。
+		if len(curLine) == 0 {
+			lineAsc, lineDesc = strutAsc, strutDesc
+		}
+		flushLine()
+	}
+	addPreText := func(tn *textNode, raw string) {
+		// HTML 规范：<pre> 开标签后紧跟的第一个换行不属于内容。
+		if len(el.children) > 0 && HTMLElement(tn) == el.children[0] {
+			raw = strings.TrimPrefix(raw, "\r\n")
+			raw = strings.TrimPrefix(raw, "\n")
+		}
+		var word []rune
+		flushWord := func() {
+			if len(word) > 0 {
+				addPreToken(tn, string(word), -1)
+				word = word[:0]
+			}
+		}
+		for _, r := range raw {
+			switch {
+			case r == '\r':
+				// CRLF 只算一次换行（与 parsing 的换行归一一致）
+			case r == '\n':
+				flushWord()
+				breakPreLine()
+			case r == '\t':
+				flushWord()
+				if preSpaceW > 0 {
+					// 制表位：从行首起每 8 个空格宽对齐（Chrome pre 的 tab-size:8）
+					stop := preSpaceW * 8
+					w := stop - (cursorX-cx)%stop
+					addPreToken(tn, strings.Repeat(" ", 8), w)
+				}
+			case r == ' ':
+				flushWord()
+				addPreToken(tn, " ", preSpaceW)
+			default:
+				if r < 0x80 {
+					word = append(word, r)
+				} else {
+					// CJK 逐字成项，与其他路径的宽度测量口径一致。
+					flushWord()
+					addPreToken(tn, string(r), -1)
+				}
+			}
+		}
+		flushWord()
 	}
 
 	addItem := func(it lineItem) {
@@ -650,8 +844,11 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 		curLine = append(curLine, it)
 		cursorX += it.w
-		if it.h > lineH {
-			lineH = it.h
+		if it.asc > lineAsc {
+			lineAsc = it.asc
+		}
+		if it.desc > lineDesc {
+			lineDesc = it.desc
 		}
 		if cursorX > maxRight {
 			maxRight = cursorX
@@ -666,6 +863,10 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		if tnc, ok := child.(*textNode); ok {
 			tnc.node.runs = nil
 			raw := tnc.Text()
+			if preMode {
+				addPreText(tnc, raw)
+				continue
+			}
 			// 前导空白：上一项是行内内容时，该空格属于行内间隙，须保留。
 			if lastInline && hasLeadingBlank(raw) {
 				pendingSpace = true
@@ -679,11 +880,12 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				flushPendingSpace()
 			}
 			for _, tok := range toks {
-				tw, th := g.MeasureText(tok, fontPx, bold, family)
+				tw, _ := g.MeasureText(tok, fontPx, bold, family)
 				if tw <= 0 {
 					continue
 				}
-				addItem(lineItem{tn: tnc, token: tok, x: cursorX, y: cursorY, w: tw, h: th})
+				asc, desc := g.FontMetrics(tok, fontPx, bold, family)
+				addItem(lineItem{tn: tnc, token: tok, x: cursorX, y: cursorY, w: tw, asc: asc, desc: desc})
 			}
 			// 尾随空白：其后若还有行内内容则保留为间隙空格；若后面是块级
 			// 子元素则丢弃（CSS 移除行尾空格）。
@@ -705,6 +907,23 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		if che.computed.Position().isOutFlow() {
 			// absolute/fixed 脱离常规流：不推进游标、不占行高，
 			// 由 layoutPositioned 第二 pass 定位（嵌套脱流盒在其子树内同样被跳过）。
+			continue
+		}
+
+		// <br> 强制换行：结束当前行盒，自身盒宽为 0（Chrome 实测 w=0、
+		// h=行高）。不当作普通行内盒，否则会占一个空格宽并把后续文字
+		// 挤到同一行。
+		if strings.EqualFold(che.tagName, "br") {
+			// 位置取换行**前**的游标（Chrome 的 br 矩形落在行尾），
+			// flushLine 会把游标复位到行首，故先记下。
+			bx, by := cursorX, cursorY
+			flushLine()
+			che.setX(bx)
+			che.setY(by)
+			che.setWidth(0)
+			che.setHeight(strutAsc + strutDesc)
+			prevBlockMB = -1
+			lastInline = false
 			continue
 		}
 
@@ -796,7 +1015,28 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			flushLine()
 			ow, oh = layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH)
 		}
-		it := lineItem{x: cursorX, y: cursorY, w: maxInt(ow, 1), h: maxInt(oh, 1), el: che}
+		asc, desc := inlineBoxBaseline(g, che, maxInt(oh, 1))
+		// 上下标：Chrome 实测（12/16/32px 三档、Arial/雅黑/Courier 同值）把
+		// 基线按「上方 1px + 父字号/3」「下方 1px + 父字号/5」位移，位移量
+		// 与字体无关。上标抬高行盒的 ascent、下标压低 descent——这正是含
+		// sub/sup 的段落比普通段落高的原因（Chrome 里 p 高 48.52 而非 42）。
+		switch strings.ToLower(che.tagName) {
+		case "sup":
+			shift := fontPx/3 + 1
+			asc += shift
+			desc -= shift
+		case "sub":
+			shift := fontPx/5 + 1
+			asc -= shift
+			desc += shift
+		}
+		if asc < 0 {
+			asc = 0
+		}
+		if desc < 0 {
+			desc = 0
+		}
+		it := lineItem{x: cursorX, y: cursorY, w: maxInt(ow, 1), asc: asc, desc: desc, el: che}
 		addItem(it)
 	}
 

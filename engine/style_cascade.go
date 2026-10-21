@@ -1,6 +1,9 @@
 package engine
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // 级联来源序号：同优先级内按来源升序应用（后者覆盖前者）。
 const (
@@ -18,7 +21,6 @@ type declCandidate struct {
 	order     int // 同特异度内的源码顺序
 }
 
-// filterByImportant 按 !important 标记过滤候选（保持原顺序）。
 // resolveStylesTree 为整棵树计算级联后的最终样式（写入 base.computed）。
 // 优先级：UA 样式表 < 文档样式表（特异度+声明顺序） < 内联 style 属性；
 // color/font-size/font-family/font-weight/text-align/text-decoration 沿父链继承。
@@ -41,6 +43,12 @@ func resolveStylesTree(e HTMLElement, parentBase *htmlElement, author *Styleshee
 		comp.SetFontWeight(pc.FontWeight())
 		comp.SetTextAlign(pc.TextAlign())
 		comp.SetTextDecoration(pc.TextDecoration())
+		comp.SetWhiteSpace(pc.WhiteSpace())
+		if pcs, ok := pc.(*cssStyleDeclaration); ok {
+			if cs, ok := comp.(*cssStyleDeclaration); ok {
+				cs.fontSizeExplicit = pcs.fontSizeExplicit
+			}
+		}
 	} else {
 		comp.SetColor(NewColor(0, 0, 0, 255))
 		comp.SetFontSize(NewSize(SIZE_PIXEL, 16, 0))
@@ -73,11 +81,54 @@ func resolveStylesTree(e HTMLElement, parentBase *htmlElement, author *Styleshee
 	if comp.Color() == nil {
 		comp.SetColor(NewColor(0, 0, 0, 255))
 	}
+	// Chrome：「font-family 落到 monospace 通用族 + 字号仍是默认值（作者从未
+	// 显式声明过 font-size）」时用默认等宽字号 13px，而非正文默认 16px。
+	// 实测（Chrome headless）：body 不写字号、.f-mono{font-family:monospace}
+	// 的计算字号是 13px；祖先显式 font-size:16px 时保持 16px。缺这条规则
+	// 时整行字大一号、行高多 4px，与浏览器对照会差一整行。
+	sizeDeclared := false
+	for _, cands := range [][]declCandidate{uaCands, authorCands, inlineCands} {
+		for _, c := range cands {
+			if c.decl.prop == "font-size" {
+				sizeDeclared = true
+				break
+			}
+		}
+	}
+	if cs, ok := comp.(*cssStyleDeclaration); ok {
+		if !sizeDeclared && !cs.fontSizeExplicit && isMonospaceGeneric(comp.FontFamily()) {
+			comp.SetFontSize(NewSize(SIZE_PIXEL, 13, 0))
+		}
+		cs.fontSizeExplicit = cs.fontSizeExplicit || sizeDeclared
+	}
+	// font-size 百分比按**父元素计算字号**解析为像素（CSS 2.1 §10.2）。
+	// 必须在级联结束后做：百分比是相对值，布局期再解析拿不到父级的最终
+	// 字号；这里落成像素后，度量/绘制沿用的都是同一份绝对值。
+	if fs := comp.FontSize(); fs != nil && fs.Type() == SIZE_PERCENT {
+		base := 16
+		if parentBase != nil && parentBase.computed != nil {
+			if p := resolveLen(parentBase.computed.FontSize(), 0); p > 0 {
+				base = p
+			}
+		}
+		px := int(float64(base)*float64(fs.Percent())/100 + 0.5)
+		comp.SetFontSize(NewSize(SIZE_PIXEL, px, 0))
+	}
 	base.computed = comp
 
 	for _, child := range base.children {
 		resolveStylesTree(child, base, author)
 	}
+}
+
+// isMonospaceGeneric 判断 font-family 的**首项**是否为等宽通用族。
+// 只看首项：Chrome 的「默认等宽字号」只在最终用到的字体就是等宽通用族时
+// 生效——"Courier New, monospace" 首项是具名字体，计算字号保持继承值
+// （实测 16px）。引擎拿不到字体可用性，用首项近似。
+func isMonospaceGeneric(family string) bool {
+	first := strings.Split(family, ",")[0]
+	name := strings.ToLower(strings.Trim(strings.TrimSpace(first), `"'`))
+	return name == "monospace" || name == "ui-monospace"
 }
 
 // filterByImportant 按 !important 标记过滤候选（保持原顺序）。
