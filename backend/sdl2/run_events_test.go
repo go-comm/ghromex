@@ -10,6 +10,8 @@ import (
 	"time"
 	"unsafe"
 
+	"golang.org/x/sys/windows"
+
 	"github.com/go-comm/ghromex/engine"
 )
 
@@ -113,6 +115,8 @@ func TestRunConsumesSelectionKeys(t *testing.T) {
 	}
 	defer win.Close()
 
+	skipIfClipboardBusy(t)
+
 	prev := clipboardText()
 	defer writeClipboardRaw(prev)
 
@@ -162,6 +166,8 @@ func TestRunConsumesInjectedPaste(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer win.Close()
+
+	skipIfClipboardBusy(t)
 
 	prev := clipboardText()
 	defer writeClipboardRaw(prev)
@@ -335,6 +341,23 @@ func pushKeyDownMods(sym uint32, mod uint16) {
 	buf[24] = byte(mod)
 	buf[25] = byte(mod >> 8)
 	pushEvent(&buf)
+}
+
+// 剪贴板占用探测用的系统调用：Windows 的剪贴板是全局独占资源，某个
+// 常驻程序打开它却没关闭时，别的进程读写都会失败。
+var (
+	procOpenClipboard  = windows.NewLazySystemDLL("user32.dll").NewProc("OpenClipboard")
+	procCloseClipboard = windows.NewLazySystemDLL("user32.dll").NewProc("CloseClipboard")
+)
+
+// skipIfClipboardBusy 在系统剪贴板被别的进程占着时跳过测试。
+func skipIfClipboardBusy(t *testing.T) {
+	t.Helper()
+	h, _, _ := procOpenClipboard.Call(0)
+	if h == 0 {
+		t.Skip("系统剪贴板被其它进程占用，跳过剪贴板测试")
+	}
+	procCloseClipboard.Call(h)
 }
 
 // clipboardText 读回系统剪贴板（测试用）。走生产的 readClipboardText：

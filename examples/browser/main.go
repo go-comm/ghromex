@@ -1,9 +1,10 @@
 // 示例：一个最小的本地浏览器。
 //
-// 起始页用 go:embed 打进二进制；地址栏与后退/前进/刷新/首页按钮由
-// installChrome 注入到每一份加载的文档里。引擎没有独立的窗口 chrome 层，
-// 所以工具条只能作为文档的一部分：position:fixed 让它固定在顶部，换页时
-// 重新注入，因此打开任何页面（包括错误页）都保留同一套导航控件。
+// 起始页用 go:embed 打进二进制；地址栏、后退/前进/刷新/首页按钮与底部
+// 状态栏由 installChrome 注入到每一份加载的文档里。引擎没有独立的窗口
+// chrome 层，所以外壳只能作为文档的一部分：position:fixed 让工具条固定
+// 在顶部，换页时重新注入，因此打开任何页面（包括错误页）都保留同一套
+// 导航控件与状态栏。
 //
 // 点击链接或地址栏「打开」都由本程序读取目标文件并替换窗口文档；相对路径
 // 按当前页面所在目录解析，file:// 也可用；http(s):// 不联网，改为显示
@@ -34,14 +35,16 @@ var homeHTML []byte
 const (
 	// homeURL 是虚拟地址：起始页来自内嵌内容，磁盘上不一定有对应文件。
 	homeURL = "about:home"
-	// chromeHeight 是工具条总高，body 的 padding-top 比它多留 8px，
-	// 避免页面首行紧贴工具条。
-	chromeHeight = 40
+	// chromeHeight 是顶部工具条高度，statusHeight 是底部状态栏高度。
+	chromeHeight = 44
+	statusHeight = 26
 	// 工具条控件的绝对坐标与尺寸（见 installChrome）。
 	chromeTop         = 6
-	chromeLeft        = 8
-	chromeButtonWidth = 44
+	chromeLeft        = 10
+	chromeButtonWidth = 40
 	chromeButtonGap   = 6
+	// chromeGoWidth 是地址栏右侧「打开」按钮的宽度。
+	chromeGoWidth = 64
 )
 
 func main() {
@@ -305,70 +308,123 @@ func (b *browserApp) showMessage(title, subject, detail string) {
 	b.installChrome(doc)
 }
 
-// installChrome 在文档顶部注入固定的浏览器工具条。
+// installChrome 在文档里注入浏览器外壳：顶部工具条 + 底部状态栏。
 //
-// 工具条是文档的一部分（引擎没有窗口 chrome 层）：position:fixed 让它
-// 在滚动时留在顶部，z-index 拉高保证盖住页面内容；body 加 padding-top
-// 给内容让位。每次换文档都重新注入，所以地址栏和按钮在任意页面都在。
+// 外壳是文档的一部分（引擎没有窗口 chrome 层）：工具条 position:fixed，
+// 滚动时留在顶部，z-index 拉高保证盖住页面内容。每次换文档都重新注入，
+// 所以地址栏和按钮在任意页面都在。
+//
+// 给内容让位用的是插在页面内容之前的一个占位块，而不是改 body 的
+// margin/padding：
+//   - 改 padding-top 会覆盖页面自己的内边距（很多示例页都有）；
+//   - 改 margin-top 更糟：body 的盒子会被推到工具条下方，命中测试认为
+//     固定工具条不在 body 里，地址栏就点不到了。
+//
+// 引擎没有 insertBefore，占位块要排到最前面只能把原有子节点摘下来再
+// 按原序接回去。
 func (b *browserApp) installChrome(doc engine.HTMLDocument) {
 	body := doc.Body()
+	doc.AddStylesheetText(chromeCSS)
+
 	bar := doc.CreateElement("div")
 	bar.SetAttribute("id", "ghromex-chrome")
-	bar.SetAttribute("style",
-		fmt.Sprintf("position:fixed;top:0;left:0;width:100%%;height:%dpx;"+
-			"background-color:#0F172A;z-index:1000", chromeHeight))
+	bar.SetAttribute("class", "gh-bar")
 
 	// 控件绝对定位：引擎的 inline-block 按基线对齐，按钮和输入框混排时
 	// 会互相顶偏；固定坐标更可控，也便于地址栏占满剩余宽度。
-	back := b.chromeButton(doc, "ghromex-back", "后退", chromeLeft, b.goBack)
-	forward := b.chromeButton(doc, "ghromex-forward", "前进", chromeLeft+chromeButtonWidth+chromeButtonGap, b.goForward)
-	refresh := b.chromeButton(doc, "ghromex-refresh", "刷新", chromeLeft+2*(chromeButtonWidth+chromeButtonGap), b.refresh)
-	home := b.chromeButton(doc, "ghromex-home", "首页", chromeLeft+3*(chromeButtonWidth+chromeButtonGap), b.showHome)
+	// 没有可后退/前进的页面时按钮置灰（样式类不同，但仍然可点，点了无事发生）。
+	back := b.chromeButton(doc, "ghromex-back", "←", chromeLeft, b.index <= 0, b.goBack)
+	forward := b.chromeButton(doc, "ghromex-forward", "→", chromeLeft+chromeButtonWidth+chromeButtonGap,
+		b.index+1 >= len(b.history), b.goForward)
+	refresh := b.chromeButton(doc, "ghromex-refresh", "↻", chromeLeft+2*(chromeButtonWidth+chromeButtonGap),
+		false, b.refresh)
+	home := b.chromeButton(doc, "ghromex-home", "⌂", chromeLeft+3*(chromeButtonWidth+chromeButtonGap),
+		false, b.showHome)
 
 	inputLeft := chromeLeft + 4*(chromeButtonWidth+chromeButtonGap)
-	width := b.win.ViewportWidth() - inputLeft - (chromeButtonWidth + chromeButtonGap + chromeLeft)
+	width := b.win.ViewportWidth() - inputLeft - (chromeGoWidth + chromeButtonGap + chromeLeft)
 	if width < 240 {
 		width = 240
 	}
 	addr := doc.CreateElement("input")
 	addr.SetAttribute("id", "ghromex-addr")
+	addr.SetAttribute("class", "gh-addr")
 	addr.SetAttribute("value", b.current)
-	addr.SetAttribute("style", fmt.Sprintf("position:absolute;top:%dpx;left:%dpx;height:28px;width:%dpx;"+
-		"padding:0 8px;border:1px solid #334155;border-radius:4px;background-color:#0F172A;"+
-		"color:#E2E8F0;box-sizing:border-box;z-index:1001", chromeTop, inputLeft, width))
+	addr.SetAttribute("style", fmt.Sprintf("left:%dpx;width:%dpx", inputLeft, width))
 
-	open := b.chromeButton(doc, "ghromex-go", "打开", inputLeft+width+chromeButtonGap, func() {
+	open := doc.CreateElement("button")
+	open.SetAttribute("id", "ghromex-go")
+	open.SetAttribute("class", "gh-go")
+	open.SetAttribute("style", fmt.Sprintf("left:%dpx;width:%dpx", inputLeft+width+chromeButtonGap, chromeGoWidth))
+	open.SetText("打开")
+	open.OnClick(func(*engine.MouseEvent) {
 		b.gotoAddress(addr.GetAttribute("value"))
 	})
 
 	bar.AppendChild(back, forward, refresh, home, addr, open)
 	body.AppendChild(bar)
 
-	// 只在页面原有内联样式后面追加 padding-top，保留作者写的其他内联样式；
-	// 页面的 <style> 规则不受影响（内联的 padding-top 优先）。
-	s := body.GetAttribute("style")
-	if s != "" {
-		s += ";"
+	// 底部状态栏：左侧是页面标题，右侧是说明。fixed 定位，不占文档流。
+	status := doc.CreateElement("div")
+	status.SetAttribute("id", "ghromex-status")
+	status.SetAttribute("class", "gh-status")
+	title := doc.CreateElement("span")
+	title.SetAttribute("class", "gh-status-title")
+	title.SetText(pageTitle(doc))
+	hint := doc.CreateElement("span")
+	hint.SetAttribute("class", "gh-status-hint")
+	hint.SetText("只浏览本地文件 · 不联网")
+	status.AppendChild(title, hint)
+	body.AppendChild(status)
+
+	// 状态栏是 fixed，会盖住页面底部：末尾补一个占位块把内容托起来。
+	pad := doc.CreateElement("div")
+	pad.SetAttribute("id", "ghromex-spacer-bottom")
+	pad.SetAttribute("class", "gh-spacer-bottom")
+	body.AppendChild(pad)
+
+	// 顶部占位块要排在页面内容之前：把原有子节点摘下来，插入占位块后
+	// 再按原序接回去（Children 返回的是底层数组，RemoveChild 会就地
+	// 改动它，所以先复制一份）。
+	children := append([]engine.HTMLElement(nil), body.Children()...)
+	top := doc.CreateElement("div")
+	top.SetAttribute("id", "ghromex-spacer-top")
+	top.SetAttribute("class", "gh-spacer-top")
+	for _, c := range children {
+		body.RemoveChild(c)
 	}
-	body.SetAttribute("style", s+fmt.Sprintf("padding-top:%dpx", chromeHeight+8))
+	body.AppendChild(top)
+	if len(children) > 0 {
+		body.AppendChild(children[0], children[1:]...)
+	}
+}
+
+// pageTitle 取页面标题（head > title），没有标题时给个占位文案。
+func pageTitle(doc engine.HTMLDocument) string {
+	if t := strings.TrimSpace(doc.Title()); t != "" {
+		return t
+	}
+	return "无标题"
 }
 
 // chromeButton 创建一个工具条按钮并放到工具条的绝对坐标 left。工具条在
-// 每份新文档上重建，因此事件处理也在这里按当前状态重新绑定。
-func (b *browserApp) chromeButton(doc engine.HTMLDocument, id, label string, left int, onClick func()) engine.HTMLElement {
+// 每份新文档上重建，因此事件处理也在这里按当前状态重新绑定。off 为真时
+// 按钮置灰（没有可后退/前进的页面）。
+func (b *browserApp) chromeButton(doc engine.HTMLDocument, id, label string, left int, off bool, onClick func()) engine.HTMLElement {
 	btn := doc.CreateElement("button")
 	btn.SetAttribute("id", id)
-	// 引擎按内容顶部排按钮文字，固定高度时略偏上；padding-top 补足视觉居中。
-	btn.SetAttribute("style", fmt.Sprintf("position:absolute;top:%dpx;left:%dpx;width:%dpx;height:28px;"+
-		"padding:5px 8px 0 8px;border:1px solid #334155;border-radius:4px;background-color:#1E293B;"+
-		"color:#E2E8F0;font-size:13px;box-sizing:border-box;z-index:1001", chromeTop, left, chromeButtonWidth))
+	btn.SetAttribute("class", "gh-btn")
+	if off {
+		btn.SetAttribute("class", "gh-btn gh-btn-off")
+	}
+	btn.SetAttribute("style", fmt.Sprintf("left:%dpx", left))
 	btn.SetText(label)
 	btn.OnClick(func(*engine.MouseEvent) { onClick() })
 	return btn
 }
 
-// messagePage 生成提示页。subject/detail 来自地址与错误信息，必须转义，
-// 否则文件名里的 <、& 会被当成标签解析。
+// messagePage 生成提示页（外部链接 / 打不开的文件）。subject/detail 来自
+// 地址与错误信息，必须转义，否则文件名里的 <、& 会被当成标签解析。
 func messagePage(title, subject, detail string, canBack bool) string {
 	back := ""
 	if canBack {
@@ -380,18 +436,62 @@ func messagePage(title, subject, detail string, canBack bool) string {
 <meta charset="utf-8">
 <title>Ghromex 浏览器 · ` + html.EscapeString(title) + `</title>
 <style>
-	body { margin: 0; padding: 48px; background-color: #F8FAFC; color: #0F172A; font-family: system-ui; font-size: 14px; }
-	h1 { margin: 0 0 14px 0; font-size: 24px; }
-	.subject { margin: 0 0 10px 0; color: #1D4ED8; font-family: monospace; font-size: 13px; }
-	.detail { margin: 0 0 18px 0; color: #475569; }
+	body {
+		margin: 0;
+		padding: 56px 32px;
+		background-color: #F1F5F9;
+		color: #0F172A;
+		font-family: system-ui;
+		font-size: 14px;
+		text-align: center;
+	}
+	.card {
+		display: inline-block;
+		vertical-align: top;
+		width: 520px;
+		padding: 32px 32px 28px 32px;
+		background-color: #FFFFFF;
+		border: 1px solid #E2E8F0;
+		border-radius: 14px;
+		box-sizing: border-box;
+		text-align: left;
+	}
+	.badge {
+		display: inline-block;
+		width: 36px;
+		height: 36px;
+		border-radius: 10px;
+		background-color: #FEF3C7;
+		border: 1px solid #FDE68A;
+		color: #B45309;
+		font-size: 18px;
+		font-weight: bold;
+		text-align: center;
+	}
+	h1 { margin: 16px 0 12px 0; font-size: 22px; }
+	.subject {
+		margin: 0 0 10px 0;
+		padding: 8px 10px;
+		background-color: #F8FAFC;
+		border: 1px solid #E2E8F0;
+		border-radius: 8px;
+		color: #1D4ED8;
+		font-family: monospace;
+		font-size: 13px;
+	}
+	.detail { margin: 0 0 22px 0; color: #475569; }
+	.nav { margin: 0; }
 	.nav a { color: #1D4ED8; }
 </style>
 </head>
 <body>
-	<h1>` + html.EscapeString(title) + `</h1>
-	<p class="subject">` + html.EscapeString(subject) + `</p>
-	<p class="detail">` + html.EscapeString(detail) + `</p>
-	<p class="nav"><a href="` + homeURL + `">回到起始页</a>` + back + `</p>
+	<div class="card">
+		<span class="badge">!</span>
+		<h1>` + html.EscapeString(title) + `</h1>
+		<p class="subject">` + html.EscapeString(subject) + `</p>
+		<p class="detail">` + html.EscapeString(detail) + `</p>
+		<p class="nav"><a href="` + homeURL + `">回到起始页</a>` + back + `</p>
+	</div>
 </body>
 </html>
 `

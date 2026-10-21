@@ -1,68 +1,173 @@
 <!doctype html>
+<!--
+  Ghromex 浏览器 · 起始页
+  位置：examples/browser/index.html
+  运行：go run ./examples/browser
+
+  页面目标：像一个真正的「新标签页」——品牌区 + 示例入口卡片 + 边界行为说明。
+  引擎不支持 flex/grid、float、box-shadow、渐变与单边 border，因此：
+    - 卡片网格用 inline-block（必须紧邻书写，否则空白文本会变成真实的
+      行内空格，把卡片挤到下一行）；
+    - 分隔线用一条 1px 高的 div，而不是 border-bottom；
+    - 层次只靠纯色与 border-radius 拉开。
+-->
 <html>
 <head>
 <meta charset="utf-8">
 <title>Ghromex 浏览器 · 起始页</title>
 <style>
-	body { margin: 0; padding: 24px 0 16px 0; background-color: #F1F5F9; color: #0F172A; font-family: system-ui; font-size: 14px; }
+	/* ── 全局画布 ─────────────────────────────────────────────── */
+	body {
+		margin: 0;
+		padding: 0 0 28px 0;
+		background-color: #F1F5F9;
+		color: #0F172A;
+		font-family: system-ui;
+		font-size: 14px;
+	}
 
-	.hero { padding: 0 32px; }
-	.hero h1 { margin: 0 0 6px 0; font-size: 22px; }
-	.hero p { margin: 0; color: #475569; }
+	/* ── 品牌区 ───────────────────────────────────────────────── */
+	.hero { padding: 44px 40px 30px 40px; background-color: #FFFFFF; }
+	.hero-badge {
+		display: inline-block;
+		padding: 3px 10px;
+		background-color: #EFF6FF;
+		border: 1px solid #BFDBFE;
+		border-radius: 999px;
+		color: #1D4ED8;
+		font-size: 12px;
+	}
+	.hero h1 { margin: 14px 0 8px 0; font-size: 30px; }
+	.hero p { margin: 0; color: #475569; font-size: 15px; }
 
-	.hint { margin: 12px 32px 0 32px; padding: 10px 12px; background-color: #FFFFFF;
-		border: 1px solid #E2E8F0; border-radius: 6px; color: #64748B; font-size: 12px; }
+	.rule { height: 1px; background-color: #E2E8F0; }
 
-	.list { margin: 16px 32px 0 32px; }
-	.card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;
-		padding: 14px 16px; margin-bottom: 8px; }
-	.card a { color: #1D4ED8; font-size: 16px; }
-	.card p { margin: 6px 0 0 0; color: #475569; }
-	.card .path { color: #94A3B8; font-family: monospace; font-size: 12px; }
+	/* ── 说明条 ───────────────────────────────────────────────── */
+	.hint {
+		margin: 22px 40px 0 40px;
+		padding: 14px 16px;
+		background-color: #FFFFFF;
+		border: 1px solid #E2E8F0;
+		border-radius: 10px;
+		color: #475569;
+	}
+	.hint b { color: #0F172A; }
+	.hint code {
+		padding: 1px 5px;
+		background-color: #F1F5F9;
+		border-radius: 4px;
+		color: #1D4ED8;
+		font-size: 13px;
+	}
 
-	.foot { margin: 20px 32px 0 32px; padding-top: 14px; border-top: 1px solid #E2E8F0; color: #475569; }
-	.foot h2 { font-size: 14px; margin: 0 0 8px 0; }
-	.foot li { margin: 4px 0; }
-	.foot a { color: #1D4ED8; }
+	/* ── 卡片网格 ─────────────────────────────────────────────── */
+	.section { margin: 30px 40px 0 40px; }
+	.section-title { margin: 0 0 12px 0; font-size: 13px; color: #64748B; }
+	.cards { font-size: 0; }
+	.card {
+		display: inline-block;
+		vertical-align: top;
+		width: 216px;
+		/* 引擎不支持 vertical-align，inline-block 按基线对齐：卡片高度不一时
+		   顶边会错开，所以给固定高度（内容按顶边排）。 */
+		height: 132px;
+		margin: 0 12px 12px 0;
+		padding: 16px 16px 18px 16px;
+		background-color: #FFFFFF;
+		border: 1px solid #E2E8F0;
+		border-radius: 12px;
+		box-sizing: border-box;
+	}
+	.card-badge {
+		display: inline-block;
+		width: 30px;
+		height: 30px;
+		border-radius: 9px;
+		color: #FFFFFF;
+		font-size: 15px;
+		font-weight: bold;
+		text-align: center;
+	}
+	.card h3 { margin: 12px 0 6px 0; font-size: 16px; }
+	.card p { margin: 0 0 10px 0; color: #475569; font-size: 13px; }
+	.card .path { color: #94A3B8; font-size: 12px; }
+	.card a { color: #0F172A; text-decoration: none; }
+
+	/* ── 边界行为 ─────────────────────────────────────────────── */
+	.edge {
+		margin: 10px 40px 0 40px;
+		padding: 16px 18px;
+		background-color: #FFFFFF;
+		border: 1px solid #E2E8F0;
+		border-radius: 10px;
+	}
+	.edge h3 { margin: 0 0 10px 0; font-size: 14px; }
+	.edge li { margin: 6px 0; color: #475569; }
+	.edge a { color: #1D4ED8; }
+
+	/* ── 页脚 ─────────────────────────────────────────────────── */
+	.foot {
+		margin: 26px 40px 0 40px;
+		padding-top: 16px;
+		color: #94A3B8;
+		font-size: 12px;
+	}
+	.foot b { color: #64748B; }
 </style>
 </head>
 <body>
 	<div class="hero">
-		<h1>Ghromex 浏览器</h1>
-		<p>最小本地浏览器示例：顶部工具条固定，切换到任意页面后依然存在</p>
+		<span class="hero-badge">Ghromex 引擎</span>
+		<h1>本地浏览器</h1>
+		<p>一个只浏览本地文件的迷你浏览器：工具条固定在顶部，换页后依然存在。</p>
+	</div>
+	<div class="rule"></div>
+
+	<p class="hint">
+		在顶部地址栏输入本地 HTML 路径（相对路径以<b>当前页面所在目录</b>为基准，也支持
+		<code>file://</code> 绝对路径），点「打开」即可；或直接点击下面的卡片。
+		外部链接与缺失文件都会显示提示页，工具条与导航按钮照常可用。
+	</p>
+
+	<div class="section">
+		<p class="section-title">示例页面</p>
+		<div class="cards">
+			<div class="card">
+				<span class="card-badge" style="background-color:#2563EB;">登</span>
+				<h3><a href="../login/index.html">登录页</a></h3>
+				<p>按钮交互与状态更新</p>
+				<p class="path">../login/index.html</p>
+			</div><div class="card">
+				<span class="card-badge" style="background-color:#059669;">表</span>
+				<h3><a href="../form/index.html">常规表单</a></h3>
+				<p>定位、层叠与盒模型</p>
+				<p class="path">../form/index.html</p>
+			</div><div class="card">
+				<span class="card-badge" style="background-color:#7C3AED;">UA</span>
+				<h3><a href="../ua/index.html">原生 UA 表单</a></h3>
+				<p>零作者 CSS 的表单控件</p>
+				<p class="path">../ua/index.html</p>
+			</div><div class="card">
+				<span class="card-badge" style="background-color:#EA580C;">滚</span>
+				<h3><a href="../scroll/index.html">滚动与裁剪</a></h3>
+				<p>文档滚动与 overflow 容器</p>
+				<p class="path">../scroll/index.html</p>
+			</div>
+		</div>
 	</div>
 
-	<p class="hint">地址栏输入本地 HTML 路径（相对路径以当前页面目录为基准，也支持 file://）后点「打开」，或直接点击下面的链接。工具条由示例程序注入到每一份文档，外部链接与缺失文件也会保留地址栏和导航按钮。</p>
-
-	<div class="list">
-		<div class="card">
-			<a href="../login/index.html">登录页</a>
-			<p>登录/重置按钮交互与状态文本更新</p>
-			<p class="path">../login/index.html</p>
-		</div>
-		<div class="card">
-			<a href="../form/index.html">常规表单</a>
-			<p>员工登记表：定位、层叠、盒模型与可输入控件</p>
-			<p class="path">../form/index.html</p>
-		</div>
-		<div class="card">
-			<a href="../ua/index.html">原生 UA 与常用标签</a>
-			<p>零作者 CSS 的表单控件与常用标签，可与 Chrome 直接对照</p>
-			<p class="path">../ua/index.html</p>
-		</div>
-		<div class="card">
-			<a href="../scroll/index.html">滚动与裁剪</a>
-			<p>文档级滚动、overflow 容器、textarea 滚轮与 wheel 事件回显</p>
-			<p class="path">../scroll/index.html</p>
+	<div class="section">
+		<div class="edge">
+			<h3>试试边界行为</h3>
+			<ul>
+				<li><a href="https://example.com">外部链接</a>：本示例不联网，改为显示提示页（工具条保留）</li>
+				<li><a href="missing.html">不存在的页面</a>：显示错误页，可用顶部「后退」返回</li>
+			</ul>
 		</div>
 	</div>
 
-	<div class="foot">
-		<h2>试试边界行为</h2>
-		<ul>
-			<li><a href="https://example.com">外部链接</a>：不联网，显示提示页（工具条保留）</li>
-			<li><a href="missing.html">不存在的页面</a>：显示错误页，可用顶部「后退」返回</li>
-		</ul>
-	</div>
+	<p class="foot">
+		由 <b>Ghromex</b> 引擎渲染（纯 Go，无 CGO）· 仅浏览本地文件，不联网
+	</p>
 </body>
 </html>
