@@ -455,6 +455,12 @@ func roundedSpanX(bx, by, bw, bh, r, y int) (x0, x1 int, ok bool) {
 }
 
 // fillRoundedRect 填充圆角矩形（带边缘 AA）；r=0 时保持平面单次填充的快速路径。
+//
+// 覆盖率只���**弧边**上逐点算（每像素一次 math.Hypot，很贵）：圆角盒的
+// SDF（见 coverageAt）决定了——上下各 r 行之外的整行必为全覆盖，中间行
+// 一次实色填充即可；角行里也只有左右两角 |x-角| ≤ r 的窄带可能有部分
+// 覆盖，中段 [bx+r, bx+bw-r-1] 必为全覆盖。整盒逐点算会让每帧的绘制
+// 成本翻几倍（profile：paintCoverage 占绘制耗时 57%，圆角卡片多的页面尤甚）。
 func fillRoundedRect(g Graphics, bx, by, bw, bh, r int, c Color) {
 	if bw <= 0 || bh <= 0 {
 		return
@@ -468,10 +474,30 @@ func fillRoundedRect(g Graphics, bx, by, bw, bh, r int, c Color) {
 		if !ok {
 			continue
 		}
+		// 中间行：弧只存在于上下各 r 行，整行一次实色填充。
+		if y-by >= r && by+bh-1-y >= r {
+			g.DrawColor(bx, y, bw, 1, c)
+			continue
+		}
 		py := float64(y) + 0.5
 		lo := maxInt(bx, x0-2)
 		hi := minInt(bx+bw-1, x1+2)
-		paintCoverage(g, y, lo, hi, c, func(x int) float64 {
+		// 角上窄带逐点算覆盖率；中段必为全覆盖（SDF 推导：qx<0 时
+		// d = qy - r ≤ -0.5），实色一次画完。
+		leftEnd := minInt(hi, bx+r-1)
+		rightStart := maxInt(lo, bx+bw-r)
+		if rightStart <= leftEnd+1 {
+			// 盒太窄（没有中段）：整段逐点算。
+			paintCoverage(g, y, lo, hi, c, func(x int) float64 {
+				return coverageAt(float64(x)+0.5, py, bx, by, bw, bh, r)
+			})
+			continue
+		}
+		paintCoverage(g, y, lo, leftEnd, c, func(x int) float64 {
+			return coverageAt(float64(x)+0.5, py, bx, by, bw, bh, r)
+		})
+		g.DrawColor(leftEnd+1, y, rightStart-leftEnd-1, 1, c)
+		paintCoverage(g, y, rightStart, hi, c, func(x int) float64 {
 			return coverageAt(float64(x)+0.5, py, bx, by, bw, bh, r)
 		})
 	}
