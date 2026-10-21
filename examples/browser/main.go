@@ -141,6 +141,12 @@ type browserApp struct {
 	current string   // 当前地址：homeURL 或文件路径
 	history []string // 浏览历史，元素含义同 current
 	index   int      // 当前页在 history 中的下标；初始为 -1（空历史）
+
+	// 工具条里的地址栏与「打开」按钮：宽度/位置都跟着视口宽度走，
+	// 窗口最大化或还原后要重排（见 syncChrome）。
+	addrIn        engine.HTMLElement
+	goBtn         engine.HTMLElement
+	lastAddrWidth int
 }
 
 // opener 是浏览器用到的窗口能力；*browser.Window 满足它，测试可以用无头
@@ -281,6 +287,7 @@ func (b *browserApp) show(addr, dir string, data []byte, commit bool) bool {
 		return false
 	}
 	doc.SetOnNavigate(b.gotoAddress)
+	doc.SetOnChanged(b.onChanged)
 	b.installChrome(doc)
 	return true
 }
@@ -305,6 +312,7 @@ func (b *browserApp) showMessage(title, subject, detail string) {
 		return
 	}
 	doc.SetOnNavigate(b.gotoAddress)
+	doc.SetOnChanged(b.onChanged)
 	b.installChrome(doc)
 }
 
@@ -357,6 +365,8 @@ func (b *browserApp) installChrome(doc engine.HTMLDocument) {
 	open.SetAttribute("class", "gh-go")
 	open.SetAttribute("style", fmt.Sprintf("left:%dpx;width:%dpx", inputLeft+width+chromeButtonGap, chromeGoWidth))
 	open.SetText("打开")
+	b.addrIn, b.goBtn = addr, open
+	b.lastAddrWidth = width
 	open.OnClick(func(*engine.MouseEvent) {
 		b.gotoAddress(addr.GetAttribute("value"))
 	})
@@ -397,6 +407,35 @@ func (b *browserApp) installChrome(doc engine.HTMLDocument) {
 	if len(children) > 0 {
 		body.AppendChild(children[0], children[1:]...)
 	}
+}
+
+// onChanged 是文档变更回调：视口尺寸变化时重排工具条。
+//
+// 引擎在「视口尺寸变化」时也会补一次变更通知（窗口缩放不改文档内容，
+// 只靠内容变更收不到信号），因此这里统一处理两种来源。
+func (b *browserApp) onChanged() {
+	b.syncChrome()
+}
+
+// syncChrome 按当前视口宽度重排工具条里的地址栏与「打开」按钮。
+//
+// 两者都贴着窗口右边缘，宽度是算出来的：窗口最大化/还原后视口宽度变了，
+// 不重排的话「打开」按钮就停在旧位置（不再右对齐）。
+func (b *browserApp) syncChrome() {
+	if b.addrIn == nil || b.goBtn == nil {
+		return
+	}
+	inputLeft := chromeLeft + 4*(chromeButtonWidth+chromeButtonGap)
+	width := b.win.ViewportWidth() - inputLeft - (chromeGoWidth + chromeButtonGap + chromeLeft)
+	if width < 240 {
+		width = 240
+	}
+	if width == b.lastAddrWidth {
+		return
+	}
+	b.lastAddrWidth = width
+	b.addrIn.SetAttribute("style", fmt.Sprintf("left:%dpx;width:%dpx", inputLeft, width))
+	b.goBtn.SetAttribute("style", fmt.Sprintf("left:%dpx;width:%dpx", inputLeft+width+chromeButtonGap, chromeGoWidth))
 }
 
 // pageTitle 取页面标题（head > title），没有标题时给个占位文案。

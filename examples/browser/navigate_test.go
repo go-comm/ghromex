@@ -180,3 +180,46 @@ func TestLinkNavigation(t *testing.T) {
 	assertTitle("第二版")
 	assertChrome()
 }
+
+// 视口变宽后工具条要重排：地址栏变宽、「打开」按钮贴到窗口右边缘。
+//
+// 工具条是换页时注入的，不跟着视口宽度重排的话，窗口最大化后「打开」
+// 按钮会停在旧位置（不再右对齐）。
+func TestChromeFollowsViewportResize(t *testing.T) {
+	vp := engine.NewHeadlessViewport(1024, 720)
+	h := &headlessOpener{vp: vp, width: 1024}
+	app := &browserApp{win: h, homeDir: ".", index: -1}
+	app.showHome()
+	h.doc.Refresh()
+
+	goBtn := h.doc.QuerySelector("#ghromex-go")
+	addr := h.doc.QuerySelector("#ghromex-addr")
+	if goBtn == nil || addr == nil {
+		t.Fatal("工具条元素缺失")
+	}
+	before := goBtn.GetBoundingClientRect()
+	addrBefore := addr.GetBoundingClientRect()
+	if got := before.Right().Pixel(); got != 1024-chromeLeft {
+		t.Fatalf("「打开」按钮右缘 = %d, want %d", got, 1024-chromeLeft)
+	}
+
+	// 模拟窗口最大化：视口变宽，引擎补一次变更通知。
+	h.width = 1400
+	vp.W = 1400
+	h.doc.Refresh()
+	h.doc.Refresh()
+
+	after := goBtn.GetBoundingClientRect()
+	if got := after.Right().Pixel(); got != 1400-chromeLeft {
+		t.Fatalf("放大后「打开」按钮右缘 = %d, want %d", got, 1400-chromeLeft)
+	}
+	if got := after.Right().Pixel() - after.Left().Pixel(); got != before.Right().Pixel()-before.Left().Pixel() {
+		t.Fatalf("放大后按钮宽度 = %d, want %d", got, before.Right().Pixel()-before.Left().Pixel())
+	}
+	addrAfter := addr.GetBoundingClientRect()
+	if addrAfter.Right().Pixel()-addrAfter.Left().Pixel() <= addrBefore.Right().Pixel()-addrBefore.Left().Pixel() {
+		t.Fatalf("放大后地址栏宽度 = %d, want > %d",
+			addrAfter.Right().Pixel()-addrAfter.Left().Pixel(),
+			addrBefore.Right().Pixel()-addrBefore.Left().Pixel())
+	}
+}
