@@ -127,6 +127,10 @@ type htmlElement struct {
 	// 拖选时锚点不动、活动端跟随指针；键入/退格/方向键会把两者收敛，
 	// 与浏览器「输入即替换选区、方向键折叠选区」一致。
 	selAnchor int
+	// caretInit 表示该控件的光标已被显式定位过（首次聚焦/点击落位）。
+	// 再次聚焦时保留原光标与选区（失焦不丢编辑状态，见 SetFocusedElement），
+	// 只有从未定位过的控件才把光标放到值末尾。
+	caretInit bool
 	// scrollTop 为纵向滚动偏移（像素）。textarea 由光标跟随/滚轮驱动，
 	// overflow 滚动容器与根元素（文档级滚动）由 applyScrollOffsets 施加。
 	scrollTop int

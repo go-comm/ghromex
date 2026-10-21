@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>记事本</title>
+<style>
+	/* 记事本界面：菜单栏 / 路径栏 / 编辑区 / 状态栏。
+	   编辑区的几何由示例程序按窗口尺寸计算（内联样式），CSS 只给外观。 */
+	html { height: 100%; background-color: #FFFFFF; }
+	body { margin: 0; padding: 0; height: 100%; color: #1F1F1F;
+		font-family: "Microsoft YaHei", "Segoe UI", system-ui, sans-serif; font-size: 13px; }
+
+	#menubar { position: absolute; left: 0; top: 0; width: 100%; height: 28px;
+		box-sizing: border-box; background-color: #F3F3F3; border-bottom: 1px solid #DCDCDC; }
+	#menubar select { position: absolute; top: 3px; height: 22px; width: 78px;
+		box-sizing: border-box; padding: 0 4px; border: 1px solid #F3F3F3;
+		background-color: #F3F3F3; color: #1F1F1F; font-size: 13px; }
+
+	#pathbar { position: absolute; left: 0; top: 28px; width: 100%; height: 34px;
+		box-sizing: border-box; background-color: #FAFAFA; border-bottom: 1px solid #E5E5E5; }
+	#pathbar button { position: absolute; top: 6px; height: 22px; width: 56px;
+		box-sizing: border-box; padding: 0 4px; font-size: 13px; }
+	#path { position: absolute; top: 6px; height: 22px;
+		box-sizing: border-box; padding: 1px 6px; font-size: 13px; }
+
+	/* 编辑区：几何（left/top/width/height）由示例程序按窗口尺寸写入内联样式。 */
+	#editor { position: absolute; left: 0; top: 62px; width: 100%; height: 100%;
+		box-sizing: border-box; border: none; padding: 4px 6px; background-color: #FFFFFF;
+		color: #1F1F1F; font-family: Consolas, "Courier New", monospace; font-size: 14px; }
+
+	#statusbar { position: absolute; left: 0; bottom: 0; width: 100%; height: 24px;
+		box-sizing: border-box; background-color: #F3F3F3; border-top: 1px solid #DCDCDC; }
+	#statusbar span { position: absolute; top: 4px; height: 16px; line-height: 16px;
+		color: #444444; font-size: 12px; }
+	#st-name { left: 8px; width: 260px; }
+	#st-pos { left: 280px; width: 110px; }
+	#st-count { left: 400px; width: 120px; }
+	#st-msg { left: 530px; }
+</style>
+</head>
+<body>
+	<!-- 菜单栏：引擎没有通用弹层，下拉菜单借 <select> 的选项浮层实现
+	     （点开 → 选项浮层 → 选中触发 change → 示例程序执行动作）。 -->
+	<div id="menubar">
+		<select id="m-file" style="left:4px">
+			<option value="">文件</option>
+			<option value="new">新建</option>
+			<option value="open">打开…</option>
+			<option value="save">保存</option>
+			<option value="saveas">另存为…</option>
+			<option value="exit">退出</option>
+		</select>
+		<select id="m-edit" style="left:86px">
+			<option value="">编辑</option>
+			<option value="undo">撤销</option>
+			<option value="cut">剪切</option>
+			<option value="copy">复制</option>
+			<option value="paste">粘贴</option>
+			<option value="selectall">全选</option>
+			<option value="time">时间/日期</option>
+		</select>
+		<select id="m-view" style="left:168px">
+			<option value="">视图</option>
+			<option value="zoomin">放大字号</option>
+			<option value="zoomout">缩小字号</option>
+			<option value="zoomreset">默认字号</option>
+		</select>
+		<select id="m-help" style="left:250px">
+			<option value="">帮助</option>
+			<option value="about">关于</option>
+		</select>
+	</div>
+
+	<!-- 路径栏：没有原生文件对话框，用路径输入框代替「打开/保存」的文件选择。 -->
+	<div id="pathbar">
+		<button id="btn-open" style="left:8px">打开</button>
+		<button id="btn-save" style="left:70px">保存</button>
+		<input id="path" style="left:132px" value="">
+	</div>
+
+	<textarea id="editor" spellcheck="false"></textarea>
+
+	<div id="statusbar">
+		<span id="st-name">未命名</span>
+		<span id="st-pos">行 1，列 1</span>
+		<span id="st-count">0 个字符</span>
+		<span id="st-msg"></span>
+	</div>
+</body>
+</html>

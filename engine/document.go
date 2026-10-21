@@ -69,6 +69,11 @@ type htmlDocument struct {
 	changed    int64
 	onChanged  func()
 	onNavigate func(href string)
+	// vpW/vpH 是上次布局时的视口尺寸。窗口缩放后后端只强制重排、并不
+	// 改文档内容（onChanged 不触发），应用层无从得知窗口变了——而
+	// 「编辑区铺满窗口剩余区域」这类 chrome 必须跟着窗口尺寸走。布局
+	// 时比对尺寸，变化则补一次变更通知（见 LayoutDocument）。
+	vpW, vpH int
 }
 
 func (document *htmlDocument) setPaintBase(p Paint) {
@@ -129,6 +134,21 @@ func findElementsBy(root HTMLElement, pred func(HTMLElement) bool) []HTMLElement
 		out = append(out, findElementsBy(child, pred)...)
 	}
 	return out
+}
+
+// docOf 沿父链找元素所属的文档：根元素的 self 指向文档包装器，普通
+// 元素的 self 指向自身。找不到时返回 nil（接口 nil，调用方需判空）。
+func docOf(e HTMLElement) HTMLDocument {
+	for cur := e; cur != nil; cur = cur.ParentElement() {
+		b := inner(cur)
+		if b == nil {
+			continue
+		}
+		if d, ok := b.self.(*htmlDocument); ok {
+			return d
+		}
+	}
+	return nil
 }
 
 func (document *htmlDocument) Head() HTMLHeadElement {

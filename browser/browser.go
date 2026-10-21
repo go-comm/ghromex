@@ -62,7 +62,21 @@ func (win *Window) Screenshot() ([]byte, uint32, int, int, error) {
 // Run 进入事件循环，直到窗口关闭或 autoExit 触发。
 func (win *Window) Run() error { return win.sdl.Run() }
 
+// RequestClose 请求关闭窗口（应用层「退出」菜单项用）：向事件队列压入
+// 一个退出事件，事件循环收到后正常返回，资源仍由 Close 释放。
+func (win *Window) RequestClose() { win.sdl.RequestClose() }
+
+// SetTitle 更新窗口标题（如编辑器显示当前文件名）。
+func (win *Window) SetTitle(title string) { win.sdl.SetTitle(title) }
+
 // Close 释放窗口资源。
 func (win *Window) Close() { win.sdl.Close() }
+
+// ClipboardText 读取系统剪贴板文本（UTF-8）。剪贴板属平台能力：引擎只
+// 给出选区文本，读写由后端完成。非 Windows 平台返回空串。
+func ClipboardText() string { return sdl2.ClipboardText() }
+
+// SetClipboardText 把 UTF-8 文本写入系统剪贴板。非 Windows 平台为空操作。
+func SetClipboardText(text string) { sdl2.SetClipboardText(text) }
 
 var _ engine.Viewport = (*Window)(nil)

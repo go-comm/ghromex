@@ -241,6 +241,40 @@ func TestRunConsumesInjectedShiftArrow(t *testing.T) {
 	}
 }
 
+// RequestClose：应用层「退出」菜单项要能关掉窗口——压入 SDL_QUIT 事件后，
+// Run 应当按「用户点关闭按钮」的同一条路径退出。
+func TestRequestCloseStopsRun(t *testing.T) {
+	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
+	defer os.Unsetenv("SDL_VIDEO_DRIVER")
+
+	win, err := NewWindow(200, 120, "close-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer win.Close()
+	const src = `<!doctype html><html><head><style>body{margin:0}</style></head>
+	<body><div style="height:400px;background-color:#DBEAFE"></div></body></html>`
+	if _, err := win.OpenDocument(src); err != nil {
+		t.Fatal(err)
+	}
+
+	// 不设 autoExit：只靠 RequestClose 退出，若事件没被消费，Run 会一直
+	// 跑下去（测试会超时失败）。
+	// 注意 SDL 要求窗口生命周期在同一 OS 线程：Run 必须留在创建窗口的
+	// goroutine 上，关窗请求从另一个 goroutine 发（SDL_PushEvent 线程安全）。
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		win.RequestClose()
+	}()
+	start := time.Now()
+	if err := win.Run(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if el := time.Since(start); el > 3*time.Second {
+		t.Fatalf("RequestClose 后 Run 仍跑了 %v 才退出（SDL_QUIT 事件没进事件循环）", el)
+	}
+}
+
 func pushEvent(buf *[eventBufferSize]byte) {
 	// SDL_PushEvent（SDL_events.h 文档）：返回 1=成功、0=被事件过滤器丢弃、
 	// 负数=失败。Windows x64 下 int 返回值只保证低 32 位有效，先截 int32 判。

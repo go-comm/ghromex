@@ -341,8 +341,10 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 		// 与渲染路径同口径：有裁剪盒（overflow 非 visible）时只丢与盒子
 		// 不相交的行，半截行交给 clip-path 截断；否则整行丢弃。
 		clipOK := isClippingBox(base)
-		for _, sr := range textareaSelectionRects(fg, base, l, fs, bold, fam, clipOK) {
-			emitSelection(sr)
+		if isFocusedElement(base) {
+			for _, sr := range textareaSelectionRects(fg, base, l, fs, bold, fam, clipOK) {
+				emitSelection(sr)
+			}
 		}
 		for i, ln := range l.lines {
 			y := l.y + i*l.lh
@@ -385,12 +387,29 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 	if h < base.height {
 		ty += (base.height - h) / 2
 	}
-	if lo, hi, ok := selectionRange(base); ok {
+	if lo, hi, ok := selectionRange(base); ok && isFocusedElement(base) {
 		for _, sr := range inputSelectionRects(fg, val, cut, tx, ty, h, fs, bold, fam, lo, hi) {
 			emitSelection(sr)
 		}
 	}
 	emitText(tx, ty+h, val)
+}
+
+// isFocusedElement 判断元素是否为当前聚焦控件。
+//
+// 渲染路径只给聚焦控件画选区高亮（render.go 的 focused 判定），SVG
+// 导出必须同口径：失焦后引擎保留编辑状态（选区仍在，见
+// SetFocusedElement），但屏幕上并不画高亮，静态导出也不该画。
+func isFocusedElement(base *htmlElement) bool {
+	if base == nil {
+		return false
+	}
+	d, ok := docOf(base.self).(*htmlDocument)
+	if !ok || d == nil {
+		return false
+	}
+	f := inner(d.focus)
+	return f != nil && f == base
 }
 
 // dumpCheckMark 导出 radio/checkbox 的选中标记（与 renderCheckedMark 同构：

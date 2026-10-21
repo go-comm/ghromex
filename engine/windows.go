@@ -39,6 +39,18 @@ func LayoutDocument(doc HTMLDocument) {
 	layoutPositioned(g, base, v.ViewportWidth(), v.ViewportHeight())
 	applyScrollOffsets(g, base, v.ViewportWidth(), v.ViewportHeight())
 	layoutSelectPopups(g, base, v.ViewportWidth(), v.ViewportHeight())
+	// 视口尺寸变了 → 补一次变更通知。窗口缩放只改视口、不改文档内容，
+	// onChanged 不会触发，应用层（编辑器铺满窗口、状态栏重排等）就
+	// 收不到任何信号。放在布局之后通知：此时 DOM 结构已稳定，应用层
+	// 在回调里改样式只会让本次布局的结果过期一次（后端按 ChangeCount
+	// 再排一遍即可收敛）。
+	if d, ok := doc.(*htmlDocument); ok {
+		w, h := v.ViewportWidth(), v.ViewportHeight()
+		if d.vpW != w || d.vpH != h {
+			d.vpW, d.vpH = w, h
+			d.markChanged()
+		}
+	}
 }
 
 // HeadlessViewport 提供无显示环境下的测试视口（FakeGraphics）。

@@ -45,6 +45,18 @@ func (*Window) Screenshot() ([]byte, uint32, int, int, error) { return nil, 0, 0
 // Run 在非 Windows 平台总是返回 ErrUnsupported。
 func (*Window) Run() error { return ErrUnsupported }
 
+// RequestClose 在非 Windows 平台为空操作。
+func (*Window) RequestClose() {}
+
+// SetTitle 在非 Windows 平台为空操作。
+func (*Window) SetTitle(string) {}
+
+// ClipboardText 在非 Windows 平台返回空串（无剪贴板实现）。
+func ClipboardText() string { return "" }
+
+// SetClipboardText 在非 Windows 平台为空操作（无剪贴板实现）。
+func SetClipboardText(string) {}
+
 // Close 在非 Windows 平台为空操作。
 func (*Window) Close() {}
 

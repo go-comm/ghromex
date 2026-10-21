@@ -73,9 +73,15 @@ func FocusedElement(doc HTMLDocument) HTMLElement {
 }
 
 // SetFocusedElement 设置聚焦元素；非可编辑输入等效清除（nil）。
-// 聚焦时光标移到值末尾（与浏览器点选落位一致；精确落点由点击坐标修正）。
+// 首次聚焦某控件时光标移到值末尾（与浏览器点选落位一致；精确落点由
+// 点击坐标修正）；再次聚焦保留该控件原有的光标与选区。
 // 焦点变化触发文档变更通知——聚焦框/光标重绘与文本变化走同一条
 // changed→重排重绘链路。
+//
+// 失焦不丢弃编辑状态：选区与光标原样留在控件上，只是停止绘制（渲染
+// 路径按 focused 决定是否画选区）。页内菜单（记事本的「复制/剪切/
+// 粘贴」）点击时编辑区会先失焦，若失焦即清空选区，菜单动作就无选中
+// 可用；保留状态后，应用层把焦点交还给编辑区即可继续操作。
 func SetFocusedElement(doc HTMLDocument, el HTMLElement) {
 	d, ok := doc.(*htmlDocument)
 	if !ok {
@@ -85,16 +91,21 @@ func SetFocusedElement(doc HTMLDocument, el HTMLElement) {
 		el = nil
 	}
 	if d.focus != el {
-		// 失焦即折叠旧选区：与浏览器「点别处后输入框内高亮消失」一致，
-		// 也避免 SVG 静态导出在控件已失焦时仍画出旧选区。
-		if old := inner(d.focus); old != nil {
-			old.selAnchor = old.caret
-		}
 		d.focus = el
 		if el != nil {
 			if b := inner(el); b != nil {
-				b.caret = len([]rune(b.GetAttribute("value")))
-				b.selAnchor = b.caret // 聚焦不继承旧的选区
+				if !b.caretInit {
+					// 首次聚焦：光标落到值末尾（精确落点由点击坐标修正）。
+					b.caret = len([]rune(b.GetAttribute("value")))
+					b.selAnchor = b.caret
+					b.caretInit = true
+				} else {
+					// 保留原光标与选区，但失焦期间值可能被改过（如程序化
+					// 设值），下标要按新长度夹紧，否则光标会落到值外。
+					n := len([]rune(b.GetAttribute("value")))
+					b.caret = clampCaret(b.caret, n)
+					b.selAnchor = clampCaret(b.selAnchor, n)
+				}
 				// Tab/程序化聚焦时光标可能落在可视区外（textarea 多行），
 				// 立刻滚动到光标行，否则聚焦后首帧看不到光标。
 				ensureCaretVisible(doc, b)
@@ -102,6 +113,29 @@ func SetFocusedElement(doc HTMLDocument, el HTMLElement) {
 		}
 		d.markChanged()
 	}
+}
+
+// CaretPosition 返回可编辑控件的光标位置（行、列，均从 1 起）。
+// textarea 按折行结果分行（软折行也算新行），单行 input 恒为第 1 行。
+// 返回 false 表示该元素不是可编辑控件（或没有光标状态）。
+//
+// 失焦后仍返回最后的光标位置（编辑状态不随失焦丢弃，见
+// SetFocusedElement），因此状态栏之类的 UI 可持续显示光标位置。
+func CaretPosition(el HTMLElement) (line, col int, ok bool) {
+	b := inner(el)
+	if b == nil || !editableInput(el) {
+		return 0, 0, false
+	}
+	caret := clampCaret(b.caret, len([]rune(b.GetAttribute("value"))))
+	if strings.EqualFold(b.tagName, "textarea") {
+		l := layoutTextarea(docGraphics(docOf(el)), b)
+		if len(l.lines) == 0 {
+			return 1, 1, true
+		}
+		row := caretRow(l.lines, caret)
+		return row + 1, caret - l.lines[row].start + 1, true
+	}
+	return 1, caret + 1, true
 }
 
 // focusTargets 按文档顺序收集全部可编辑输入（Tab 循环用）。

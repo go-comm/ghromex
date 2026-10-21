@@ -3,6 +3,7 @@
 package sdl2
 
 import (
+	"encoding/binary"
 	"fmt"
 	"os"
 	"runtime"
@@ -431,6 +432,16 @@ func setClipboardText(text string) {
 	runtime.KeepAlive(buf)
 }
 
+// SetClipboardText 把 UTF-8 文本写入系统剪贴板（应用层接口）。
+//
+// 引擎只负责选区文本，剪贴板读写属平台能力，故放在后端：应用经
+// browser.SetClipboardText 落盘，engine 保持纯 Go、无平台依赖。
+func SetClipboardText(text string) { setClipboardText(text) }
+
+// ClipboardText 读取系统剪贴板文本（UTF-8）。剪贴板为空或 SDL 未导出
+// 相关符号时返回空串。
+func ClipboardText() string { return readClipboardText() }
+
 // readClipboardText 读取系统剪贴板文本（UTF-8），供 Ctrl+V 粘贴。
 //
 // SDL_GetClipboardText 返回 **SDL 分配的** C 字符串，必须用 SDL_free
@@ -450,6 +461,28 @@ func readClipboardText() string {
 		sdlFree(ptr)
 	}
 	return s
+}
+
+// SetTitle 设置窗口标题（应用层可随时更新，如编辑器显示当前文件名）。
+func (win *Window) SetTitle(title string) {
+	if win == nil || win.closed || win.win == 0 {
+		return
+	}
+	b, p := cBytes(title)
+	sdlSetWindowTitle(win.win, p)
+	runtime.KeepAlive(b)
+}
+
+// RequestClose 请求关闭窗口：向事件队列压入一个 SDL_QUIT 事件，事件
+// 循环收到后按「用户点关闭按钮」的同一条路径退出（应用层的「退出」
+// 菜单项用）。
+func (win *Window) RequestClose() {
+	if win == nil || win.closed {
+		return
+	}
+	var buf [eventBufferSize]byte
+	binary.LittleEndian.PutUint32(buf[0:4], eventQuit)
+	sdlPushEvent(uintptr(unsafe.Pointer(&buf[0])))
 }
 
 // Close 释放窗口资源。幂等：重复调用直接返回——重复 SDL_Destroy* 会对已
