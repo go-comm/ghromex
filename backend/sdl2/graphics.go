@@ -221,6 +221,9 @@ type Graphics struct {
 	// 淘汰最近最少使用的纹理。
 	texClock  uint64
 	texPixels int
+	// sprites 是位图精灵的纹理缓存（键是引擎侧缓存的精灵指针）。精灵
+	// 像素只随「半径+颜色」变，引擎侧已缓存，这里按指针复用纹理即可。
+	sprites map[*engine.Sprite]uintptr
 
 	// env* 是文本渲染相关的环境变量取值，每帧刷新一次（见 refreshEnv）。
 	envLCD      bool
@@ -351,6 +354,7 @@ func NewGraphics(renderer uintptr, fontPath string) *Graphics {
 		cjkFont:      CJKFontPath(),
 		faces:        make(map[faceKey]*fontFace),
 		textures:     make(map[texKey]texInfo),
+		sprites:      make(map[*engine.Sprite]uintptr),
 		measures:     make(map[measureKey]measureVal),
 		familyPaths:  make(map[string]string),
 		reuseFaces:   hasTTFSetFontSize,
@@ -903,6 +907,49 @@ func (g *Graphics) DrawColor(x, y, w, h int, color engine.Color) {
 func (g *Graphics) DrawImage(x, y, w, h int, image engine.Image) {
 }
 
+// pixelFormatRGBA32 是 SDL_PIXELFORMAT_RGBA32（0x16762004）：小端下内存
+// 字节序恰为 R,G,B,A —— 引擎的精灵像素可直接灌入，无需逐像素换序。
+//
+// 常量值是实测出来的（不能凭 SDL 头文件的枚举顺序推断：相邻的几个
+// 8888 格式只差一个字节序位，用错就是"alpha 读成 R"或"整块不透明"）。
+const pixelFormatRGBA32 = 0x16762004
+
+// textureAccessStreaming 是 SDL_TEXTUREACCESS_STREAMING：纹理由
+// SDL_UpdateTexture 灌像素（STATIC 只允许从 surface 创建）。
+const textureAccessStreaming = 0
+
+// DrawSprite 实现 engine.SpriteDrawer：把位图精灵上传成纹理并 blit 一次。
+//
+// 精灵按指针缓存（引擎侧的角标精灵按「半径+颜色」缓存，同一份像素只上传
+// 一次）。整块圆角一次 blit，替掉逐像素的半透明小方块——后者是绘制调用
+// 的主要来源（实测 portal 页一帧 1.8 万次 1×1 绘制），GPU 路径上每次都
+// 是驱动调用，帧时间被拖到几十毫秒，滚动动画被切成两三帧。
+func (g *Graphics) DrawSprite(x, y int, s *engine.Sprite) {
+	if s == nil || s.W <= 0 || s.H <= 0 || g.renderer == 0 || len(s.Pix) < s.W*s.H*4 {
+		return
+	}
+	tex, ok := g.sprites[s]
+	if !ok {
+		tex = sdlCreateTexture(g.renderer, uintptr(pixelFormatRGBA32),
+			uintptr(textureAccessStreaming), uintptr(s.W), uintptr(s.H))
+		if tex == 0 {
+			checkDraw("SDL_CreateTexture", 0)
+			return
+		}
+		sdlSetTextureBlendMode(tex, uintptr(blendModeBlend))
+		g.sprites[s] = tex
+	}
+	// 灌像素：矩形参数为 NULL 表示整块。RGBA32 的行距 = W*4。
+	rect := sdlRect{0, 0, int32(s.W), int32(s.H)}
+	if sdlUpdateTexture(tex, uintptr(unsafe.Pointer(&rect)),
+		uintptr(unsafe.Pointer(&s.Pix[0])), uintptr(s.W*4)) != 0 {
+		checkDraw("SDL_UpdateTexture", 0)
+		return
+	}
+	dst := sdlRect{int32(x), int32(y), int32(s.W), int32(s.H)}
+	checkDraw("SDL_RenderCopy", sdlRenderCopy(g.renderer, tex, 0, uintptr(unsafe.Pointer(&dst))))
+}
+
 // Clear 清屏。同时把裁剪栈清空并关闭 SDL 裁剪（SDL_RenderClear 本身无视
 // 裁剪区，这里仅为让 Go 侧栈与 SDL 实际状态保持一致，防上一帧配对失衡）。
 // 也是每帧的起点：在这里刷新文本渲染的环境变量取值（见 refreshEnv）。
@@ -987,6 +1034,12 @@ func (g *Graphics) CloseFonts() {
 	}
 	g.textures = make(map[texKey]texInfo)
 	g.texPixels = 0
+	for _, t := range g.sprites {
+		if t != 0 {
+			sdlDestroyTexture(t)
+		}
+	}
+	g.sprites = make(map[*engine.Sprite]uintptr)
 }
 
 // maxCachedTextures 是文本纹理缓存的条数上限，maxCachedTexPixels 是像素

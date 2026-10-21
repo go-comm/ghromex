@@ -68,12 +68,17 @@ var (
 	sdlDestroyTexture           nativeCall
 	sdlSetTextureBlendMode      nativeCall
 	sdlFreeSurface              nativeCall
-	sdlPollEvent                nativeCall
-	sdlPushEvent                nativeCall
-	sdlStartTextInput           nativeCall
-	sdlDelay                    nativeCall
-	sdlGetTicks                 nativeCall
-	sdlGetModState              nativeCall
+	// SDL_CreateTexture / SDL_UpdateTexture：把引擎的位图精灵（圆角角标）
+	// 上传成纹理。CreateTextureFromSurface 只能从 surface 取，像素精灵
+	// 没有 surface，故用这两条直接建纹理并灌像素。
+	sdlCreateTexture  nativeCall
+	sdlUpdateTexture  nativeCall
+	sdlPollEvent      nativeCall
+	sdlPushEvent      nativeCall
+	sdlStartTextInput nativeCall
+	sdlDelay          nativeCall
+	sdlGetTicks       nativeCall
+	sdlGetModState    nativeCall
 	// SDL_SetClipboardText（SDL_clipboard.h）：UTF-8 NUL 结尾，0 成功。
 	// 引擎只给出选区文本，写系统剪贴板这一平台动作留在后端。
 	sdlSetClipboardText nativeCall
@@ -240,6 +245,10 @@ func doLoad() error {
 	sdlDestroyTexture = bindSdl("SDL_DestroyTexture")
 	sdlSetTextureBlendMode = bindSdl("SDL_SetTextureBlendMode")
 	sdlFreeSurface = bindSdl("SDL_FreeSurface")
+	// 位图精灵上传（圆角角标）：RGBA32 的内存序即 R,G,B,A，引擎侧的像素
+	// 可直接灌入，无需逐像素换序。
+	sdlCreateTexture = bindSdl("SDL_CreateTexture")
+	sdlUpdateTexture = bindSdl("SDL_UpdateTexture")
 	sdlPollEvent = bindSdl("SDL_PollEvent")
 	// SDL_TEXTINPUT 由驱动在“文本输入激活”时才产生可打印字符事件
 	// （SDL2 wiki SDL_StartTextInput：要收 TextInputEvent 必须显式启用）。

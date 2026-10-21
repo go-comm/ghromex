@@ -4,6 +4,57 @@ import (
 	"testing"
 )
 
+// 圆角边框环的"精灵路径"（四条直边 + 四角精灵）必须与逐行逐像素路径
+// 逐像素一致：环的覆盖率 = 外盒覆盖 - 内盒覆盖，边界取错会差半个 alpha。
+func TestStrokeRoundedRectMatchesPixelPath(t *testing.T) {
+	blue := NewColor(0x00, 0x00, 0xFF, 0xFF)
+
+	type spec struct {
+		bx, by, bw, bh, r int
+		bd                edges
+	}
+	cases := []spec{
+		{0, 0, 64, 44, 6, edges{1, 1, 1, 1}},
+		{0, 0, 64, 44, 6, edges{2, 2, 2, 2}},
+		{0, 0, 64, 44, 6, edges{1, 3, 2, 1}}, // 四侧宽不同
+		{5, 3, 40, 30, 10, edges{1, 1, 1, 1}},
+		{0, 0, 20, 20, 8, edges{1, 1, 1, 1}},  // 小盒
+		{0, 0, 30, 30, 12, edges{3, 3, 3, 3}}, // 边框很厚
+	}
+	for _, cs := range cases {
+		w := cs.bx + cs.bw + 8
+		h := cs.by + cs.bh + 8
+		got := NewBufferGraphics(w, h)
+		want := NewBufferGraphics(w, h)
+		strokeRoundedRect(got, cs.bx, cs.by, cs.bw, cs.bh, cs.r, cs.bd, blue)
+		// 逐像素参照路径
+		li, rt, tp, bt := maxZero(cs.bd[eLeft]), maxZero(cs.bd[eRight]),
+			maxZero(cs.bd[eTop]), maxZero(cs.bd[eBottom])
+		iw, ih := cs.bw-li-rt, cs.bh-tp-bt
+		ir := cs.r - minInt(minInt(minInt(li, rt), tp), bt)
+		if ir < 0 {
+			ir = 0
+		}
+		if iw > 0 && ih > 0 {
+			if c := minInt(iw, ih) / 2; ir > c {
+				ir = c
+			}
+		}
+		strokeRoundedRectPixels(want, cs.bx, cs.by, cs.bw, cs.bh, cs.r, li, rt, tp, bt,
+			iw, ih, ir, blue)
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				ar, ag, ab, aa, aok := got.ColorAt(x, y)
+				br, bg, bb, ba, bok := want.ColorAt(x, y)
+				if aok != bok || ar != br || ag != bg || ab != bb || aa != ba {
+					t.Fatalf("盒 %+v：像素 (%d,%d) 精灵路径 (%d,%d,%d,%d,%v) ≠ 逐像素 (%d,%d,%d,%d,%v)",
+						cs, x, y, ar, ag, ab, aa, aok, br, bg, bb, ba, bok)
+				}
+			}
+		}
+	}
+}
+
 // 圆角填充的"只算弧边"优化必须与逐点算覆盖率的朴素实现**逐像素一致**：
 // 优化把整盒扫描换成角上窄带（SDF 推导：中间行与角行中段必为全覆盖），
 // 一旦边界取错就会差半个像素的 alpha。
@@ -31,11 +82,12 @@ func TestFillRoundedRectMatchesNaiveCoverage(t *testing.T) {
 		{0, 0, 100, 40, 1},
 		{0, 0, 100, 40, 20}, // r = bh/2（半圆端）
 		{3, 5, 64, 64, 12},  // 正方形
-		{0, 0, 7, 5, 3},     // 盒比直径还小（无中段）
+		{0, 0, 7, 5, 2},     // 盒比直径还小（无中段）
 		{0, 0, 5, 5, 2},     // 极小盒
 		{10, 10, 30, 18, 9}, // r 接近半高
 		{0, 0, 200, 12, 6},  // 扁盒
 		{0, 0, 60, 60, 24},  // r 超查表上限（走逐点回退路径）
+		{40, 15, 40, 40, 9}, // portal 页的品牌角标（40×40 r=9）
 	}
 	for _, cs := range cases {
 		w := cs.bx + cs.bw + 8

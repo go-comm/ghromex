@@ -133,6 +133,27 @@ func (c *colorVal) RGBA() (r, g, b, a uint8) {
 type Image interface {
 }
 
+// Sprite 是一块可 blit 的位图（RGBA8888，每像素 4 字节，行主序）。
+//
+// 目前只用于圆角抗锯齿的"角标精灵"：整块圆角一次 blit，代替逐像素的
+// 半透明小方块。逐像素画圆角边缘的绘制调用极多——实测 portal 页一帧
+// 18524 次 1×1 绘制，占全部绘制调用的 3/4；GPU 路径上每次都是驱动
+// 调用，帧时间被拖到几十毫秒，120ms 的滚动动画被切成两三帧，看起来就是
+// "一卡一卡、还会闪"。整角一次 blit 把这部分降到 4 次/盒。
+//
+// alpha 为 0 的像素表示"不着色"（blit 时不覆盖底色），与逐像素路径里
+// scaledAlpha 返回 ok=false 的跳过语义一致。
+type Sprite struct {
+	W, H int
+	Pix  []byte
+}
+
+// SpriteDrawer 是 Graphics 的可选扩展：支持位图 blit 的后端实现它。
+// 不实现的后端回落到逐像素绘制（结果一致，只是慢）。
+type SpriteDrawer interface {
+	DrawSprite(x, y int, s *Sprite)
+}
+
 // Rect 在这里表示盒模型四边的尺寸集合（left/right/top/bottom）。
 type Rect interface {
 	Left() Size
@@ -529,6 +550,28 @@ func (g *BufferGraphics) DrawText(x, y, w, h int, paint Paint, text string) {
 func (g *BufferGraphics) DrawImage(x, y, w, h int, image Image) {
 	g.DrawCalls++
 	g.FillRect(x, y, w, h, 255, 0, 255, 255)
+}
+
+// DrawSprite 实现 engine.SpriteDrawer：按 RGBA8888 逐像素混合精灵
+// （alpha 0 的像素跳过，与逐像素路径的跳过语义一致）。
+func (g *BufferGraphics) DrawSprite(x, y int, s *Sprite) {
+	if s == nil || s.W <= 0 || s.H <= 0 {
+		return
+	}
+	g.DrawCalls++
+	for v := 0; v < s.H; v++ {
+		for u := 0; u < s.W; u++ {
+			i := (v*s.W + u) * 4
+			if i+3 >= len(s.Pix) {
+				break
+			}
+			a := s.Pix[i+3]
+			if a == 0 {
+				continue
+			}
+			g.FillRect(x+u, y+v, 1, 1, s.Pix[i], s.Pix[i+1], s.Pix[i+2], a)
+		}
+	}
 }
 
 // MeasureText 实现 Graphics：与 FakeGraphics 相同的粗略估算，
