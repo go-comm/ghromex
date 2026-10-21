@@ -24,8 +24,7 @@ func TestTableBorderCollapse(t *testing.T) {
 			<tr id="r2"><td id="b1">单元格 B1</td><td id="b2">单元格 B2</td></tr>
 		</table>
 	</body></html>`
-	buf := NewBufferGraphics(400, 200)
-	vp := &HeadlessViewport{W: 400, H: 200, G: buf}
+	vp, buf := NewBufferedViewport(400, 200)
 	doc, err := OpenDocument(vp, src)
 	if err != nil {
 		t.Fatalf("OpenDocument: %v", err)
@@ -108,8 +107,7 @@ func TestTableBorderCollapseSeparateDefault(t *testing.T) {
 	src := `<!doctype html><html><body style="margin:0">
 		<table id="t" style="border-collapse: separate"><tr><td id="a">x</td></tr></table>
 	</body></html>`
-	buf := NewBufferGraphics(200, 100)
-	vp := &HeadlessViewport{W: 200, H: 100, G: buf}
+	vp, buf := NewBufferedViewport(200, 100)
 	doc, err := OpenDocument(vp, src)
 	if err != nil {
 		t.Fatalf("OpenDocument: %v", err)

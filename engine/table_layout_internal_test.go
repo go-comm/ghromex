@@ -15,8 +15,7 @@ func TestTableLayoutColumns(t *testing.T) {
 			</tbody>
 		</table>
 	</body></html>`
-	buf := NewBufferGraphics(400, 200)
-	vp := &HeadlessViewport{W: 400, H: 200, G: buf}
+	vp, buf := NewBufferedViewport(400, 200)
 	doc, err := OpenDocument(vp, src)
 	if err != nil {
 		t.Fatalf("OpenDocument: %v", err)

@@ -12,8 +12,7 @@ func TestListMarkers(t *testing.T) {
 		<ul id="u"><li>甲</li><li>乙</li></ul>
 		<ol id="o"><li>一</li><li>二</li><li>三</li></ol>
 	</body></html>`
-	buf := NewBufferGraphics(200, 200)
-	vp := &HeadlessViewport{W: 200, H: 200, G: buf}
+	vp, buf := NewBufferedViewport(200, 200)
 	doc, err := OpenDocument(vp, src)
 	if err != nil {
 		t.Fatalf("OpenDocument: %v", err)
@@ -55,8 +54,7 @@ func TestListMarkerAlignsWithFirstLine(t *testing.T) {
 	src := `<!doctype html><html><body style="margin:0">
 		<ul><li>甲<ul><li>乙</li></ul></li></ul>
 	</body></html>`
-	buf := NewBufferGraphics(200, 200)
-	vp := &HeadlessViewport{W: 200, H: 200, G: buf}
+	vp, buf := NewBufferedViewport(200, 200)
 	doc, err := OpenDocument(vp, src)
 	if err != nil {
 		t.Fatalf("OpenDocument: %v", err)

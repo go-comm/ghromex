@@ -11,13 +11,10 @@ import (
 // openScrollDoc 打开页面并完成首次布局 + 绘制。
 func openScrollDoc(t *testing.T, w, h int, src string) (HTMLDocument, *BufferGraphics) {
 	t.Helper()
-	buf := NewBufferGraphics(w, h)
-	vp := &HeadlessViewport{W: w, H: h, G: buf}
-	doc, err := OpenDocument(vp, src)
+	buf, doc, err := OpenBufferedDocument(w, h, src)
 	if err != nil {
-		t.Fatalf("OpenDocument: %v", err)
+		t.Fatalf("OpenBufferedDocument: %v", err)
 	}
-	RenderNode(buf, doc)
 	return doc, buf
 }
 

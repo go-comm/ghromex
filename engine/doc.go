@@ -57,6 +57,8 @@
 //
 //   - FakeGraphics：只计数，断言绘制指令的调用序列；
 //   - BufferGraphics：软件光栅化到 RGBA，可 SavePNG 与 ColorAt 逐像素断言；
+//     NewBufferedViewport / OpenBufferedDocument 一把建好「视口 + 缓冲」，
+//     免得视口与缓冲的尺寸写岔；
 //   - HeadlessViewport：无头视口，配合 DumpSVG 断言布局几何；
 //   - 事件用 engine.OnDocumentClick / OnDocumentKeyDown / OnDocumentPaste
 //     等公开入口驱动，不要直接调内部函数——白盒绕过命中与焦点链路会漏掉

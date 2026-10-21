@@ -19,7 +19,7 @@
 - 滚动与裁剪：`overflow(visible/hidden/clip/scroll/auto，单值两轴、两值 x y、overflow-x/overflow-y 分轴)` 滚动容器（滚轮驱动、子树平移 + padding 盒裁剪，被裁内容不可命中）、**圆角裁剪按 border-radius 的形状**（`overflow:hidden` 的圆角盒，溢出到角外的子元素按圆角裁掉，角上透出盒后底色）、文档级页面滚动（根元素以视口为滚动盒，长页面/宽页面均可滚）、`wheel` 事件（`OnWheel` 注册、`MouseEvent.DeltaX/DeltaY` 像素位移、冒泡派发）、Shift+滚轮 转横向滚动、textarea 滚轮滚动（与光标跟随同夹紧口径，全量吸收纵向滚轮、撞边界不带动页面）；裁剪经 `Graphics` 可选 `Clipper`（`PushClip`/`PopClip`，逐层求交）落地：`BufferGraphics` 像素断言、SDL2 `SDL_RenderSetClipRect`，SVG 导出同步生成 `clipPath`
 - 可插拔图形后端：`engine.Graphics` 接口（DrawText / DrawColor / DrawImage / MeasureText），内置 `FakeGraphics`（计数）、`BufferGraphics`（软件光栅化到 RGBA 缓冲，可 `SavePNG`）供无显示器测试；圆角抗锯齿走**角标精灵**（可选扩展 `SpriteDrawer`：整块圆角一次 blit，替掉逐像素的半透明小方块）——绘制调用数是 GPU 路径上的主要开销，portal 页一帧从 31840 次降到 2500 次、单帧绘制 149ms → 8.7ms（软件渲染器实测），滚动动画才不会被切成几帧
 - 元素注册表：`CustomElements().Define(tag, proto)` + `CloneElement` 注册自定义标签，解析时克隆原型生成独立实例
-- 无头运行：`-dump-svg` 导出布局结果；`HeadlessViewport` + `BufferGraphics` 可在 CI 中像素级断言渲染结果
+- 无头运行：`-dump-svg` 导出布局结果；`NewBufferedViewport` / `OpenBufferedDocument`（视口 + 软件光栅化缓冲）可在 CI 中像素级断言渲染结果
 
 ## 环境要求
 
@@ -99,10 +99,20 @@ func main() {
 无头测试（不依赖任何 DLL）：
 
 ```go
+// 只做布局（不需要像素）：FakeGraphics 后端，绘制指令只计数
 vp := engine.NewHeadlessViewport(400, 300)
 doc, _ := engine.OpenDocument(vp, `<html><body><div class="box">hi</div></body></html>`)
-buf := engine.NewBufferGraphics(400, 300)
-engine.RenderNode(buf, doc)
+```
+
+要出图 / 逐像素断言像素时，用带缓冲的视口——视口与缓冲同尺寸，一次建好：
+
+```go
+// 只要视口：vp, buf := engine.NewBufferedViewport(400, 300)
+buf, doc, err := engine.OpenBufferedDocument(400, 300,
+	`<html><body><div class="box">hi</div></body></html>`)
+if err != nil {
+	panic(err)
+}
 _ = buf.SavePNG("out.png") // 或直接 buf.ColorAt(x, y) 断言像素
 ```
 

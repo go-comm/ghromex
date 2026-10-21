@@ -10,8 +10,7 @@ func TestNoGapAfterLeadingSpaceInlineLabel(t *testing.T) {
 	src := `<!doctype html><html><body style="margin:0">
 		<p><label><input type="radio" name="g"> 不接收</label></p>
 	</body></html>`
-	buf := NewBufferGraphics(300, 200)
-	vp := &HeadlessViewport{W: 300, H: 200, G: buf}
+	vp, buf := NewBufferedViewport(300, 200)
 	doc, err := OpenDocument(vp, src)
 	if err != nil {
 		t.Fatalf("OpenDocument: %v", err)

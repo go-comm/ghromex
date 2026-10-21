@@ -21,6 +21,21 @@ func OpenDocument(v Viewport, src string) (HTMLDocument, error) {
 	return doc, nil
 }
 
+// OpenBufferedDocument 在软件光栅化后端上打开文档，并完成首次级联、布局
+// 与绘制，返回缓冲区与文档，供逐像素断言。
+//
+// 它把「建视口 → OpenDocument → RenderNode」三步收成一步：视口与缓冲的尺寸
+// 由同一处给定，不会写岔（尺寸不一致时，像素断言会读到空白处）。
+func OpenBufferedDocument(w, h int, src string) (*BufferGraphics, HTMLDocument, error) {
+	vp, buf := NewBufferedViewport(w, h)
+	doc, err := OpenDocument(vp, src)
+	if err != nil {
+		return nil, nil, err
+	}
+	RenderNode(buf, doc)
+	return buf, doc, nil
+}
+
 // LayoutDocument 对文档执行一次完整的级联 + 布局。
 func LayoutDocument(doc HTMLDocument) {
 	v := doc.Viewport()
@@ -62,8 +77,20 @@ type HeadlessViewport struct {
 
 // NewHeadlessViewport 创建无显示视口：w×h 视口 + FakeGraphics 绘制后端，
 // 供无显示器环境做级联/布局与 SVG 导出（不产生任何窗口）。
+//
+// 要出图/逐像素断言像素，用 NewBufferedViewport（软件光栅化后端）。
 func NewHeadlessViewport(w, h int) *HeadlessViewport {
 	return &HeadlessViewport{W: w, H: h, G: NewFakeGraphics()}
+}
+
+// NewBufferedViewport 创建无显示视口 + 软件光栅化后端（BufferGraphics）：
+// 视口与缓冲同尺寸，绘制指令落进缓冲区，可 ColorAt 逐像素断言、SavePNG 出图。
+//
+// 与 NewHeadlessViewport 只差绘制后端：两者的文本度量同口径
+// （BufferGraphics 的度量与 FakeGraphics 相同），换后端不改布局结果。
+func NewBufferedViewport(w, h int) (*HeadlessViewport, *BufferGraphics) {
+	buf := NewBufferGraphics(w, h)
+	return &HeadlessViewport{W: w, H: h, G: buf}, buf
 }
 
 // ViewportWidth 返回视口宽度（px）。

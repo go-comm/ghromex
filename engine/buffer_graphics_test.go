@@ -9,13 +9,10 @@ import (
 // 打开页面并把绘制指令落在 BufferGraphics 上，返回缓冲与文档。
 func openBuffered(t *testing.T, w, h int, src string) (*engine.BufferGraphics, engine.HTMLDocument) {
 	t.Helper()
-	buf := engine.NewBufferGraphics(w, h)
-	vp := &engine.HeadlessViewport{W: w, H: h, G: buf}
-	doc, err := engine.OpenDocument(vp, src)
+	buf, doc, err := engine.OpenBufferedDocument(w, h, src)
 	if err != nil {
-		t.Fatalf("OpenDocument: %v", err)
+		t.Fatalf("OpenBufferedDocument: %v", err)
 	}
-	engine.RenderNode(buf, doc)
 	return buf, doc
 }
 
