@@ -1,57 +1,58 @@
 //go:build windows
 
-package sdl2
-
-import (
-	"image"
-	"os"
-	"path/filepath"
-	"testing"
-
-	"github.com/go-comm/ghromex/engine"
-)
-
-// ---------------------------------------------------------------------------
-// select 展开浮层 LCD 可读性回归
+// select 展开浮层 LCD 可读性回归（在 browser 层：这一层才有文档与渲染）。
 //
 // 用户反馈：改选中行为 #1967D2 蓝底白字后，"文字区域都变成了白的，看不到
-// 是什么字"。根因在 LCD 落屏合成（graphics.go DrawText）：TTF_RenderUTF8_LCD
+// 是什么字"。根因在 LCD 落屏合成（后端 DrawText）：TTF_RenderUTF8_LCD
 // 需要 paint.Background() 作为落点底色，Background=nil 时按白底合成——浮层
 // option 自身无背景色、种子 Paint 不带底，白字配白底合成出纯白不透明纹理直贴
-// 蓝底上，字形整个变实心白块。修复：renderSelectPopup 给选中项种子 Paint 携带
+// 蓝底上，字形整个变实心白块。修复：引擎给选中项种子 Paint 携带
 // selectHighlight 蓝底（引擎层 TestSelectPopupTextPaintCarriesBlue 锁 Paint
 // 契约，本测试锁真实 LCD 落屏结果）。
 //
 // 校准口径：截图 4 字节序未知 → 黑底画纯 R/G/B 色块识别通道位；option 盒内
 // 统计。修复后选中行：蓝底主导、纯白像素≈0（字形带亚像素毛边、不落纯白）；
 // 白块回归时字形纹理区（约 26×16≈400+ 像素）整片纯白。
-// ---------------------------------------------------------------------------
+package browser
+
+import (
+	"image"
+	"image/png"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/go-comm/ghromex/backend/sdl2"
+	"github.com/go-comm/ghromex/core"
+	"github.com/go-comm/ghromex/engine"
+)
 
 func TestSelectPopupLCDTextLegible(t *testing.T) {
 	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
 	defer os.Unsetenv("SDL_VIDEO_DRIVER")
 	t.Setenv("GHROMEX_LCD", "1") // 文本默认灰度 AA，本测试专锁 LCD 路径，显式开启
 
-	html, err := os.ReadFile(filepath.Join("..", "..", "examples", "ua", "index.html"))
+	html, err := os.ReadFile(filepath.Join("..", "examples", "ua", "index.html"))
 	if err != nil {
 		t.Fatalf("read examples/ua/index.html: %v", err)
 	}
 
-	win, err := NewWindow(400, 700, "select-lcd")
+	win, err := New(400, 700, "select-lcd")
 	if err != nil {
-		t.Fatalf("NewWindow: %v", err)
+		t.Fatalf("New: %v", err)
 	}
 	defer win.Close()
-	if !lcdText() {
+	if !sdl2.LCDTextEnabled() {
 		t.Skip("DLL 无 TTF_RenderUTF8_LCD，LCD 路径不可用")
 	}
 
 	// 通道序校准：黑底画纯 R/G/B 色块，识别各通道在 4 字节中的位置。
-	win.g.Clear(0, 0, 0, 255)
-	win.g.DrawColor(300, 0, 10, 10, engine.NewColor(255, 0, 0, 255))
-	win.g.DrawColor(320, 0, 10, 10, engine.NewColor(0, 255, 0, 255))
-	win.g.DrawColor(340, 0, 10, 10, engine.NewColor(0, 0, 255, 255))
-	win.g.Present()
+	g := win.sdl.Graphics()
+	g.DrawColor(0, 0, 400, 700, core.NewColor(0, 0, 0, 255))
+	g.DrawColor(300, 0, 10, 10, core.NewColor(255, 0, 0, 255))
+	g.DrawColor(320, 0, 10, 10, core.NewColor(0, 255, 0, 255))
+	g.DrawColor(340, 0, 10, 10, core.NewColor(0, 0, 255, 255))
+	win.sdl.Present()
 	cbuf, _, cw, _, err := win.Screenshot()
 	if err != nil {
 		t.Fatalf("calib Screenshot: %v", err)
@@ -91,8 +92,8 @@ func TestSelectPopupLCDTextLegible(t *testing.T) {
 		(rc.Top().Pixel()+rc.Bottom().Pixel())/2)
 	engine.LayoutDocument(doc)
 	win.clearCanvas()
-	engine.RenderNode(win.g, doc)
-	win.present()
+	engine.RenderNode(win.sdl.Graphics(), doc)
+	win.sdl.Present()
 	buf, _, vw, vh, err := win.Screenshot()
 	if err != nil {
 		t.Fatalf("Screenshot: %v", err)
@@ -172,5 +173,21 @@ func TestSelectPopupLCDTextLegible(t *testing.T) {
 		if w*100 > a*95 {
 			t.Errorf("未选中行 option[%d] 纯白 %d/%d（>95%%）：文字没画出来", i, w, a)
 		}
+	}
+}
+
+// cmpSavePNG 把图片存到磁盘（供人工比对）。
+func cmpSavePNG(t *testing.T, path string, img image.Image) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create %s: %v", path, err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatalf("png encode %s: %v", path, err)
 	}
 }

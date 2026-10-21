@@ -1,33 +1,70 @@
-//go:build windows
+﻿//go:build windows
 
-package sdl2
+// 端到端事件链测试：往事件队列注入真实平台事件（点击聚焦 →
+// 文本输入上屏 → KEYDOWN Backspace 删除），由主循环完整消费。
+//
+// 补此前「探针直接调 engine API、绕过平台事件层」的盲区——真机
+// 「有光标无法输入」正是这一层缺 StartTextInput。
+//
+// 这一层在 browser（主循环所在处）：后端只解码事件，事件→引擎动作的
+// 翻译在 browser，所以端到端链路也在这里测。
+package browser
 
 import (
-	"fmt"
 	"os"
-	"runtime"
 	"testing"
 	"time"
-	"unsafe"
 
-	"golang.org/x/sys/windows"
-
+	"github.com/go-comm/ghromex/backend/sdl2"
 	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/runtime/clipboard"
 )
 
-// 端到端事件链测试：SDL_PushEvent 注入真实 SDL 事件（点击聚焦 →
-// SDL_TEXTINPUT 上屏 → KEYDOWN Backspace 删除），由 Run 的完整事件
-// 循环消费。补此前"探针直接调 engine API、绕过 SDL 事件层"的盲区——
-// 真机"有光标无法输入"正是这一层缺 SDL_StartTextInput。
-func TestRunConsumesInjectedEvents(t *testing.T) {
+// newTestWindow 建一个用 dummy 驱动的窗口（无显示器也能跑）。
+func newTestWindow(t *testing.T, w, h int, title string) *Window {
+	t.Helper()
 	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
-	defer os.Unsetenv("SDL_VIDEO_DRIVER")
-
-	win, err := NewWindow(300, 200, "evt-test")
+	t.Cleanup(func() { os.Unsetenv("SDL_VIDEO_DRIVER") })
+	win, err := New(w, h, title)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer win.Close()
+	t.Cleanup(win.Close)
+	return win
+}
+
+// mouseButtonUp 注入一次左键抬起（点击的抬起半边）。
+func mouseButtonUp(win *Window, x, y int) {
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonUp, Button: sdl2.MouseButtonLeft, X: x, Y: y})
+}
+
+// mouseButtonDown 注入一次左键按下。
+func mouseButtonDown(win *Window, x, y int) {
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonDown, Button: sdl2.MouseButtonLeft, X: x, Y: y})
+}
+
+// mouseMotion 注入一次鼠标移动。
+func mouseMotion(win *Window, x, y int) {
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseMotion, X: x, Y: y})
+}
+
+// mouseWheel 注入一档滚轮（wy 为负 = 朝用户）。
+func mouseWheel(win *Window, x, y, wx, wy int) {
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseWheel, X: x, Y: y, WheelX: wx, WheelY: wy})
+}
+
+// textInput 注入一段文本输入。
+func textInput(win *Window, s string) {
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventTextInput, Text: s})
+}
+
+// keyDown 注入一次按键（可带修饰键）。
+func keyDown(win *Window, key int, mod uint16) {
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventKeyDown, Key: key, Mod: mod})
+}
+
+func TestRunConsumesInjectedEvents(t *testing.T) {
+	win := newTestWindow(t, 300, 200, "evt-test")
 
 	const src = `<!doctype html><html><head><style>` +
 		`body{margin:0}` +
@@ -45,9 +82,9 @@ func TestRunConsumesInjectedEvents(t *testing.T) {
 	cx := (r.Left().Pixel() + r.Right().Pixel()) / 2
 	cy := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
 
-	pushMouseButtonUp(cx, cy)
-	pushTextInput("ab中")
-	pushKeyDown(0x08) // SDLK_BACKSPACE
+	mouseButtonUp(win, cx, cy)
+	textInput(win, "ab中")
+	keyDown(win, 0x08, 0) // SDLK_BACKSPACE
 
 	win.SetAutoExit(300 * time.Millisecond)
 	if err := win.Run(); err != nil {
@@ -63,14 +100,7 @@ func TestRunConsumesInjectedEvents(t *testing.T) {
 }
 
 func TestRunConsumesInjectedDragSelection(t *testing.T) {
-	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
-	defer os.Unsetenv("SDL_VIDEO_DRIVER")
-
-	win, err := NewWindow(320, 200, "drag-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer win.Close()
+	win := newTestWindow(t, 320, 200, "drag-test")
 
 	const src = `<!doctype html><html><head><style>` +
 		`body{margin:0}` +
@@ -89,10 +119,10 @@ func TestRunConsumesInjectedDragSelection(t *testing.T) {
 	x2 := r.Right().Pixel() - 2
 	y := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
 
-	// 按下→移动（超过拖选阈值）→抬起：走完整 SDL 事件链。
-	pushMouseButtonDown(x1, y)
-	pushMouseMotion(x2, y)
-	pushMouseButtonUp(x2, y)
+	// 按下→移动（超过拖选阈值）→抬起：走完整事件链。
+	mouseButtonDown(win, x1, y)
+	mouseMotion(win, x2, y)
+	mouseButtonUp(win, x2, y)
 
 	win.SetAutoExit(250 * time.Millisecond)
 	if err := win.Run(); err != nil {
@@ -106,19 +136,9 @@ func TestRunConsumesInjectedDragSelection(t *testing.T) {
 }
 
 func TestRunConsumesSelectionKeys(t *testing.T) {
-	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
-	defer os.Unsetenv("SDL_VIDEO_DRIVER")
+	win := newTestWindow(t, 320, 200, "ctrl-a-test")
 
-	win, err := NewWindow(320, 200, "ctrl-a-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer win.Close()
-
-	skipIfClipboardBusy(t)
-
-	prev := clipboardText()
-	defer writeClipboardRaw(prev)
+	skipIfClipboardUnavailable(t)
 
 	const src = `<!doctype html><html><head><style>` +
 		`body{margin:0}` +
@@ -136,9 +156,9 @@ func TestRunConsumesSelectionKeys(t *testing.T) {
 	cx := (r.Left().Pixel() + r.Right().Pixel()) / 2
 	cy := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
 
-	pushMouseButtonUp(cx, cy) // 先聚焦
-	pushKeyDownMods('a', kmodCtrl)
-	pushKeyDownMods('c', kmodCtrl)
+	mouseButtonUp(win, cx, cy) // 先聚焦
+	keyDown(win, 'a', sdl2.KmodCtrl)
+	keyDown(win, 'c', sdl2.KmodCtrl)
 
 	win.SetAutoExit(250 * time.Millisecond)
 	if err := win.Run(); err != nil {
@@ -149,32 +169,19 @@ func TestRunConsumesSelectionKeys(t *testing.T) {
 	if !ok || got != "hello world" {
 		t.Fatalf("Ctrl+A 选区 = %q, ok=%v（mod 位未解码或未传入引擎）", got, ok)
 	}
-	// 从系统剪贴板读回，验证 Ctrl+C 的完整链路（含 SDL_SetClipboardText）。
-	if clip := clipboardText(); clip != "hello world" {
+	// 从系统剪贴板读回，验证 Ctrl+C 的完整链路（含系统剪贴板写入）。
+	if clip := clipboard.Text(); clip != "hello world" {
 		t.Fatalf("剪贴板 = %q, want %q（Ctrl+C 未写入或写入内容错误）", clip, "hello world")
 	}
 }
 
-// 端到端：Ctrl+V 粘贴 —— 系统剪贴板 → SDL_GetClipboardText → 引擎
-// OnDocumentPaste → value。覆盖"平台剪贴板读写"这一段引擎测不到的链路。
+// 端到端：Ctrl+V 粘贴 —— 系统剪贴板 → 平台剪贴板读取 → 引擎
+// OnDocumentPaste → value。覆盖「平台剪贴板读写」这一段引擎测不到的链路。
 func TestRunConsumesInjectedPaste(t *testing.T) {
-	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
-	defer os.Unsetenv("SDL_VIDEO_DRIVER")
+	win := newTestWindow(t, 320, 200, "paste-test")
 
-	win, err := NewWindow(320, 200, "paste-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer win.Close()
-
-	skipIfClipboardBusy(t)
-
-	prev := clipboardText()
-	defer writeClipboardRaw(prev)
-	writeClipboardRaw("pasted text")
-	if !hasGetClipboardText || !hasSDLFree {
-		t.Fatal("SDL2 未导出 SDL_GetClipboardText/SDL_free：剪贴板不可用，粘贴无法实现")
-	}
+	skipIfClipboardUnavailable(t)
+	clipboard.SetText("pasted text")
 
 	const src = `<!doctype html><html><head><style>` +
 		`body{margin:0}` +
@@ -192,8 +199,8 @@ func TestRunConsumesInjectedPaste(t *testing.T) {
 	cx := (r.Left().Pixel() + r.Right().Pixel()) / 2
 	cy := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
 
-	pushMouseButtonUp(cx, cy) // 先聚焦
-	pushKeyDownMods('v', kmodCtrl)
+	mouseButtonUp(win, cx, cy) // 先聚焦
+	keyDown(win, 'v', sdl2.KmodCtrl)
 
 	win.SetAutoExit(250 * time.Millisecond)
 	if err := win.Run(); err != nil {
@@ -207,14 +214,7 @@ func TestRunConsumesInjectedPaste(t *testing.T) {
 
 // 端到端：Shift+方向键扩展选区（KEYDOWN 的 mod 位 → 引擎按键处理）。
 func TestRunConsumesInjectedShiftArrow(t *testing.T) {
-	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
-	defer os.Unsetenv("SDL_VIDEO_DRIVER")
-
-	win, err := NewWindow(320, 200, "shift-arrow-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer win.Close()
+	win := newTestWindow(t, 320, 200, "shift-arrow-test")
 
 	const src = `<!doctype html><html><head><style>` +
 		`body{margin:0}` +
@@ -232,9 +232,9 @@ func TestRunConsumesInjectedShiftArrow(t *testing.T) {
 	cx := (r.Left().Pixel() + r.Right().Pixel()) / 2
 	cy := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
 
-	pushMouseButtonUp(cx, cy)              // 聚焦
-	pushKeyDownMods('a', kmodCtrl)         // 全选（建立选区）
-	pushKeyDownMods(0x40000050, kmodShift) // Shift+Left：SDLK_LEFT
+	mouseButtonUp(win, cx, cy)               // 聚焦
+	keyDown(win, 'a', sdl2.KmodCtrl)         // 全选（建立选区）
+	keyDown(win, 0x40000050, sdl2.KmodShift) // Shift+Left：SDLK_LEFT
 
 	win.SetAutoExit(250 * time.Millisecond)
 	if err := win.Run(); err != nil {
@@ -247,27 +247,18 @@ func TestRunConsumesInjectedShiftArrow(t *testing.T) {
 	}
 }
 
-// RequestClose：应用层「退出」菜单项要能关掉窗口——压入 SDL_QUIT 事件后，
-// Run 应当按「用户点关闭按钮」的同一条路径退出。
+// RequestClose：应用层「退出」菜单项要能关掉窗口——压入退出事件后，
+// 主循环应当按「用户点关闭按钮」的同一条路径退出。
 func TestRequestCloseStopsRun(t *testing.T) {
-	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
-	defer os.Unsetenv("SDL_VIDEO_DRIVER")
-
-	win, err := NewWindow(200, 120, "close-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer win.Close()
+	win := newTestWindow(t, 200, 120, "close-test")
 	const src = `<!doctype html><html><head><style>body{margin:0}</style></head>
 	<body><div style="height:400px;background-color:#DBEAFE"></div></body></html>`
 	if _, err := win.OpenDocument(src); err != nil {
 		t.Fatal(err)
 	}
 
-	// 不设 autoExit：只靠 RequestClose 退出，若事件没被消费，Run 会一直
+	// 不设 autoExit：只靠 RequestClose 退出，若事件没被消费，主循环会一直
 	// 跑下去（测试会超时失败）。
-	// 注意 SDL 要求窗口生命周期在同一 OS 线程：Run 必须留在创建窗口的
-	// goroutine 上，关窗请求从另一个 goroutine 发（SDL_PushEvent 线程安全）。
 	go func() {
 		time.Sleep(200 * time.Millisecond)
 		win.RequestClose()
@@ -277,114 +268,15 @@ func TestRequestCloseStopsRun(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 	if el := time.Since(start); el > 3*time.Second {
-		t.Fatalf("RequestClose 后 Run 仍跑了 %v 才退出（SDL_QUIT 事件没进事件循环）", el)
+		t.Fatalf("RequestClose 后主循环仍跑了 %v 才退出（退出事件没进事件循环）", el)
 	}
 }
 
-func pushEvent(buf *[eventBufferSize]byte) {
-	// SDL_PushEvent（SDL_events.h 文档）：返回 1=成功、0=被事件过滤器丢弃、
-	// 负数=失败。Windows x64 下 int 返回值只保证低 32 位有效，先截 int32 判。
-	if r := int32(sdlPushEvent(uintptr(unsafe.Pointer(&buf[0])))); r < 0 {
-		panic(fmt.Sprintf("SDL_PushEvent failed: ret=%d err=%s", r, lastError()))
-	} else if r == 0 {
-		panic("SDL_PushEvent filtered: 事件被过滤，测试前提不成立")
-	}
-}
-
-func pushMouseButtonUp(x, y int) {
-	var buf [eventBufferSize]byte
-	put32(buf[0:], eventMouseButtonUp)
-	buf[16] = mouseButtonLeft
-	buf[17] = 1 // SDL_RELEASED
-	put32(buf[20:], uint32(x))
-	put32(buf[24:], uint32(y))
-	pushEvent(&buf)
-}
-
-func pushMouseButtonDown(x, y int) {
-	var buf [eventBufferSize]byte
-	put32(buf[0:], eventMouseButtonDown)
-	buf[16] = mouseButtonLeft
-	buf[17] = 0 // SDL_PRESSED
-	put32(buf[20:], uint32(x))
-	put32(buf[24:], uint32(y))
-	pushEvent(&buf)
-}
-
-func pushMouseMotion(x, y int) {
-	var buf [eventBufferSize]byte
-	// SDL_MouseMotionEvent：type@0 ts@4 windowID@8 which@12 state@16 x@20 y@24
-	put32(buf[0:], eventMouseMotion)
-	put32(buf[8:], 1)
-	buf[16] = 1 // SDL_BUTTON_LMASK：左键按住
-	put32(buf[20:], uint32(x))
-	put32(buf[24:], uint32(y))
-	pushEvent(&buf)
-}
-
-func pushTextInput(s string) {
-	var buf [eventBufferSize]byte
-	put32(buf[0:], eventTextInput)
-	copy(buf[12:], s) // char text[32]，尾部天然 NUL
-	pushEvent(&buf)
-}
-
-func pushKeyDown(sym uint32) {
-	pushKeyDownMods(sym, 0)
-}
-
-func pushKeyDownMods(sym uint32, mod uint16) {
-	var buf [eventBufferSize]byte
-	put32(buf[0:], eventKeyDown)
-	buf[12] = 1 // SDL_PRESSED
-	put32(buf[20:], sym)
-	buf[24] = byte(mod)
-	buf[25] = byte(mod >> 8)
-	pushEvent(&buf)
-}
-
-// 剪贴板占用探测用的系统调用：Windows 的剪贴板是全局独占资源，某个
-// 常驻程序打开它却没关闭时，别的进程读写都会失败。
-var (
-	procOpenClipboard  = windows.NewLazySystemDLL("user32.dll").NewProc("OpenClipboard")
-	procCloseClipboard = windows.NewLazySystemDLL("user32.dll").NewProc("CloseClipboard")
-)
-
-// skipIfClipboardBusy 在系统剪贴板被别的进程占着时跳过测试。
-func skipIfClipboardBusy(t *testing.T) {
-	t.Helper()
-	h, _, _ := procOpenClipboard.Call(0)
-	if h == 0 {
-		t.Skip("系统剪贴板被其它进程占用，跳过剪贴板测试")
-	}
-	procCloseClipboard.Call(h)
-}
-
-// clipboardText 读回系统剪贴板（测试用）。走生产的 readClipboardText：
-// SDL_GetClipboardText 返回 SDL 分配的 C 字符串，必须用 SDL_free 释放。
-func clipboardText() string {
-	return readClipboardText()
-}
-
-// writeClipboardRaw 写入任意文本（含空串），用于测试结束后恢复用户剪贴板。
-func writeClipboardRaw(s string) {
-	buf, ptr := cBytes(s)
-	sdlSetClipboardText(ptr)
-	runtime.KeepAlive(buf)
-}
-
-// 端到端滚轮事件链：注入 SDL_MOUSEWHEEL → decodeEvent → Run 消费 →
+// 端到端滚轮事件链：注入滚轮事件 → 后端解码 → 主循环消费 →
 // OnDocumentWheel 滚文档 → ChangeCount 变化触发重排 → 元素 rect 平移。
 // dummy 驱动不会自发产生滚轮（无真实指针），必须注入验证整条链路。
 func TestRunConsumesInjectedWheel(t *testing.T) {
-	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
-	defer os.Unsetenv("SDL_VIDEO_DRIVER")
-
-	win, err := NewWindow(300, 200, "wheel-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer win.Close()
+	win := newTestWindow(t, 300, 200, "wheel-test")
 
 	const src = `<!doctype html><html><head><style>body{margin:0}</style></head>` +
 		`<body><div id="p" style="height:800px;background-color:#2563EB"></div></body></html>`
@@ -403,7 +295,7 @@ func TestRunConsumesInjectedWheel(t *testing.T) {
 
 	// 滚轮向下（y 负 = 朝用户）→ 引擎 dy>0 → scrollTop +100（每档 100px，
 	// 与 Chrome/Windows 一致）→ 内容上移 100px；平滑滚动在 300ms 内收敛。
-	pushMouseWheel(150, 100, 0, -1)
+	mouseWheel(win, 150, 100, 0, -1)
 
 	win.SetAutoExit(300 * time.Millisecond)
 	if err := win.Run(); err != nil {
@@ -417,30 +309,13 @@ func TestRunConsumesInjectedWheel(t *testing.T) {
 	}
 }
 
-func pushMouseWheel(x, y int, wx, wy int32) {
-	var buf [eventBufferSize]byte
-	put32(buf[0:], eventMouseWheel)
-	put32(buf[16:], uint32(wx))
-	put32(buf[20:], uint32(wy))
-	put32(buf[36:], uint32(x)) // mouseX/mouseY（SDL ≥2.26，DLL 2.28 ✓）
-	put32(buf[40:], uint32(y))
-	pushEvent(&buf)
-}
-
 // 端到端：滚轮落在「可滚长页上的 textarea」时，位移必须被 textarea 抢占，
 // 文档级滚动不得同时发生。文档滚动的可观测面 = #tall 顶层 rect 平移；
 // textarea 滚动的可观测面 = ChangeCount 变化（onChanged 触发）而外层
-// rect 不动。补引擎白盒之外的盲区：真实 SDL 事件坐标（mouseX/Y@36/40）
-// → ElementAt 命中 textarea → wheelScrollTextarea 消费整段位移。
+// rect 不动。补引擎白盒之外的盲区：真实事件坐标（mouseX/Y）→
+// ElementAt 命中 textarea → 引擎的 textarea 滚轮消费整段位移。
 func TestRunWheelOverTextareaKeepsDocumentStill(t *testing.T) {
-	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
-	defer os.Unsetenv("SDL_VIDEO_DRIVER")
-
-	win, err := NewWindow(300, 200, "wheel-ta-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer win.Close()
+	win := newTestWindow(t, 300, 200, "wheel-ta-test")
 
 	var val []byte
 	val = append(val, `<!doctype html><html><head><style>body{margin:0}</style></head><body>
@@ -470,8 +345,8 @@ func TestRunWheelOverTextareaKeepsDocumentStill(t *testing.T) {
 
 	// 两档滚轮都落在 textarea 中心：长页 contentH=800 > 视口 200，
 	// 若位移漏到根元素，#tall top 会变成 -40/-80。
-	pushMouseWheel(cx, cy, 0, -1)
-	pushMouseWheel(cx, cy, 0, -1)
+	mouseWheel(win, cx, cy, 0, -1)
+	mouseWheel(win, cx, cy, 0, -1)
 
 	win.SetAutoExit(300 * time.Millisecond)
 	if err := win.Run(); err != nil {
@@ -485,3 +360,17 @@ func TestRunWheelOverTextareaKeepsDocumentStill(t *testing.T) {
 		t.Fatal("ChangeCount 未变：textarea 没有滚动（滚轮位移被丢弃）")
 	}
 }
+
+// skipIfClipboardUnavailable 在系统剪贴板不可用时跳过测试。
+//
+// Windows 的剪贴板是全局独占资源：某个常驻程序打开它却没关闭时，别的
+// 进程读写都会失败（无桌面会话的 CI 环境更是完全没有）。写一段再读回，
+// 读不回来说明这会儿用不了剪贴板，剪贴板相关的用例直接跳过。
+func skipIfClipboardUnavailable(t *testing.T) {
+	t.Helper()
+	clipboard.SetText("ghromex-clipboard-probe")
+	if clipboard.Text() != "ghromex-clipboard-probe" {
+		t.Skip("系统剪贴板不可用（被其它进程占用或没有桌面会话），跳过剪贴板测试")
+	}
+}
+

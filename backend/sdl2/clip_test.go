@@ -8,7 +8,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/core"
 )
 
 // 裁剪栈回归：PushClip/PopClip 与 SDL_RenderSetClipRect 的绑定语义
@@ -92,7 +92,7 @@ func TestClipAffectsDrawing(t *testing.T) {
 		i := (y*W + x) * 4
 		return b[i : i+4]
 	}
-	red := engine.NewColor(255, 0, 0, 255)
+	red := core.NewColor(255, 0, 0, 255)
 
 	// 校准：无裁剪画红块，记录红/黑两种像素在本格式下的字节序列
 	win.g.Clear(0, 0, 0, 255)

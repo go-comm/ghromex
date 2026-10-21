@@ -5,93 +5,52 @@ import (
 	"image/png"
 	"os"
 	"strings"
+
+	"github.com/go-comm/ghromex/core"
 )
 
-type SizeType uint8
+// 跨层契约（接口与它们签名里用到的值类型）放在 core 包：平台后端只依赖
+// core，不依赖 engine。这里的类型别名让对外 API 一字不变，引擎与后端
+// 实现的仍是同一个类型，接口照样互相满足。
+type (
+	// SizeType 是带单位尺寸的种类。
+	SizeType = core.SizeType
+	// Size 表示一个带单位的尺寸值。
+	Size = core.Size
+	// Color 表示 RGBA 颜色。
+	Color = core.Color
+	// Paint 是一次绘制动作的属性集合。
+	Paint = core.Paint
+	// Image 是绘制目标里的一张位图。
+	Image = core.Image
+	// Sprite 是一块可 blit 的位图。
+	Sprite = core.Sprite
+	// SpriteDrawer 是 Graphics 的可选扩展：支持位图 blit。
+	SpriteDrawer = core.SpriteDrawer
+	// Graphics 是渲染后端的抽象。
+	Graphics = core.Graphics
+	// Clipper 是 Graphics 的可选扩展：矩形裁剪栈。
+	Clipper = core.Clipper
+)
 
+// 尺寸单位（与 core 同名常量，类型一致）。
 const (
-	SIZE_PIXEL SizeType = iota
-	SIZE_POINT
-	SIZE_DISPLAYPORT
-	SIZE_PERCENT
-	SIZE_AUTO
+	SIZE_PIXEL       = core.SIZE_PIXEL
+	SIZE_POINT       = core.SIZE_POINT
+	SIZE_DISPLAYPORT = core.SIZE_DISPLAYPORT
+	SIZE_PERCENT     = core.SIZE_PERCENT
+	SIZE_AUTO        = core.SIZE_AUTO
 )
 
-// Size 表示一个带单位的尺寸值。
-type Size interface {
-	Type() SizeType
-	Pixel() int
-	SetPixel(v int)
-	Point() int
-	SetPoint(v int)
-	Displayport() int
-	SetDisplayport(v int)
-	Percent() float32
-	SetPercent(v float32)
-	Disc(int) int
-}
-
-func NewZeroSize() Size {
-	return &size{tp: SIZE_PIXEL, intVal: 0, float32Val: 0}
-}
+// 构造器转发到 core（值类型与实现同处 core，跨层共用同一份）。
+func NewZeroSize() Size { return core.NewZeroSize() }
 
 // NewAutoSize 表示 CSS 中的 auto。
-func NewAutoSize() Size {
-	return &size{tp: SIZE_AUTO}
-}
+func NewAutoSize() Size { return core.NewAutoSize() }
 
+// NewSize 造一个带单位的尺寸。
 func NewSize(tp SizeType, intVal int, float32Val float32) Size {
-	return &size{tp: tp, intVal: intVal, float32Val: float32Val}
-}
-
-type size struct {
-	tp         SizeType
-	intVal     int
-	float32Val float32
-}
-
-func (s *size) Type() SizeType {
-	return s.tp
-}
-
-func (s *size) Pixel() int {
-	return s.intVal
-}
-
-func (s *size) SetPixel(v int) {
-	s.tp = SIZE_PIXEL
-	s.intVal = v
-}
-
-func (s *size) Point() int {
-	return s.intVal
-}
-
-func (s *size) SetPoint(v int) {
-	s.tp = SIZE_POINT
-	s.intVal = v
-}
-
-func (s *size) Displayport() int {
-	return s.intVal
-}
-
-func (s *size) SetDisplayport(v int) {
-	s.tp = SIZE_DISPLAYPORT
-	s.intVal = v
-}
-
-func (s *size) Percent() float32 {
-	return s.float32Val
-}
-
-func (s *size) SetPercent(v float32) {
-	s.tp = SIZE_PERCENT
-	s.float32Val = v
-}
-
-func (s *size) Disc(int) int {
-	return 0
+	return core.NewSize(tp, intVal, float32Val)
 }
 
 // resolveLen 将带单位的 Size 解析为像素值；auto/nil 返回 -1。
@@ -113,46 +72,8 @@ func resolveLen(s Size, base int) int {
 	}
 }
 
-// Color 表示 RGBA 颜色。
-type Color interface {
-	RGBA() (r, g, b, a uint8)
-}
-
-type colorVal struct {
-	r, g, b, a uint8
-}
-
-func NewColor(r, g, b, a uint8) Color {
-	return &colorVal{r: r, g: g, b: b, a: a}
-}
-
-func (c *colorVal) RGBA() (r, g, b, a uint8) {
-	return c.r, c.g, c.b, c.a
-}
-
-type Image interface {
-}
-
-// Sprite 是一块可 blit 的位图（RGBA8888，每像素 4 字节，行主序）。
-//
-// 目前只用于圆角抗锯齿的"角标精灵"：整块圆角一次 blit，代替逐像素的
-// 半透明小方块。逐像素画圆角边缘的绘制调用极多——实测 portal 页一帧
-// 18524 次 1×1 绘制，占全部绘制调用的 3/4；GPU 路径上每次都是驱动
-// 调用，帧时间被拖到几十毫秒，120ms 的滚动动画被切成两三帧，看起来就是
-// "一卡一卡、还会闪"。整角一次 blit 把这部分降到 4 次/盒。
-//
-// alpha 为 0 的像素表示"不着色"（blit 时不覆盖底色），与逐像素路径里
-// scaledAlpha 返回 ok=false 的跳过语义一致。
-type Sprite struct {
-	W, H int
-	Pix  []byte
-}
-
-// SpriteDrawer 是 Graphics 的可选扩展：支持位图 blit 的后端实现它。
-// 不实现的后端回落到逐像素绘制（结果一致，只是慢）。
-type SpriteDrawer interface {
-	DrawSprite(x, y int, s *Sprite)
-}
+// NewColor 造一个 RGBA 颜色。
+func NewColor(r, g, b, a uint8) Color { return core.NewColor(r, g, b, a) }
 
 // Rect 在这里表示盒模型四边的尺寸集合（left/right/top/bottom）。
 type Rect interface {
@@ -193,106 +114,14 @@ func (r *rect) Bottom() Size {
 	return r.bottom
 }
 
-// Paint 是一次绘制动作的属性集合（类比 Android Paint / Skia Paint）。
-// Background 为文字落点的背景色（沿父链最近实底，可能 nil）：供 LCD
-// 子像素合成使用——子像素渲染必须知道底色才能合成出正确过渡色。
-type Paint interface {
-	Size() Size
-	SetSize(size Size)
-	Color() Color
-	SetColor(color Color)
-	FontFamily() string
-	SetFontFamily(family string)
-	Bold() bool
-	SetBold(bold bool)
-	Background() Color
-	SetBackground(color Color)
-}
-
-func NewPaint() Paint {
-	p := &paint{size: NewSize(SIZE_PIXEL, 16, 0), color: NewColor(0, 0, 0, 255)}
-	return p
-}
-
-type paint struct {
-	size   Size
-	color  Color
-	family string
-	bold   bool
-	bg     Color
-}
-
-func (p *paint) Size() Size {
-	return p.size
-}
-
-func (p *paint) SetSize(size Size) {
-	if size != nil {
-		p.size = size
-	}
-}
-
-func (p *paint) Color() Color {
-	return p.color
-}
-
-func (p *paint) SetColor(color Color) {
-	if color != nil {
-		p.color = color
-	}
-}
-
-func (p *paint) FontFamily() string {
-	return p.family
-}
-
-func (p *paint) SetFontFamily(family string) {
-	p.family = family
-}
-
-func (p *paint) Bold() bool {
-	return p.bold
-}
-
-func (p *paint) SetBold(bold bool) {
-	p.bold = bold
-}
-
-func (p *paint) Background() Color {
-	return p.bg
-}
-
-func (p *paint) SetBackground(color Color) {
-	p.bg = color
-}
+// NewPaint 造一份默认绘制属性（16px 常规字重、黑色）。
+func NewPaint() Paint { return core.NewPaint() }
 
 // Graphics 是渲染后端的抽象。布局引擎依赖 MeasureText 获取文本度量，
 // 渲染阶段通过 DrawText/DrawColor/DrawImage 落笔。
-type Graphics interface {
-	DrawText(x, y, w, h int, paint Paint, text string)
-	DrawColor(x, y, w, h int, color Color)
-	DrawImage(x, y, w, h int, image Image)
-	// MeasureText 返回文本在给定字号/粗体/字族下的像素宽高。
-	// family 传 CSS font-family 原值（可含逗号列表）；度量必须与 DrawText
-	// 使用同一字体解析规则，否则混排宽度会错位。
-	MeasureText(text string, fontSize int, bold bool, family string) (w, h int)
-	// FontMetrics 返回文本在给定字号/粗体/字族下的**行度量**：ascent 为
-	// 基线以上的像素高度，descent 为基线以下的像素高度，二者之和即行盒
-	// 高度。口径对齐浏览器 line-height:normal（Chrome 取字体 hhea 的
-	// ascender+descender+lineGap），行盒按基线对齐各内联盒。
-	// text 为空时返回主字体的度量（不含逐字回退）——用于行盒的 strut
-	// （块级自身的字体）。
-	FontMetrics(text string, fontSize int, bold bool, family string) (ascent, descent int)
-}
-
-// Clipper 是 Graphics 的可选扩展：矩形裁剪栈。overflow 非 visible 的
-// 元素绘制其内容前 PushClip、画完 PopClip，超出裁剪区的像素不落笔。
-// 实现方可自行选择不支持（不实现本接口时渲染层退化为不裁剪，内容
-// 可能画出盒外——README 已知限制）。栈语义：每层与上一层求交集。
-type Clipper interface {
-	PushClip(x, y, w, h int)
-	PopClip()
-}
+//
+// 接口本体在 core 包（见 core.Graphics）：平台后端只依赖 core，不反向
+// 依赖 engine。这里的别名保证对外 API 不变、两边实现的是同一类型。
 
 // pushClip 对支持裁剪的后端压栈，返回是否真的压了栈——调用方必须据此
 // 配对 popClip，否则非 Clipper 后端/退化矩形（w 或 h ≤ 0）漏压却出栈会

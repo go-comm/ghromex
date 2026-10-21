@@ -7,36 +7,34 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"time"
 	"unsafe"
 
-	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/core"
 )
 
-// Window 是 SDL2 窗口，实现 engine.Viewport，承载单个 HTMLDocument。
+// Window 是 SDL2 窗口：平台层，只负责窗口/渲染器/字体纹理/事件解码/绘制。
+//
+// 这里**不认识引擎**：文档与主循环（事件 → 引擎输入处理 → 重排 → 重绘）
+// 在上一层（browser）做。后端只提供三样东西：
+//
+//   - 视口契约（core.Viewport / core.Graphics）：引擎靠它量尺寸、落笔；
+//   - 事件（Event）：平台事件由上层解释成引擎动作；
+//   - 呈现（Present）：把这一帧提交到窗口。
+//
+// 这样依赖方向是单向的：core ← engine，core ← backend/sdl2。
 type Window struct {
 	w, h     int
 	title    string
 	win      uintptr
 	renderer uintptr
 	g        *Graphics
-	doc      engine.HTMLDocument
-
-	lastChange  int64
-	autoExit    time.Duration
-	hasAutoExit bool
-
-	// dirty 为 true 才重绘：内容变化/窗口尺寸变化/暴露(EXPOSED)/首帧。
-	// 空闲时零绘制，避免每帧产生的绘制指令垃圾把稳态内存抬高数 MB；
-	// 但 EXPOSED 必须重绘——否则无 DWM 环境下窗口被别窗覆盖后永不可恢复。
-	dirty bool
 
 	// shown 记录窗口是否已显示。首帧 Present 之前保持隐藏（建窗带
-	// windowHidden），首帧提交后才 ShowWindow + RaiseWindow——见 present。
+	// windowHidden），首帧提交后才 ShowWindow + RaiseWindow——见 Present。
 	shown bool
 
 	// closed 记录窗口是否已关闭：Close 幂等（重复 SDL_Destroy* 是
-	// use-after-free），关闭后 Run/绘制一律拒绝。
+	// use-after-free），关闭后绘制一律拒绝。
 	closed bool
 }
 
@@ -125,60 +123,26 @@ func NewWindow(w, h int, title string) (*Window, error) {
 	return &Window{
 		w: w, h: h, title: title,
 		win: hwnd, renderer: renderer,
-		g:          NewGraphics(renderer, ""),
-		lastChange: -1,
+		g: NewGraphics(renderer, ""),
 	}, nil
 }
 
-// ViewportWidth 实现 engine.Viewport。
+// ViewportWidth 实现 core.Viewport。
 func (win *Window) ViewportWidth() int { return win.w }
 
-// ViewportHeight 实现 engine.Viewport。
+// ViewportHeight 实现 core.Viewport。
 func (win *Window) ViewportHeight() int { return win.h }
 
-// Graphics 实现 engine.Viewport。
-func (win *Window) Graphics() engine.Graphics { return win.g }
+// Graphics 实现 core.Viewport。
+func (win *Window) Graphics() core.Graphics { return win.g }
 
-// OpenDocument 解析并布局 HTML 源码，绑定到本窗口。
-func (win *Window) OpenDocument(src string) (engine.HTMLDocument, error) {
-	doc, err := engine.OpenDocument(win, src)
-	if err != nil {
-		return nil, err
-	}
-	win.doc = doc
-	win.lastChange = doc.ChangeCount()
-	win.dirty = true // 首次打开强制出一帧
-	if t := doc.Title(); t != "" {
-		b, p := cBytes(t)
-		sdlSetWindowTitle(win.win, p)
-		runtime.KeepAlive(b)
-	}
-	return doc, nil
-}
-
-// SetAutoExit 让 Run 在窗口打开指定时长后自动返回（调试/CI 用）。
-func (win *Window) SetAutoExit(d time.Duration) {
-	win.autoExit = d
-	win.hasAutoExit = d > 0
-}
-
-// clearCanvas 清屏：先白底，再用文档的画布背景色（CSS canvas propagation，
-// html/body 背景）铺满整个视口——否则内容高度以下的区域会露出白底，
-// 窗口看起来“铺不满”。
-func (win *Window) clearCanvas() {
-	win.g.Clear(255, 255, 255, 255)
-	if bg := engine.CanvasBackground(win.doc); bg != nil {
-		win.g.DrawColor(0, 0, win.w, win.h, bg)
-	}
-}
-
-// present 提交当前帧；首帧提交后才真正显示窗口。
+// Present 提交当前帧；首帧提交后才真正显示窗口。
 //
 // 时序原因见 NewWindow 中 windowHidden 的注释：黑底出现在“建窗可见”与
 // “首帧就绪”之间的空窗期，因此建窗隐藏，等这一帧内容进了交换链
 // （Present 已返回）再 ShowWindow——窗口一出现就是完整页面，没有黑闪。
 // RaiseWindow 复原建窗即可见时的初始前台/焦点（否则可能落在别的窗口后面）。
-func (win *Window) present() {
+func (win *Window) Present() {
 	win.g.Present()
 	if win.shown {
 		return
@@ -188,15 +152,123 @@ func (win *Window) present() {
 	sdlRaiseWindow(win.win)
 }
 
-// RenderFrame 手动绘制一帧（清屏+渲染+提交），供无头渲染测试/截图使用；
-// 常规用法交给 Run 的帧循环。
-func (win *Window) RenderFrame() {
-	if win.doc == nil {
-		return
+// Delay 等待若干毫秒（主循环空闲时用来省 CPU，不空转）。
+func (win *Window) Delay(ms int) { sdlDelay(uintptr(ms)) }
+
+// PollEvent 取下一个平台事件；队列为空时返回 false。
+//
+// 事件怎么解释成引擎动作（点击、按键、滚轮）是上一层的事：后端只解码
+// SDL 事件，不认识文档与引擎。
+func (win *Window) PollEvent() (Event, bool) {
+	ev, ok := pollEvent()
+	if !ok {
+		return Event{}, false
 	}
-	win.clearCanvas()
-	engine.RenderNode(win.g, win.doc)
-	win.present()
+	return win.toPublicEvent(ev), true
+}
+
+// toPublicEvent 把内部解码结果转成公开的 Event。
+//
+// 窗口尺寸变化顺带更新后端自己的尺寸：视口尺寸是平台事实，上层只管
+// 读（ViewportWidth/Height）。
+//
+// 认不出的事件（窗口移动、鼠标进入/离开等）返回 EventUnknown——上层按
+// 未知事件忽略即可（不能落到 EventQuit 上，否则窗口会莫名其妙地退出）。
+func (win *Window) toPublicEvent(ev event) Event {
+	switch ev.typ {
+	case eventQuit:
+		return Event{Kind: EventQuit}
+	case eventWindow:
+		switch ev.windowEvent {
+		case windowEventClose:
+			return Event{Kind: EventWindowClose}
+		case windowEventResized, windowEventSizeChanged:
+			if ev.data1 > 0 && ev.data2 > 0 {
+				win.w, win.h = int(ev.data1), int(ev.data2)
+			}
+			return Event{Kind: EventWindowResized, Width: win.w, Height: win.h}
+		case windowEventExposed:
+			return Event{Kind: EventWindowExposed}
+		}
+	case eventMouseMotion:
+		return Event{Kind: EventMouseMotion, X: int(ev.x), Y: int(ev.y)}
+	case eventMouseButtonDown:
+		return Event{Kind: EventMouseButtonDown, Button: ev.button, X: int(ev.x), Y: int(ev.y)}
+	case eventMouseButtonUp:
+		return Event{Kind: EventMouseButtonUp, Button: ev.button, X: int(ev.x), Y: int(ev.y)}
+	case eventMouseWheel:
+		return Event{Kind: EventMouseWheel, WheelX: int(ev.wheelX), WheelY: int(ev.wheelY), X: int(ev.x), Y: int(ev.y)}
+	case eventKeyDown:
+		return Event{Kind: EventKeyDown, Key: int(ev.sym), Mod: ev.mod}
+	case eventTextInput:
+		return Event{Kind: EventTextInput, Text: ev.text}
+	}
+	return Event{}
+}
+
+// Ticks 返回自 SDL 初始化以来的毫秒数（主循环用来算自动退出时刻）。
+func (win *Window) Ticks() uint32 { return uint32(sdlGetTicks()) }
+
+// ModState 返回当前修饰键位掩码（KmodShift/KmodCtrl/KmodAlt）。
+//
+// 文本输入通道会混进 Ctrl+V 之类的控制码，要靠它把「组合键」和「打字」
+// 分开——所以掩码的含义属于平台层，由后端定义。
+func (win *Window) ModState() uint16 { return uint16(sdlGetModState()) }
+
+// InjectEvent 往事件队列注入一个平台事件（测试用）。
+//
+// 真实事件由 SDL 产生；测试要用「按下鼠标」「敲键盘」这类事件驱动窗口，
+// 就靠它——比在测试里手搓 SDL_Event 字节布局稳得多。
+//
+// 字节布局按 SDL2 的事件结构填（字段偏移见 sdl2.go 的 decodeEvent 注释）：
+// 类型码用 SDL 的值，事件体内各字段的位置与真实事件一致，decodeEvent
+// 才能照常解出。
+func (win *Window) InjectEvent(ev Event) {
+	var buf [eventBufferSize]byte
+	put32 := func(off int, v uint32) { binary.LittleEndian.PutUint32(buf[off:off+4], v) }
+	switch ev.Kind {
+	case EventQuit:
+		put32(0, eventQuit)
+	case EventWindowClose:
+		put32(0, eventWindow)
+		put32(12, uint32(windowEventClose))
+	case EventWindowResized:
+		put32(0, eventWindow)
+		put32(12, uint32(windowEventResized))
+		put32(16, uint32(int32(ev.Width)))
+		put32(20, uint32(int32(ev.Height)))
+	case EventWindowExposed:
+		put32(0, eventWindow)
+		put32(12, uint32(windowEventExposed))
+	case EventMouseMotion:
+		put32(0, eventMouseMotion)
+		put32(20, uint32(int32(ev.X)))
+		put32(24, uint32(int32(ev.Y)))
+	case EventMouseButtonDown, EventMouseButtonUp:
+		if ev.Kind == EventMouseButtonDown {
+			put32(0, eventMouseButtonDown)
+		} else {
+			put32(0, eventMouseButtonUp)
+		}
+		buf[16] = ev.Button
+		buf[17] = 1 // 按下态
+		put32(20, uint32(int32(ev.X)))
+		put32(24, uint32(int32(ev.Y)))
+	case EventMouseWheel:
+		put32(0, eventMouseWheel)
+		put32(16, uint32(int32(ev.WheelX)))
+		put32(20, uint32(int32(ev.WheelY)))
+		put32(36, uint32(int32(ev.X)))
+		put32(40, uint32(int32(ev.Y)))
+	case EventKeyDown:
+		put32(0, eventKeyDown)
+		put32(20, uint32(int32(ev.Key)))
+		binary.LittleEndian.PutUint16(buf[24:26], ev.Mod)
+	case EventTextInput:
+		put32(0, eventTextInput)
+		copy(buf[12:44], ev.Text)
+	}
+	sdlPushEvent(uintptr(unsafe.Pointer(&buf[0])))
 }
 
 // Screenshot 回读渲染目标当前内容（32bpp 原生字节，行主序）及其像素格式与尺寸。
@@ -227,201 +299,6 @@ func (win *Window) Screenshot() ([]byte, uint32, int, int, error) {
 		return nil, 0, 0, 0, fmt.Errorf("SDL_RenderReadPixels: %s", e)
 	}
 	return buf, format, w, h, nil
-}
-
-// Run 进入事件循环：处理关闭/尺寸变化/暴露/点击，并按内容变化重排、逐帧重绘。
-func (win *Window) Run() error {
-	if win.closed {
-		return fmt.Errorf("window already closed")
-	}
-	if win.doc == nil {
-		return fmt.Errorf("window has no document, call OpenDocument first")
-	}
-	start := uint32(sdlGetTicks())
-	var exitAt uint32
-	if win.hasAutoExit {
-		exitAt = start + uint32(win.autoExit/time.Millisecond)
-	}
-
-	running := true
-	// 鼠标拖选状态：按下点只记录锚点，位移超过阈值才真正扩选。
-	// 这样单击仍走原 click 链路（按钮/链接/select/radio 的行为不变），
-	// 拖动结束也不派发 click——浏览器里拖选不应触发链接导航。
-	mouseDown := false
-	selecting := false
-	dragSelect := false
-	downX, downY := 0, 0
-	for running {
-		for {
-			ev, ok := pollEvent()
-			if !ok {
-				break
-			}
-			switch ev.typ {
-			case eventQuit:
-				running = false
-			case eventWindow:
-				if drawDebug {
-					// 诊断行：SDL2 枚举 EXPOSED=0x03 SHOWN=0x01 MOVED=0x04
-					// RESIZED=0x05 CLOSE=0x0E（完整表见 sdl2.go 常量注释）。
-					// Win7 覆盖异常时据此判断事件是否到达。
-					fmt.Fprintf(os.Stderr, "[ghromex] win-event 0x%02X data=(%d,%d)\n", ev.windowEvent, ev.data1, ev.data2)
-				}
-				switch ev.windowEvent {
-				case windowEventClose:
-					running = false
-				case windowEventResized, windowEventSizeChanged:
-					if ev.data1 > 0 && ev.data2 > 0 {
-						win.w = int(ev.data1)
-						win.h = int(ev.data2)
-						win.lastChange = -1 // 强制重排
-						win.dirty = true
-					}
-				case windowEventExposed:
-					// 被覆盖后重新暴露：内容已丢（Win7 无 DWM + GPU 后缓冲），
-					// 布局未变无需重排，强制重绘即可。
-					win.dirty = true
-				}
-			case eventKeyDown:
-				if win.doc != nil {
-					// Ctrl+C：引擎只给选区文本，写系统剪贴板由后端完成。
-					// 无选区时 SelectedText 返回 false，保留用户原有剪贴板
-					//（浏览器 Ctrl+C 无选区也不会清空剪贴板）。
-					if ev.mod&kmodCtrl != 0 && (ev.sym == 'c' || ev.sym == 'C') {
-						if text, ok := engine.SelectedText(win.doc); ok {
-							setClipboardText(text)
-						}
-					}
-					// Ctrl+V：读系统剪贴板，交给引擎粘贴（引擎不碰平台
-					// 剪贴板，只负责在光标处落文本）。
-					if ev.mod&kmodCtrl != 0 && (ev.sym == 'v' || ev.sym == 'V') {
-						if text := readClipboardText(); text != "" {
-							engine.OnDocumentPaste(win.doc, text)
-						}
-					}
-					// 控制键（Backspace/Tab/Enter/方向键/Home/End）、Ctrl+A
-					// 全选、Shift+方向键扩选；value/焦点变化经 markChanged
-					// 触发 changed → 下方重排+重绘链路，无需手动置 dirty。
-					engine.OnDocumentKeyDownMods(win.doc, int(ev.sym), ev.mod)
-				}
-			case eventTextInput:
-				if win.doc != nil && ev.text != "" {
-					// 带 Ctrl 的"文本"不是打字：Windows 把 Ctrl+V 之类的
-					// 组合键以控制码（0x16 等）送进文本通道，照单插入会在
-					// 输入框里留下不可见控制字符。带 Ctrl 且不带 Alt 时丢弃
-					//（AltGr 组合仍需放行——部分布局用 Ctrl+Alt 打字）。
-					mods := sdlGetModState()
-					if mods&kmodCtrl != 0 && mods&kmodAlt == 0 {
-						break
-					}
-					engine.OnDocumentTextInput(win.doc, ev.text)
-				}
-			case eventMouseButtonDown:
-				if ev.button == mouseButtonLeft {
-					mouseDown = true
-					dragSelect = false
-					downX, downY = int(ev.x), int(ev.y)
-					if win.doc != nil {
-						selecting = engine.OnDocumentMouseDown(win.doc, int(ev.x), int(ev.y))
-					}
-				}
-			case eventMouseMotion:
-				if mouseDown && selecting && win.doc != nil {
-					dx, dy := int(ev.x)-downX, int(ev.y)-downY
-					if dx < 0 {
-						dx = -dx
-					}
-					if dy < 0 {
-						dy = -dy
-					}
-					if !dragSelect && (dx > 3 || dy > 3) {
-						dragSelect = true
-					}
-					if dragSelect {
-						engine.OnDocumentMouseDrag(win.doc, int(ev.x), int(ev.y))
-					}
-				}
-			case eventMouseButtonUp:
-				if ev.button == mouseButtonLeft {
-					wasDrag := dragSelect
-					mouseDown = false
-					selecting = false
-					dragSelect = false
-					if win.doc != nil {
-						engine.OnDocumentMouseUp(win.doc)
-					}
-					if wasDrag {
-						// 拖选结束：不派发 click（否则拖过 <a> 会导航）。
-						if drawDebug {
-							fmt.Fprintf(os.Stderr, "[ghromex] drag-select up(%d,%d)\n", ev.x, ev.y)
-						}
-						break
-					}
-					if win.doc != nil {
-						handled := engine.OnDocumentClick(win.doc, int(ev.x), int(ev.y))
-						if drawDebug {
-							target := engine.ElementAt(win.doc, int(ev.x), int(ev.y))
-							tag := "<none>"
-							if target != nil {
-								tag = target.TagName()
-							}
-							fmt.Fprintf(os.Stderr, "[ghromex] click(%d,%d) hit=%s handled=%v\n", ev.x, ev.y, tag, handled)
-						}
-					}
-				}
-			case eventMouseWheel:
-				// 坐标符号：OnDocumentWheel 要求 dy>0 = 向下滚（scrollTop 增）、
-				// dx>0 = 向右滚；SDL y 正=滚轮向上、x 正=向右 → dy 取反。
-				if win.doc != nil {
-					dx := int(ev.wheelX) * wheelStepPx
-					dy := -int(ev.wheelY) * wheelStepPx
-					if dx == 0 && dy != 0 && sdlGetModState()&kmodShift != 0 {
-						// Shift+滚轮：竖轮转横滚（浏览器同语义）。
-						dx, dy = dy, 0
-					}
-					engine.OnDocumentWheel(win.doc, int(ev.x), int(ev.y), dx, dy)
-				}
-			}
-			if !running {
-				// 关闭事件已到达：不再消费队列里的剩余事件——否则窗口已关
-				// 仍会有点击/按键改写文档并触发重排（对已销毁的渲染器绘制）。
-				break
-			}
-		}
-
-		pending := false
-		if doc := win.doc; doc != nil {
-			if c := doc.ChangeCount(); c != win.lastChange {
-				engine.LayoutDocument(doc)
-				win.lastChange = c
-				win.dirty = true
-			}
-			// 滚动动画：只平移已布局的盒子，不重排（滚动偏移与盒模型无关，
-			// 每帧一次全量级联+布局足以让大页面滚动发顿）。
-			if engine.TickScroll(doc) {
-				win.dirty = true
-			}
-			if win.dirty {
-				win.clearCanvas()
-				engine.RenderNode(win.g, doc)
-				win.present()
-				win.dirty = false
-			}
-			// 布局期可能又标记了变更（滚动动画的下一帧）：此时不能睡 10ms，
-			// 否则每帧白等 10ms，120ms 的动画会被拖到 200ms 以上；空闲时仍
-			// 保留 10ms 休眠省 CPU（present 有 vsync 时本就会自然限帧）。
-			pending = doc.ChangeCount() != win.lastChange || engine.ScrollAnimating(doc)
-		}
-
-		if !pending {
-			sdlDelay(10)
-		}
-
-		if win.hasAutoExit && int32(uint32(sdlGetTicks())-exitAt) >= 0 {
-			running = false
-		}
-	}
-	return nil
 }
 
 // setClipboardText 把 UTF-8 文本写入系统剪贴板。SDL2 的接口是
@@ -535,6 +412,15 @@ func (win *Window) RequestClose() {
 	sdlPushEvent(uintptr(unsafe.Pointer(&buf[0])))
 }
 
+// Closed 报告窗口是否已关闭（Close 之后为 true）。
+func (win *Window) Closed() bool { return win != nil && win.closed }
+
+// Shown 报告窗口是否已经显示（首次 Present 之后为 true）。
+//
+// 窗口建出来时是隐藏的：交换链在首次 Present 前没有有效画面，可见就会
+// 先闪一段黑底。
+func (win *Window) Shown() bool { return win != nil && win.shown }
+
 // Close 释放窗口资源。幂等：重复调用直接返回——重复 SDL_Destroy* 会对已
 // 销毁对象二次释放（use-after-free），句柄不置零也会让后续绘制打到野指针。
 func (win *Window) Close() {
@@ -558,4 +444,4 @@ func (win *Window) Close() {
 	runtime.UnlockOSThread()
 }
 
-var _ engine.Viewport = (*Window)(nil)
+var _ core.Viewport = (*Window)(nil)

@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/core"
 )
 
 // 位图精灵（圆角角标）的上传与混合必须正确：
@@ -36,7 +36,7 @@ func TestDrawSpriteBlendAndFormat(t *testing.T) {
 		pix[i*4+2] = 0x00
 		pix[i*4+3] = 0x80
 	}
-	g.DrawSprite(10, 10, &engine.Sprite{W: 4, H: 4, Pix: pix})
+	g.DrawSprite(10, 10, &core.Sprite{W: 4, H: 4, Pix: pix})
 
 	raw, _, _, _, err := win.Screenshot()
 	if err != nil {

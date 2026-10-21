@@ -1,7 +1,20 @@
-// Package sdl2 是 Ghromex 的 SDL2 渲染后端：窗口、事件循环、文本纹理
+// Package sdl2 是 Ghromex 的 SDL2 渲染后端：窗口、事件解码、文本纹理
 // 缓存与系统剪贴板。纯动态加载 SDL2.dll / SDL2_ttf.dll，无需 CGO 与 C
 // 工具链；非 Windows 平台由 stub_other.go 提供同签名的空实现
 // （NewWindow 返回 ErrUnsupported）。
+//
+// # 分层：后端不认识引擎
+//
+// 本包是**平台层**：只做窗口/渲染器/字体纹理/事件解码/绘制，向上的契约
+// 只有 core 包的（core.Graphics / core.Viewport）。它不 import 引擎，
+// 也不持有文档：
+//
+//   - 平台事件由 PollEvent() 交出去（Event 类型在本包），怎么解释成引擎
+//     动作是上一层（browser）的事；
+//   - 绘制走 core.Graphics 的方法集，实现与引擎用的是同一份接口
+//     （core.Graphics 与 engine.Graphics 是别名），所以两边都满足。
+//
+// 文档与主循环（事件 → 引擎动作 → 重排 → 重绘）在 browser 层。
 //
 // 原生文件对话框不在本包：它是 Windows Shell 的能力，与渲染后端无关。
 // 调用入口在 runtime/dialog（通用 API），平台实现在 backend/dialog。

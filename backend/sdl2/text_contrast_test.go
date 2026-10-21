@@ -9,7 +9,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/core"
 )
 
 // ---------------------------------------------------------------------------
@@ -285,9 +285,9 @@ func TestHintSwitchRebuildsFaceAndTexture(t *testing.T) {
 
 	draw := func() []byte {
 		g.Clear(255, 255, 255, 255)
-		p := engine.NewPaint()
-		p.SetSize(engine.NewSize(engine.SIZE_PIXEL, 13, 0))
-		p.SetColor(engine.NewColor(30, 30, 30, 255))
+		p := core.NewPaint()
+		p.SetSize(core.NewSize(core.SIZE_PIXEL, 13, 0))
+		p.SetColor(core.NewColor(30, 30, 30, 255))
 		g.DrawText(8, 24, 280, 20, p, "灰度Hint")
 		g.Present()
 		buf, _, _, _, err := win.Screenshot()
@@ -334,9 +334,9 @@ func TestContrastSwitchRebuildsTexture(t *testing.T) {
 
 	draw := func() []byte {
 		g.Clear(255, 255, 255, 255)
-		p := engine.NewPaint()
-		p.SetSize(engine.NewSize(engine.SIZE_PIXEL, 13, 0))
-		p.SetColor(engine.NewColor(30, 30, 30, 255))
+		p := core.NewPaint()
+		p.SetSize(core.NewSize(core.SIZE_PIXEL, 13, 0))
+		p.SetColor(core.NewColor(30, 30, 30, 255))
 		g.DrawText(8, 24, 280, 20, p, "灰度Hint")
 		g.Present()
 		buf, _, _, _, err := win.Screenshot()

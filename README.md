@@ -27,6 +27,7 @@
 - 渲染后端目前提供 Windows 实现（`backend/sdl2`，加载 `SDL2.dll` 2.28 与 `SDL2_ttf.dll`）
 - 把 `SDL2.dll`、`SDL2_ttf.dll`（及 `zlib1.dll`）放到工程根目录 `libs/`，或保证系统可搜索到它们
 - 平台边界：`engine` 包是纯 Go、可移植的；`backend/sdl2` 是渲染后端——Windows 提供 SDL2 实现，其它平台 `NewWindow` 返回 `ErrUnsupported`；`runtime/` 是平台能力的通用调用入口（`runtime/dialog` 原生对话框、`runtime/clipboard` 系统剪贴板），平台实现在 `backend/dialog`、`backend/clipboard`；Windows 用纯 Win32 / SDL2 调用实现，其它平台返回 `ErrUnsupported` 或空操作；`browser` 与 `examples/` 都不带构建标签，任意平台 `go build ./...` / `go test ./...` 都能通过，非 Windows 启动窗口时会打印明确提示
+- 依赖方向：`core`（契约：Graphics/Viewport/Paint/Color…，叶子包）← `engine` 与 `backend/*` 各自向上依赖它，再由 `browser`（应用层：窗口 + 文档 + 主循环）把两者缝起来。平台层不 import 引擎，`core/arch_test.go` 把这条规则钉死
 
 ## 快速开始
 
@@ -148,6 +149,8 @@ Win32 COM 调用，无 CGO），消息框走 user32 的 `MessageBoxW`（不需�
 ## 项目结构
 
 ```
+core/             引擎与后端之间的契约（Graphics/Viewport/Paint/Color/Sprite…），
+                  叶子包：engine 与 backend 都只依赖它，依赖方向保持单向
 engine/            渲染引擎（纯 Go，不依赖任何图形后端）
   html_parser.go     HTML 解析 → DOM 树
   css_parser.go      CSS / 内联样式解析
@@ -166,10 +169,12 @@ engine/            渲染引擎（纯 Go，不依赖任何图形后端）
   graphics.go        Graphics 接口 / FakeGraphics / BufferGraphics
   svg_dump.go        布局结果导出 SVG
   element_registry.go 标签原型注册表（自定义元素）
-backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓存（LRU + 像素双上限，
+backend/sdl2/      SDL2 后端：窗口、事件解码、SDL_ttf 文本纹理缓存（LRU + 像素双上限，
                    页面文本段数超限时不再逐帧重渲染）、
                    剪贴板读写（Ctrl+C 写 / Ctrl+V 读，引擎只管文本）、
-                   原生窗口句柄（NativeHandle，供原生对话框当父窗口）
+                   原生窗口句柄（NativeHandle，供原生对话框当父窗口）。
+                   平台层：只依赖 core，不认识引擎（主循环在 browser）
+browser/           应用层：窗口 + 文档 + 主循环（平台事件 → 引擎动作 → 重排 → 重绘）
 runtime/dialog/     原生对话框的通用调用入口（平台无关的类型 + 五个对话框：
                    打开文件 / 打开多个文件 / 选择文件夹 / 另存为 / 消息框）
 runtime/clipboard/   系统剪贴板的通用调用入口（Text / SetText）

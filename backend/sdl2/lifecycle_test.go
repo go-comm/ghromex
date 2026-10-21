@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/core"
 )
 
 // TestCloseIdempotent 重复 Close 不得二次销毁 SDL 对象（use-after-free）：
@@ -26,9 +26,6 @@ func TestCloseIdempotent(t *testing.T) {
 	}
 	// 第二次 Close 必须是空操作（此前会二次 SDL_Destroy*）
 	win.Close()
-	if err := win.Run(); err == nil {
-		t.Error("已关闭窗口再 Run 应报错")
-	}
 }
 
 // TestTextureCacheBounded 文本纹理缓存必须有上限：动态文本（计数/时间戳）
@@ -46,9 +43,9 @@ func TestTextureCacheBounded(t *testing.T) {
 
 	for i := 0; i < maxCachedTextures+64; i++ {
 		g.Clear(255, 255, 255, 255)
-		p := engine.NewPaint()
-		p.SetSize(engine.NewSize(engine.SIZE_PIXEL, 13, 0))
-		p.SetColor(engine.NewColor(0, 0, 0, 255))
+		p := core.NewPaint()
+		p.SetSize(core.NewSize(core.SIZE_PIXEL, 13, 0))
+		p.SetColor(core.NewColor(0, 0, 0, 255))
 		g.DrawText(8, 20, 280, 20, p, fmt.Sprintf("dyn-%d", i))
 	}
 	if n := len(g.textures); n > maxCachedTextures {
@@ -75,9 +72,9 @@ func TestTextureCacheEvictsLeastRecentlyUsed(t *testing.T) {
 
 	// 造一批纹理（超过上限的一半），其中 "hot" 被反复使用。
 	mk := func(text string) {
-		p := engine.NewPaint()
-		p.SetSize(engine.NewSize(engine.SIZE_PIXEL, 13, 0))
-		p.SetColor(engine.NewColor(0, 0, 0, 255))
+		p := core.NewPaint()
+		p.SetSize(core.NewSize(core.SIZE_PIXEL, 13, 0))
+		p.SetColor(core.NewColor(0, 0, 0, 255))
 		g.DrawText(8, 20, 280, 20, p, text)
 	}
 	for i := 0; i < maxCachedTextures; i++ {

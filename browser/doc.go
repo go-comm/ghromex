@@ -4,9 +4,18 @@
 //
 // # 分工
 //
+//   - core：引擎与后端之间的契约（Graphics / Viewport / Paint / Color…），
+//     叶子包，engine 与 backend 都只依赖它；
 //   - engine：渲染引擎，纯 Go，不认识窗口与剪贴板；
-//   - backend/sdl2：平台实现层（Windows），提供窗口、事件循环、剪贴板；
-//   - browser：门面，装配 New → OpenDocument → Run → Close 并转发调用。
+//   - backend/sdl2：平台实现层（Windows），提供窗口、事件解码、绘制、
+//     剪贴板——**不认识引擎**，只按 core 的契约干活；
+//   - browser：应用层，持有文档并跑主循环（平台事件 → 引擎动作 →
+//     重排 → 重绘），把引擎与后端缝在一起。
+//
+// 主循环放在这一层而不是后端：后端只该做平台的事。事件怎么解释成引擎
+// 动作（点击、选区、滚轮）、什么时候重排重绘，都是应用层的事；后端若
+// 直接依赖引擎，平台层就反过来依赖了它上面的层（core/arch_test.go 把
+// 这条规则钉死）。
 //
 // 平台差异收在 backend/sdl2：非 Windows 下 NewWindow 返回 ErrUnsupported，
 // 本层原样透传，应用可据此提示「当前平台不支持」。

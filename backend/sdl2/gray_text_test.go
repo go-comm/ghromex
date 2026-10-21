@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/core"
 )
 
 // ---------------------------------------------------------------------------
@@ -88,10 +88,10 @@ func runGrayFidelity(t *testing.T, text, family string) {
 	// --- 生产路径：Graphics.DrawText 落屏 ---
 	g := win.g // 包内访问具体类型：Clear/Present 不在 engine.Graphics 接口上
 	g.Clear(255, 255, 255, 255)
-	p := engine.NewPaint()
-	p.SetSize(engine.NewSize(engine.SIZE_PIXEL, size, 0))
-	p.SetColor(engine.NewColor(ink[0], ink[1], ink[2], ink[3]))
-	p.SetBackground(engine.NewColor(255, 255, 255, 255))
+	p := core.NewPaint()
+	p.SetSize(core.NewSize(core.SIZE_PIXEL, size, 0))
+	p.SetColor(core.NewColor(ink[0], ink[1], ink[2], ink[3]))
+	p.SetBackground(core.NewColor(255, 255, 255, 255))
 	g.DrawText(originX, originY, 280, 20, p, text)
 	g.Present()
 

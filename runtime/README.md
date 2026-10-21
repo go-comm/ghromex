@@ -6,13 +6,22 @@
 
 ## 为什么单独一棵树
 
-仓库的三层分工：
+仓库的分层：
 
 | 目录 | 放什么 | 依赖 |
 | --- | --- | --- |
-| `engine/` | 渲染引擎（HTML/CSS 解析、布局、绘制指令） | 纯 Go，无平台依赖 |
-| `backend/` | 平台实现（`sdl2`：窗口、事件循环、文本纹理；`dialog`：原生对话框） | 平台实现（Windows） |
+| `core/` | 引擎与后端之间的**契约**（`Graphics`/`Viewport`/`Paint`/`Color`…） | 叶子包，不依赖仓库内任何包 |
+| `engine/` | 渲染引擎（HTML/CSS 解析、布局、绘制指令） | 纯 Go，只依赖 `core` |
+| `backend/` | 平台实现（`sdl2`：窗口、事件解码、文本纹理；`dialog`：原生对话框） | 平台实现（Windows），只依赖 `core` |
+| `browser/` | 应用层：窗口 + 文档 + 主循环（把平台事件翻译成引擎动作） | `engine` + `backend` |
 | `runtime/` | 平台能力的**通用调用入口**（`dialog`：原生对话框） | 平台无关的类型，转调 `backend/` |
+
+依赖方向是单向的：`core` 在最底下，`engine` 与 `backend` 各自向上依赖它，
+`browser` 再把两者缝起来。平台层（`backend`）**不认识引擎**——它只解码事件、
+只按 `core` 的契约绘制；「事件 → 引擎动作 → 重排 → 重绘」这条主循环在
+`browser`。反过来的依赖（后端 import 引擎）会让平台层反过来依赖它上面的层，
+引擎一改就牵动后端，后端也没法被别的引擎复用；`core/arch_test.go` 把这条
+规则钉死。
 
 `backend/` 是**实现层**，`runtime/` 是**调用入口**：调用方只 import
 `runtime/dialog`（平台无关的类型与函数），由它转调 `backend/dialog` 的

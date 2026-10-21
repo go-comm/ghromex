@@ -6,14 +6,12 @@
 // 本后端依赖 Windows 的 SDL2.dll / SDL2_ttf.dll 与系统字体目录
 // （backend/sdl2 下的实现文件均为 //go:build windows）。把平台差异收在
 // 这一层后，browser 与 examples 都无需构建标签；engine 本身是纯 Go，
-// 其它平台可自行实现 engine.Graphics 后端。
+// 其它平台可自行实现 core.Graphics 后端。
 
 package sdl2
 
 import (
-	"time"
-
-	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/core"
 )
 
 // Window 在非 Windows 平台不可用；NewWindow 总是失败。
@@ -22,35 +20,44 @@ type Window struct{}
 // NewWindow 在非 Windows 平台总是返回 ErrUnsupported。
 func NewWindow(w, h int, title string) (*Window, error) { return nil, ErrUnsupported }
 
-// ViewportWidth 实现 engine.Viewport（仅在 Window 可用时有效）。
+// ViewportWidth 实现 core.Viewport（仅在 Window 可用时有效）。
 func (*Window) ViewportWidth() int { return 0 }
 
-// ViewportHeight 实现 engine.Viewport（仅在 Window 可用时有效）。
+// ViewportHeight 实现 core.Viewport（仅在 Window 可用时有效）。
 func (*Window) ViewportHeight() int { return 0 }
 
-// Graphics 实现 engine.Viewport（仅在 Window 可用时有效）。
-func (*Window) Graphics() engine.Graphics { return nil }
+// Graphics 实现 core.Viewport（仅在 Window 可用时有效）。
+func (*Window) Graphics() core.Graphics { return nil }
 
-// OpenDocument 在非 Windows 平台总是返回 ErrUnsupported。
-func (*Window) OpenDocument(src string) (engine.HTMLDocument, error) { return nil, ErrUnsupported }
+// PollEvent 在非 Windows 平台没有事件源：永远返回 false。
+func (*Window) PollEvent() (Event, bool) { return Event{}, false }
 
-// SetAutoExit 在非 Windows 平台为空操作。
-func (*Window) SetAutoExit(d time.Duration) {}
+// InjectEvent 在非 Windows 平台是空操作。
+func (*Window) InjectEvent(Event) {}
 
-// RenderFrame 在非 Windows 平台为空操作。
-func (*Window) RenderFrame() {}
+// Present 在非 Windows 平台是空操作。
+func (*Window) Present() {}
+
+// Delay 在非 Windows 平台是空操作。
+func (*Window) Delay(int) {}
+
+// Ticks 在非 Windows 平台恒为 0（没有事件循环，用不到）。
+func (*Window) Ticks() uint32 { return 0 }
+
+// ModState 在非 Windows 平台恒为 0（没有键盘事件）。
+func (*Window) ModState() uint16 { return 0 }
 
 // Screenshot 在非 Windows 平台总是返回 ErrUnsupported。
 func (*Window) Screenshot() ([]byte, uint32, int, int, error) { return nil, 0, 0, 0, ErrUnsupported }
-
-// Run 在非 Windows 平台总是返回 ErrUnsupported。
-func (*Window) Run() error { return ErrUnsupported }
 
 // RequestClose 在非 Windows 平台为空操作。
 func (*Window) RequestClose() {}
 
 // SetTitle 在非 Windows 平台为空操作。
 func (*Window) SetTitle(string) {}
+
+// NativeHandle 在非 Windows 平台总是返回 ErrUnsupported（没有原生句柄）。
+func (*Window) NativeHandle() (uintptr, error) { return 0, ErrUnsupported }
 
 // ClipboardText 在非 Windows 平台返回空串（无剪贴板实现）。
 func ClipboardText() string { return "" }
@@ -61,8 +68,11 @@ func SetClipboardText(string) {}
 // Close 在非 Windows 平台为空操作。
 func (*Window) Close() {}
 
-// NativeHandle 在非 Windows 平台返回 0（无原生句柄）。
-func (*Window) NativeHandle() (uintptr, error) { return 0, ErrUnsupported }
+// Closed 在非 Windows 平台恒为 false（窗口从来没能创建）。
+func (*Window) Closed() bool { return false }
+
+// Shown 在非 Windows 平台恒为 false（窗口从来没能创建）。
+func (*Window) Shown() bool { return false }
 
 // 平台无关地保持与 Windows 实现一致的接口实现。
-var _ engine.Viewport = (*Window)(nil)
+var _ core.Viewport = (*Window)(nil)

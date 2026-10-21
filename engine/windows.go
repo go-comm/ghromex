@@ -1,12 +1,13 @@
 package engine
 
+import "github.com/go-comm/ghromex/core"
+
 // Viewport 是渲染输出目标的抽象：一个有尺寸、可绘图的窗口/画布。
 // 具体后端（如 SDL2）实现该接口；文档通过 OpenDocument 绑定到视口。
-type Viewport interface {
-	ViewportWidth() int
-	ViewportHeight() int
-	Graphics() Graphics
-}
+//
+// 接口本体在 core 包（见 core.Viewport）：平台后端只依赖 core，不反向
+// 依赖 engine。这里的别名保证对外 API 不变、两边实现的是同一类型。
+type Viewport = core.Viewport
 
 // OpenDocument 解析 HTML/CSS 源码并完成首次级联与布局。
 func OpenDocument(v Viewport, src string) (HTMLDocument, error) {

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/core"
 )
 
 // drawDebug 为 true 时（环境变量 GHROMEX_DEBUG 非空），绘制调用失败会打印 SDL 错误。
@@ -200,7 +200,7 @@ func splitScripts(text string) []scriptSeg {
 // Graphics
 // ---------------------------------------------------------------------------
 
-// Graphics 基于 SDL2 Renderer + SDL_ttf 实现 engine.Graphics。
+// Graphics 基于 SDL2 Renderer + SDL_ttf 实现 core.Graphics。
 // 每个字体文件只打开一个 FT_Face（动态切字号/粗体），文本纹理按
 // （解析后的文件+子段+字号+粗体+颜色）缓存；含 CJK 字符的段用 fallback 字体。
 type Graphics struct {
@@ -223,7 +223,7 @@ type Graphics struct {
 	texPixels int
 	// sprites 是位图精灵的纹理缓存（键是引擎侧缓存的精灵指针）。精灵
 	// 像素只随「半径+颜色」变，引擎侧已缓存，这里按指针复用纹理即可。
-	sprites map[*engine.Sprite]uintptr
+	sprites map[*core.Sprite]uintptr
 
 	// env* 是文本渲染相关的环境变量取值，每帧刷新一次（见 refreshEnv）。
 	envLCD      bool
@@ -234,13 +234,13 @@ type Graphics struct {
 	// faceKey 带上 size/bold，行为退化为每组合一个 face（与历史版本一致）。
 	reuseFaces bool
 
-	// clips 是裁剪矩形栈（与 engine.Clipper 的 Push/Pop 严格配对），栈顶
+	// clips 是裁剪矩形栈（与 core.Clipper 的 Push/Pop 严格配对），栈顶
 	// 即当前生效裁剪区；空栈 = 无裁剪。与 SDL viewport 同坐标系。
 	clips []sdlRect
 }
 
-// 编译期断言：SDL 后端必须实现 engine.Clipper，否则 overflow 裁剪会静默失效。
-var _ engine.Clipper = (*Graphics)(nil)
+// 编译期断言：SDL 后端必须实现 core.Clipper，否则 overflow 裁剪会静默失效。
+var _ core.Clipper = (*Graphics)(nil)
 
 type faceKey struct {
 	path string
@@ -267,6 +267,13 @@ type fontFace struct {
 // 落点背景色合成（见 DrawText）。
 // 惰性函数而非包级变量：hasTTFLCD 在 Load()（DLL 符号解析）后才有值，
 // 包初始化时求值恒为 false。
+// LCDTextEnabled 报告当前是否走 LCD（子像素）文本路径：既要环境变量
+// GHROMEX_LCD=1 打开，也要 DLL 真的导出 TTF_RenderUTF8_LCD。
+//
+// 供上层（browser 层）判断「这条渲染路径在本机可用吗」——LCD 相关的
+// 断言要用真实字形贴图，路径不可用时只能跳过。
+func LCDTextEnabled() bool { return lcdText() }
+
 func lcdText() bool {
 	return os.Getenv("GHROMEX_LCD") == "1" && hasTTFLCD
 }
@@ -354,7 +361,7 @@ func NewGraphics(renderer uintptr, fontPath string) *Graphics {
 		cjkFont:      CJKFontPath(),
 		faces:        make(map[faceKey]*fontFace),
 		textures:     make(map[texKey]texInfo),
-		sprites:      make(map[*engine.Sprite]uintptr),
+		sprites:      make(map[*core.Sprite]uintptr),
 		measures:     make(map[measureKey]measureVal),
 		familyPaths:  make(map[string]string),
 		reuseFaces:   hasTTFSetFontSize,
@@ -629,7 +636,7 @@ type measureVal struct{ w, h int }
 // 唯一字符串无上限，超出后整体清空——度量重算比无限增长安全。
 const maxCachedMeasures = 8192
 
-// MeasureText 实现 engine.Graphics。与 DrawText 同一套脚本分段与字体解析，
+// MeasureText 实现 core.Graphics。与 DrawText 同一套脚本分段与字体解析，
 // 宽度为各段之和，行高取各段最大值（近似 Chrome 的行盒语义）。
 func (g *Graphics) MeasureText(text string, fontSize int, bold bool, family string) (int, int) {
 	if fontSize <= 0 {
@@ -680,7 +687,7 @@ func (g *Graphics) MeasureText(text string, fontSize int, bold bool, family stri
 	return totalW, maxH
 }
 
-// FontMetrics 实现 engine.Graphics：返回行度量（基线以上 ascent、基线以下
+// FontMetrics 实现 core.Graphics：返回行度量（基线以上 ascent、基线以下
 // descent）。各脚本段取最大值：行盒高度 = 各内联盒 ascent 的最大者 +
 // descent 的最大者（同基线对齐）。度量来自 SDL_ttf 的 TTF_FontAscent/
 // TTF_FontDescent，行高与 Chrome/DirectWrite 可能有 1~4px 差异。
@@ -752,9 +759,9 @@ func (g *Graphics) lineMetricsOf(path string, size int, bold bool) (int, int, bo
 	return asc, desc, true
 }
 
-// DrawText 实现 engine.Graphics：按脚本段绘制纹理，x 依次推进各段测量宽度，
+// DrawText 实现 core.Graphics：按脚本段绘制纹理，x 依次推进各段测量宽度，
 // 各段以基线（TTF_FontAscent）对齐。
-func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
+func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string) {
 	if text == "" || !hasTTF() {
 		return
 	}
@@ -897,8 +904,8 @@ func (g *Graphics) ascentOf(path string, size int, bold bool) int32 {
 	return int32(asc)
 }
 
-// DrawColor 实现 engine.Graphics。
-func (g *Graphics) DrawColor(x, y, w, h int, color engine.Color) {
+// DrawColor 实现 core.Graphics。
+func (g *Graphics) DrawColor(x, y, w, h int, color core.Color) {
 	if color == nil || w <= 0 || h <= 0 {
 		return
 	}
@@ -909,7 +916,7 @@ func (g *Graphics) DrawColor(x, y, w, h int, color engine.Color) {
 }
 
 // DrawImage 暂不支持（预留接口）。
-func (g *Graphics) DrawImage(x, y, w, h int, image engine.Image) {
+func (g *Graphics) DrawImage(x, y, w, h int, image core.Image) {
 }
 
 // pixelFormatRGBA32 是 SDL_PIXELFORMAT_RGBA32（0x16762004）：小端下内存
@@ -923,13 +930,13 @@ const pixelFormatRGBA32 = 0x16762004
 // SDL_UpdateTexture 灌像素（STATIC 只允许从 surface 创建）。
 const textureAccessStreaming = 0
 
-// DrawSprite 实现 engine.SpriteDrawer：把位图精灵上传成纹理并 blit 一次。
+// DrawSprite 实现 core.SpriteDrawer：把位图精灵上传成纹理并 blit 一次。
 //
 // 精灵按指针缓存（引擎侧的角标精灵按「半径+颜色」缓存，同一份像素只上传
 // 一次）。整块圆角一次 blit，替掉逐像素的半透明小方块——后者是绘制调用
 // 的主要来源（实测 portal 页一帧 1.8 万次 1×1 绘制），GPU 路径上每次都
 // 是驱动调用，帧时间被拖到几十毫秒，滚动动画被切成两三帧。
-func (g *Graphics) DrawSprite(x, y int, s *engine.Sprite) {
+func (g *Graphics) DrawSprite(x, y int, s *core.Sprite) {
 	if s == nil || s.W <= 0 || s.H <= 0 || g.renderer == 0 || len(s.Pix) < s.W*s.H*4 {
 		return
 	}
@@ -966,7 +973,7 @@ func (g *Graphics) Clear(r, gr, b, a uint8) {
 	checkDraw("SDL_RenderClear", sdlRenderClear(g.renderer))
 }
 
-// PushClip 实现 engine.Clipper：与当前裁剪区求交后下推并应用。
+// PushClip 实现 core.Clipper：与当前裁剪区求交后下推并应用。
 // 裁剪区由引擎在 padding 盒/滚动容器上给出，坐标即渲染坐标。
 func (g *Graphics) PushClip(x, y, w, h int) {
 	r := sdlRect{int32(x), int32(y), int32(w), int32(h)}
@@ -977,7 +984,7 @@ func (g *Graphics) PushClip(x, y, w, h int) {
 	g.applyClip()
 }
 
-// PopClip 实现 engine.Clipper：弹出栈顶并应用剩余栈顶（空栈=关闭裁剪）。
+// PopClip 实现 core.Clipper：弹出栈顶并应用剩余栈顶（空栈=关闭裁剪）。
 func (g *Graphics) PopClip() {
 	if n := len(g.clips); n > 0 {
 		g.clips = g.clips[:n-1]
@@ -1044,7 +1051,7 @@ func (g *Graphics) CloseFonts() {
 			sdlDestroyTexture(t)
 		}
 	}
-	g.sprites = make(map[*engine.Sprite]uintptr)
+	g.sprites = make(map[*core.Sprite]uintptr)
 }
 
 // maxCachedTextures 是文本纹理缓存的条数上限，maxCachedTexPixels 是像素
@@ -1114,4 +1121,4 @@ func estimateText(text string, fontSize int) (int, int) {
 	return w, fontSize * 13 / 10
 }
 
-var _ engine.Graphics = (*Graphics)(nil)
+var _ core.Graphics = (*Graphics)(nil)
