@@ -122,6 +122,11 @@ type htmlElement struct {
 	open bool
 	// caret 为聚焦可编辑控件的插入点，单位是 value 的 rune 下标。
 	caret int
+	// selAnchor 是选区的固定端（锚点），与 caret（活动端）共同表示
+	// [min(selAnchor,caret), max(...)) 的选区；两者相等即无选区。鼠标
+	// 拖选时锚点不动、活动端跟随指针；键入/退格/方向键会把两者收敛，
+	// 与浏览器「输入即替换选区、方向键折叠选区」一致。
+	selAnchor int
 	// scrollTop 为纵向滚动偏移（像素）。textarea 由光标跟随/滚轮驱动，
 	// overflow 滚动容器与根元素（文档级滚动）由 applyScrollOffsets 施加。
 	scrollTop int
@@ -449,6 +454,7 @@ func (element *htmlElement) Clone() HTMLElement {
 	c.paint = element.paint
 	c.open = false
 	c.caret = 0
+	c.selAnchor = 0
 	c.scrollTop = 0
 	c.scrollLeft = 0
 	c.contentW = 0

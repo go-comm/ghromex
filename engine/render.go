@@ -221,7 +221,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		for _, run := range tn.node.runs {
 			g.DrawText(run.x, run.y, run.w, run.h, p, run.text)
 			if dec != TextDecorationNone && run.w > 0 && run.h > 0 {
-				drawDecoration(g, dec, run.x, run.y, run.w, run.h, p.Size().Pixel(), p)
+				drawDecoration(g, dec, run.x, run.y, run.w, run.h, run.asc, p.Size().Pixel(), p)
 			}
 		}
 		return
@@ -315,6 +315,17 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 				ty := base.y
 				if th < base.height {
 					ty += (base.height - th) / 2
+				}
+				if focused {
+					// 选区高亮先于文字绘制：半透明蓝压在背景上，文字仍按原色
+					// 绘制。矩形前缀宽与可见窗口同口径（val/cut），超宽输入
+					// 的选区不会错位到被裁掉的前缀。
+					if lo, hi, ok := selectionRange(base); ok {
+						for _, sr := range inputSelectionRects(g, val, cut, tx, ty, th,
+							size, p.Bold(), p.FontFamily(), lo, hi) {
+							g.DrawColor(sr.x, sr.y, sr.w, sr.h, selectionColor)
+						}
+					}
 				}
 				if val != "" {
 					g.DrawText(tx, ty, tw, th, p, val)
@@ -488,8 +499,9 @@ func paintCoverage(g Graphics, y, x0, x1 int, c Color, cov func(x int) float64) 
 }
 
 // drawDecoration 绘制文本装饰（下划线/删除线）：以文本色画一条实线。
-// 位置基于行片段盒（引擎不度量基线），厚度随字号缩放并夹在盒内。
-func drawDecoration(g Graphics, d TextDecoration, x, y, w, h, fontSize int, p Paint) {
+// 下划线按基线定位（ascent + 厚度），不能按片段盒底定位：SDL_ttf 的 descent
+// 比旧字体表口径小，盒底离基线更近，按盒底画会显得下划线偏高。
+func drawDecoration(g Graphics, d TextDecoration, x, y, w, h, ascent, fontSize int, p Paint) {
 	if d == TextDecorationNone || w <= 0 || h <= 0 {
 		return
 	}
@@ -500,7 +512,9 @@ func drawDecoration(g Graphics, d TextDecoration, x, y, w, h, fontSize int, p Pa
 	var dy int
 	switch d {
 	case TextDecorationUnderline:
-		dy = h - th - 1
+		// 基线下方留一个线厚的间距；允许略超出片段盒（下线本就在基线下方，
+		// 而盒底的 descent 可能只有 2~3px）。
+		dy = ascent + th
 	case TextDecorationLineThrough:
 		dy = h/2 - th/2
 	default:
@@ -509,7 +523,7 @@ func drawDecoration(g Graphics, d TextDecoration, x, y, w, h, fontSize int, p Pa
 	if dy < 0 {
 		dy = 0
 	}
-	if dy+th > h {
+	if d == TextDecorationLineThrough && dy+th > h {
 		dy = h - th
 	}
 	if dy < 0 {

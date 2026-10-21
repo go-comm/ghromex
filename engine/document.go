@@ -57,11 +57,15 @@ func NewDocument() HTMLDocument {
 type htmlDocument struct {
 	HTMLElement
 
-	viewport   Viewport
-	sheet      *Stylesheet
-	head       HTMLHeadElement
-	body       HTMLBodyElement
-	focus      HTMLElement // 当前聚焦的可编辑输入（v1 仅 input/textarea），nil 无焦点
+	viewport Viewport
+	sheet    *Stylesheet
+	head     HTMLHeadElement
+	body     HTMLBodyElement
+	focus    HTMLElement // 当前聚焦的可编辑输入（v1 仅 input/textarea），nil 无焦点
+	// dragInput 是鼠标按下时命中的可编辑控件。拖选期间活动端可移出控件
+	// 甚至窗口，仍应把坐标反推为同一控件的光标位置（浏览器同语义）；
+	// 因此不能在每次 MouseMotion 时重新命中测试。鼠标抬起即清空。
+	dragInput  *htmlElement
 	changed    int64
 	onChanged  func()
 	onNavigate func(href string)

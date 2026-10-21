@@ -19,6 +19,9 @@ type textRun struct {
 	y    int
 	w    int
 	h    int
+	// asc 是基线以上高度（行片段自身的 ascent）。下划线要画在基线下方，
+	// 不能用 y+h 推：字体 descent 变小后 y+h 会贴近基线，下划线看起来偏高。
+	asc int
 }
 
 // NewTextNode 创建一个文本节点。

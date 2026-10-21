@@ -243,6 +243,13 @@ func (win *Window) Run() error {
 	}
 
 	running := true
+	// 鼠标拖选状态：按下点只记录锚点，位移超过阈值才真正扩选。
+	// 这样单击仍走原 click 链路（按钮/链接/select/radio 的行为不变），
+	// 拖动结束也不派发 click——浏览器里拖选不应触发链接导航。
+	mouseDown := false
+	selecting := false
+	dragSelect := false
+	downX, downY := 0, 0
 	for running {
 		for {
 			ev, ok := pollEvent()
@@ -276,24 +283,74 @@ func (win *Window) Run() error {
 				}
 			case eventKeyDown:
 				if win.doc != nil {
-					// 控制键（Backspace/Tab/Enter/方向键/Home/End）；value/焦点变化经
-					// markChanged 触发 changed → 下方重排+重绘链路，无需手动置 dirty。
-					engine.OnDocumentKeyDown(win.doc, int(ev.sym))
+					// Ctrl+C：引擎只给选区文本，写系统剪贴板由后端完成。
+					// 无选区时 SelectedText 返回 false，保留用户原有剪贴板
+					//（浏览器 Ctrl+C 无选区也不会清空剪贴板）。
+					if ev.mod&kmodCtrl != 0 && (ev.sym == 'c' || ev.sym == 'C') {
+						if text, ok := engine.SelectedText(win.doc); ok {
+							setClipboardText(text)
+						}
+					}
+					// 控制键（Backspace/Tab/Enter/方向键/Home/End）、Ctrl+A
+					// 全选；value/焦点变化经 markChanged 触发 changed → 下方
+					// 重排+重绘链路，无需手动置 dirty。
+					engine.OnDocumentKeyDownMods(win.doc, int(ev.sym), ev.mod)
 				}
 			case eventTextInput:
 				if win.doc != nil && ev.text != "" {
 					engine.OnDocumentTextInput(win.doc, ev.text)
 				}
+			case eventMouseButtonDown:
+				if ev.button == mouseButtonLeft {
+					mouseDown = true
+					dragSelect = false
+					downX, downY = int(ev.x), int(ev.y)
+					if win.doc != nil {
+						selecting = engine.OnDocumentMouseDown(win.doc, int(ev.x), int(ev.y))
+					}
+				}
+			case eventMouseMotion:
+				if mouseDown && selecting && win.doc != nil {
+					dx, dy := int(ev.x)-downX, int(ev.y)-downY
+					if dx < 0 {
+						dx = -dx
+					}
+					if dy < 0 {
+						dy = -dy
+					}
+					if !dragSelect && (dx > 3 || dy > 3) {
+						dragSelect = true
+					}
+					if dragSelect {
+						engine.OnDocumentMouseDrag(win.doc, int(ev.x), int(ev.y))
+					}
+				}
 			case eventMouseButtonUp:
-				if ev.button == mouseButtonLeft && win.doc != nil {
-					handled := engine.OnDocumentClick(win.doc, int(ev.x), int(ev.y))
-					if drawDebug {
-						target := engine.ElementAt(win.doc, int(ev.x), int(ev.y))
-						tag := "<none>"
-						if target != nil {
-							tag = target.TagName()
+				if ev.button == mouseButtonLeft {
+					wasDrag := dragSelect
+					mouseDown = false
+					selecting = false
+					dragSelect = false
+					if win.doc != nil {
+						engine.OnDocumentMouseUp(win.doc)
+					}
+					if wasDrag {
+						// 拖选结束：不派发 click（否则拖过 <a> 会导航）。
+						if drawDebug {
+							fmt.Fprintf(os.Stderr, "[ghromex] drag-select up(%d,%d)\n", ev.x, ev.y)
 						}
-						fmt.Fprintf(os.Stderr, "[ghromex] click(%d,%d) hit=%s handled=%v\n", ev.x, ev.y, tag, handled)
+						break
+					}
+					if win.doc != nil {
+						handled := engine.OnDocumentClick(win.doc, int(ev.x), int(ev.y))
+						if drawDebug {
+							target := engine.ElementAt(win.doc, int(ev.x), int(ev.y))
+							tag := "<none>"
+							if target != nil {
+								tag = target.TagName()
+							}
+							fmt.Fprintf(os.Stderr, "[ghromex] click(%d,%d) hit=%s handled=%v\n", ev.x, ev.y, tag, handled)
+						}
 					}
 				}
 			case eventMouseWheel:
@@ -344,6 +401,19 @@ func (win *Window) Run() error {
 		}
 	}
 	return nil
+}
+
+// setClipboardText 把 UTF-8 文本写入系统剪贴板。SDL2 的接口是
+// int SDL_SetClipboardText(const char *text)，成功返回 0；失败不影响
+// 界面（复制是尽力而为，不打断事件循环）。cBytes 返回的切片必须
+// KeepAlive 到调用结束，否则 GC 可能在 SDL 读取前回收。
+func setClipboardText(text string) {
+	if text == "" {
+		return
+	}
+	buf, ptr := cBytes(text)
+	sdlSetClipboardText(ptr)
+	runtime.KeepAlive(buf)
 }
 
 // Close 释放窗口资源。幂等：重复调用直接返回——重复 SDL_Destroy* 会对已

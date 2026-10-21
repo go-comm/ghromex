@@ -5,6 +5,7 @@ package sdl2
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 	"unsafe"
@@ -59,6 +60,97 @@ func TestRunConsumesInjectedEvents(t *testing.T) {
 	}
 }
 
+func TestRunConsumesInjectedDragSelection(t *testing.T) {
+	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
+	defer os.Unsetenv("SDL_VIDEO_DRIVER")
+
+	win, err := NewWindow(320, 200, "drag-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer win.Close()
+
+	const src = `<!doctype html><html><head><style>` +
+		`body{margin:0}` +
+		`.in{display:inline-block;width:260px;padding:6px;border:1px solid #CBD5E1;font-size:16px}` +
+		`</style></head><body><div><input class="in" id="a" type="text" value="hello world"></div></body></html>`
+	doc, err := win.OpenDocument(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := doc.QuerySelector("#a")
+	if input == nil {
+		t.Fatal("input not found")
+	}
+	r := input.GetBoundingClientRect()
+	x1 := r.Left().Pixel() + 2
+	x2 := r.Right().Pixel() - 2
+	y := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
+
+	// 按下→移动（超过拖选阈值）→抬起：走完整 SDL 事件链。
+	pushMouseButtonDown(x1, y)
+	pushMouseMotion(x2, y)
+	pushMouseButtonUp(x2, y)
+
+	win.SetAutoExit(250 * time.Millisecond)
+	if err := win.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := engine.SelectedText(doc)
+	if !ok || got != "hello world" {
+		t.Fatalf("拖选结果 = %q, ok=%v, want %q（MouseMotion 解码/分发断链）", got, ok, "hello world")
+	}
+}
+
+func TestRunConsumesSelectionKeys(t *testing.T) {
+	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
+	defer os.Unsetenv("SDL_VIDEO_DRIVER")
+
+	win, err := NewWindow(320, 200, "ctrl-a-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer win.Close()
+
+	prev := clipboardText()
+	defer writeClipboardRaw(prev)
+
+	const src = `<!doctype html><html><head><style>` +
+		`body{margin:0}` +
+		`.in{display:inline-block;width:260px;padding:6px;border:1px solid #CBD5E1;font-size:16px}` +
+		`</style></head><body><div><input class="in" id="a" type="text" value="hello world"></div></body></html>`
+	doc, err := win.OpenDocument(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := doc.QuerySelector("#a")
+	if input == nil {
+		t.Fatal("input not found")
+	}
+	r := input.GetBoundingClientRect()
+	cx := (r.Left().Pixel() + r.Right().Pixel()) / 2
+	cy := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
+
+	pushMouseButtonUp(cx, cy) // 先聚焦
+	pushKeyDownMods('a', kmodCtrl)
+	pushKeyDownMods('c', kmodCtrl)
+
+	win.SetAutoExit(250 * time.Millisecond)
+	if err := win.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := engine.SelectedText(doc)
+	if !ok || got != "hello world" {
+		t.Fatalf("Ctrl+A 选区 = %q, ok=%v（mod 位未解码或未传入引擎）", got, ok)
+	}
+	// 从系统剪贴板读回，验证 Ctrl+C 的完整链路（含 SDL_SetClipboardText）。
+	if clip := clipboardText(); clip != "hello world" {
+		t.Fatalf("剪贴板 = %q, want %q（Ctrl+C 未写入或写入内容错误）", clip, "hello world")
+	}
+}
+
 func pushEvent(buf *[eventBufferSize]byte) {
 	// SDL_PushEvent（SDL_events.h 文档）：返回 1=成功、0=被事件过滤器丢弃、
 	// 负数=失败。Windows x64 下 int 返回值只保证低 32 位有效，先截 int32 判。
@@ -79,6 +171,27 @@ func pushMouseButtonUp(x, y int) {
 	pushEvent(&buf)
 }
 
+func pushMouseButtonDown(x, y int) {
+	var buf [eventBufferSize]byte
+	put32(buf[0:], eventMouseButtonDown)
+	buf[16] = mouseButtonLeft
+	buf[17] = 0 // SDL_PRESSED
+	put32(buf[20:], uint32(x))
+	put32(buf[24:], uint32(y))
+	pushEvent(&buf)
+}
+
+func pushMouseMotion(x, y int) {
+	var buf [eventBufferSize]byte
+	// SDL_MouseMotionEvent：type@0 ts@4 windowID@8 which@12 state@16 x@20 y@24
+	put32(buf[0:], eventMouseMotion)
+	put32(buf[8:], 1)
+	buf[16] = 1 // SDL_BUTTON_LMASK：左键按住
+	put32(buf[20:], uint32(x))
+	put32(buf[24:], uint32(y))
+	pushEvent(&buf)
+}
+
 func pushTextInput(s string) {
 	var buf [eventBufferSize]byte
 	put32(buf[0:], eventTextInput)
@@ -87,11 +200,39 @@ func pushTextInput(s string) {
 }
 
 func pushKeyDown(sym uint32) {
+	pushKeyDownMods(sym, 0)
+}
+
+func pushKeyDownMods(sym uint32, mod uint16) {
 	var buf [eventBufferSize]byte
 	put32(buf[0:], eventKeyDown)
 	buf[12] = 1 // SDL_PRESSED
 	put32(buf[20:], sym)
+	buf[24] = byte(mod)
+	buf[25] = byte(mod >> 8)
 	pushEvent(&buf)
+}
+
+// clipboardText 读回系统剪贴板（测试用）。SDL_GetClipboardText 返回
+// SDL 分配的 C 字符串，必须用 SDL_free 释放；两个符号只测试用，故
+// 走 bindProcOpt，不污染生产符号表。
+func clipboardText() string {
+	get := bindProcOpt(dllSDL, "SDL_GetClipboardText")
+	free := bindProcOpt(dllSDL, "SDL_free")
+	ptr := get()
+	if ptr == 0 {
+		return ""
+	}
+	s := goString(ptr)
+	free(ptr)
+	return s
+}
+
+// writeClipboardRaw 写入任意文本（含空串），用于测试结束后恢复用户剪贴板。
+func writeClipboardRaw(s string) {
+	buf, ptr := cBytes(s)
+	sdlSetClipboardText(ptr)
+	runtime.KeepAlive(buf)
 }
 
 // 端到端滚轮事件链：注入 SDL_MOUSEWHEEL → decodeEvent → Run 消费 →

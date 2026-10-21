@@ -73,10 +73,13 @@ var (
 	sdlDelay                    nativeCall
 	sdlGetTicks                 nativeCall
 	sdlGetModState              nativeCall
-	sdlQueryTexture             nativeCall
-	sdlRenderReadPixels         nativeCall
-	sdlGetWindowPixelFormat     nativeCall
-	sdlClearError               nativeCall
+	// SDL_SetClipboardText（SDL_clipboard.h）：UTF-8 NUL 结尾，0 成功。
+	// 引擎只给出选区文本，写系统剪贴板这一平台动作留在后端。
+	sdlSetClipboardText     nativeCall
+	sdlQueryTexture         nativeCall
+	sdlRenderReadPixels     nativeCall
+	sdlGetWindowPixelFormat nativeCall
+	sdlClearError           nativeCall
 
 	ttfInit              nativeCall
 	ttfQuit              nativeCall
@@ -87,11 +90,13 @@ var (
 	ttfSetFontStyle      nativeCall
 	ttfSetFontSize       nativeCall
 	ttfFontAscent        nativeCall
+	ttfFontDescent       nativeCall
 	ttfSetFontHinting    nativeCall
 	ttfRenderUTF8LCD     nativeCall
 	hasTTFSetFontSize    bool
 	hasTTFHinting        bool
 	hasTTFFontAscent     bool
+	hasTTFFontDescent    bool
 	hasTTFLCD            bool
 )
 
@@ -127,6 +132,7 @@ const (
 	eventWindow          = 0x200
 	eventKeyDown         = 0x300 // SDL_KEYDOWN
 	eventTextInput       = 0x303 // SDL_TEXTINPUT（0x300 KEYDOWN/0x301 KEYUP/0x302 TEXTEDITING/0x303 TEXTINPUT；0x400 是 SDL_MOUSEMOTION，SDL_events.h 原文核对，勿凭记忆写——曾错标 0x400 致真机收不到文本事件）
+	eventMouseMotion     = 0x400 // SDL_MOUSEMOTION
 	eventMouseButtonDown = 0x401
 	eventMouseButtonUp   = 0x402
 	// SDL_MOUSEWHEEL：事件类型值取自 SDL_events.h 的 SDL_EventType 枚举
@@ -140,6 +146,9 @@ const (
 	// KMOD_SHIFT = KMOD_LSHIFT(0x0001) | KMOD_RSHIFT(0x0002)（SDL_keycode.h
 	// SDL_Keymod 枚举原文），Shift+滚轮 换算横向滚动用。
 	kmodShift = 0x0003
+	// KMOD_CTRL = KMOD_LCTRL(0x0040) | KMOD_RCTRL(0x0080)：Ctrl+A 全选、
+	// Ctrl+C 复制。
+	kmodCtrl = 0x00C0
 
 	// wheelStepPx 是每档滚轮位移的像素数。Chrome（Windows）每档约 100px
 	// （3 行 × 约 33px），引擎此前取 40px —— 同样的滚轮在引擎里要滚 2.5 倍
@@ -232,6 +241,7 @@ func doLoad() error {
 	// Shift 键态（Shift+滚轮 → 横向滚动）：SDL_GetModState 返回当前修饰键
 	// 位掩码，按事件逐次查询，无需自行跟踪 KEYDOWN/KEYUP。
 	sdlGetModState = bindSdl("SDL_GetModState")
+	sdlSetClipboardText = bindSdl("SDL_SetClipboardText")
 	sdlQueryTexture = bindSdl("SDL_QueryTexture")
 	sdlRenderReadPixels = bindProcOpt(dllSDL, "SDL_RenderReadPixels")
 	// 截图回读用的像素格式查询：SDL2 的对应 API 是 SDL_GetWindowPixelFormat。
@@ -254,6 +264,7 @@ func doLoad() error {
 	// 缺失时 Graphics 自动退化为按 (文件,字号,粗体) 各开一个 face 的旧路径。
 	ttfSetFontSize, hasTTFSetFontSize = bindProbe(dllTTF, "TTF_SetFontSize")
 	ttfFontAscent, hasTTFFontAscent = bindProbe(dllTTF, "TTF_FontAscent")
+	ttfFontDescent, hasTTFFontDescent = bindProbe(dllTTF, "TTF_FontDescent")
 	ttfSetFontHinting, hasTTFHinting = bindProbe(dllTTF, "TTF_SetFontHinting")
 	ttfRenderUTF8LCD, hasTTFLCD = bindProbe(dllTTF, "TTF_RenderUTF8_LCD")
 	if bindErr != nil {
@@ -375,6 +386,8 @@ type sdlRect struct {
 
 func le32(b []byte) uint32 { return binary.LittleEndian.Uint32(b) }
 
+func le16(b []byte) uint16 { return binary.LittleEndian.Uint16(b) }
+
 // event 是 SDL_Event 常用字段的解析结果。
 type event struct {
 	typ         uint32
@@ -388,6 +401,7 @@ type event struct {
 	// FLIPPED 已在 decodeEvent 内翻转还原）；x/y 在 wheel 事件里存鼠标位置。
 	wheelX, wheelY int32
 	sym            int32  // KEYDOWN: keysym.sym
+	mod            uint16 // KEYDOWN: keysym.mod（KMOD_* 位掩码）
 	text           string // TEXTINPUT: UTF-8 文本（IME 组合完成串走这里）
 }
 
@@ -415,6 +429,13 @@ func decodeEvent(buf *[eventBufferSize]byte) event {
 		ev.windowEvent = buf[12]
 		ev.data1 = int32(le32(buf[16:20]))
 		ev.data2 = int32(le32(buf[20:24]))
+	case eventMouseMotion:
+		// SDL_MouseMotionEvent：windowID@8 which@12 state@16 x@20 y@24。
+		// 拖选时后端从按下点起累计位移，超过阈值才把后续 motion 当作
+		// 扩选；单击抖动不会误选。
+		ev.state = buf[16]
+		ev.x = int32(le32(buf[20:24]))
+		ev.y = int32(le32(buf[24:28]))
 	case eventMouseButtonDown, eventMouseButtonUp:
 		ev.button = buf[16]
 		ev.state = buf[17]
@@ -450,6 +471,7 @@ func decodeEvent(buf *[eventBufferSize]byte) event {
 		// 自发产生，无法像 windowEvent 枚举那样真机反推——结构体布局
 		// 以 SDL2 头文件定义为准（ABI 自 2.0.0 稳定）。
 		ev.sym = int32(le32(buf[20:24]))
+		ev.mod = le16(buf[24:26])
 	case eventTextInput:
 		// SDL_TextInputEvent：char text[32] 紧接 windowID，偏移 12，
 		// UTF-8 NUL 结尾（SDL 已把 IME 候选确认串组好）。

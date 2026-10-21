@@ -670,8 +670,9 @@ func (g *Graphics) MeasureText(text string, fontSize int, bold bool, family stri
 }
 
 // FontMetrics 实现 engine.Graphics：返回行度量（基线以上 ascent、基线以下
-// descent）。各脚本段取最大值——与浏览器行盒口径一致：行盒高度 = 各内联盒
-// ascent 的最大者 + descent 的最大者（同基线对齐）。
+// descent）。各脚本段取最大值：行盒高度 = 各内联盒 ascent 的最大者 +
+// descent 的最大者（同基线对齐）。度量来自 SDL_ttf 的 TTF_FontAscent/
+// TTF_FontDescent，行高与 Chrome/DirectWrite 可能有 1~4px 差异。
 // text 为空时只取主字体（不触发 CJK 逐字回退），对应行盒的 strut。
 func (g *Graphics) FontMetrics(text string, fontSize int, bold bool, family string) (int, int) {
 	if fontSize <= 0 {
@@ -702,24 +703,41 @@ func (g *Graphics) FontMetrics(text string, fontSize int, bold bool, family stri
 			maxDesc = desc
 		}
 	}
+	if maxAsc == 0 && maxDesc == 0 {
+		h := fontSize * 13 / 10
+		return h / 2, h - h/2
+	}
 	return maxAsc, maxDesc
 }
 
-// lineMetricsOf 返回（字体文件, 字号, 粗细）下的行度量。粗体优先用真粗体
-// 字文件（与 face/绘制同源），否则布局度量与实际绘制会取到不同字体。
+// lineMetricsOf 返回（字体文件, 字号, 粗细）下的行度量：ascent 取
+// TTF_FontAscent，descent 取 -TTF_FontDescent（SDL_ttf 返回负值）。
+//
+// 这里直接用 SDL_ttf 的 FreeType 像素取整，不再解析字体的 head/hhea/OS2。
+// 代价是行高不再逐像素对齐 Chrome/DirectWrite（同一字体可能差 1~4px），
+// 换来的是实现简单、无字体表解析代码；布局与绘制仍使用同一个 face，
+// ascent/descent 与真实字形基线至少自洽。
 func (g *Graphics) lineMetricsOf(path string, size int, bold bool) (int, int, bool) {
-	if bold {
-		if name, ok := boldVariants[strings.ToLower(filepath.Base(path))]; ok {
-			if p := fontPathOf(name); p != "" {
-				path = p
-			}
-		}
+	if !hasTTFFontAscent || !hasTTFFontDescent {
+		return 0, 0, false
 	}
-	return fontLineMetrics(path, size)
+	f := g.face(path, size, bold)
+	if f == nil {
+		return 0, 0, false
+	}
+	asc := int(ttfFontAscent(f.handle))
+	desc := -int(ttfFontDescent(f.handle))
+	if asc < 0 {
+		asc = 0
+	}
+	if desc < 0 {
+		desc = 0
+	}
+	return asc, desc, true
 }
 
 // DrawText 实现 engine.Graphics：按脚本段绘制纹理，x 依次推进各段测量宽度，
-// 各段以基线（TTF_FontAscent）对齐，与 Chrome 混排效果一致。
+// 各段以基线（TTF_FontAscent）对齐。
 func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 	if text == "" || !hasTTF() {
 		return
@@ -848,18 +866,14 @@ func (g *Graphics) DrawText(x, y, w, h int, paint engine.Paint, text string) {
 	}
 }
 
-// ascentOf 读取指定字体当前样式的基线（调用后 face 的 size/bold 已就位）。
-// 口径与 FontMetrics 一致（hhea 的 ascender），使绘制时的基线位置与布局
-// 计算的基线严格对齐；解析失败才退回 SDL_ttf 的 TTF_FontAscent。
+// ascentOf 读取指定字体当前样式的基线（TTF_FontAscent）。
+// 与 lineMetricsOf 同源，保证绘制基线与布局行盒使用同一个 face 的度量。
 func (g *Graphics) ascentOf(path string, size int, bold bool) int32 {
-	if asc, _, ok := g.lineMetricsOf(path, size, bold); ok {
-		return int32(asc)
-	}
-	f := g.face(path, size, bold)
-	if f == nil || !hasTTFFontAscent {
+	asc, _, ok := g.lineMetricsOf(path, size, bold)
+	if !ok {
 		return 0
 	}
-	return int32(ttfFontAscent(f.handle))
+	return int32(asc)
 }
 
 // DrawColor 实现 engine.Graphics。

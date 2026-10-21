@@ -90,6 +90,7 @@ type textareaLayout struct {
 	x, y   int
 	w, h   int
 	lh     int
+	asc    int // 基线以上高度（文本装饰定位用）
 	scroll int
 	lines  []textareaLine
 }
@@ -112,6 +113,10 @@ func layoutTextarea(g Graphics, el *htmlElement) textareaLayout {
 	if lh <= 0 {
 		lh = px * 13 / 10
 	}
+	asc, _ := g.FontMetrics("", px, bold, family)
+	if asc <= 0 {
+		asc = lh / 2
+	}
 	scroll := el.scrollTop
 	if scroll < 0 {
 		// 负值哨兵：跳到光标行（SetValue 设值后光标在末尾，见 form.go）。
@@ -133,7 +138,7 @@ func layoutTextarea(g Graphics, el *htmlElement) textareaLayout {
 	}
 	el.scrollTop = scroll
 	return textareaLayout{x: el.x, y: el.y - scroll, w: el.width, h: el.height,
-		lh: lh, scroll: scroll, lines: lines}
+		lh: lh, asc: asc, scroll: scroll, lines: lines}
 }
 
 // caretRow 返回光标所在行下标（行区间 [start,end] 连续不重叠）。
@@ -201,20 +206,35 @@ func (l textareaLayout) caretFromPoint(g Graphics, x, y int, fontPx int, bold bo
 }
 
 // setCaret 设置光标并触发重绘；textarea 顺带保证光标在可视区内。
+// 光标移动同时折叠选区（锚点跟到新光标处）——点击/方向键/输入后的
+// 默认语义，拖选扩展请走 setSelection。
 func setCaret(doc HTMLDocument, el *htmlElement, caret int) {
+	setSelection(doc, el, caret, caret)
+}
+
+// setSelection 设置选区两端并触发重绘：anchor 为固定端、focus 为活动端
+// （即 caret）。两端都夹到 value 的 rune 长度内；相等即无选区。
+// 用「两端都没变」判断是否需要重绘，避免拖选时同一位置反复触发重排。
+func setSelection(doc HTMLDocument, el *htmlElement, anchor, focus int) {
 	if el == nil {
 		return
 	}
-	if n := len([]rune(el.GetAttribute("value"))); caret > n {
-		caret = n
+	n := len([]rune(el.GetAttribute("value")))
+	clamp := func(v int) int {
+		if v < 0 {
+			return 0
+		}
+		if v > n {
+			return n
+		}
+		return v
 	}
-	if caret < 0 {
-		caret = 0
-	}
-	if el.caret == caret {
+	anchor, focus = clamp(anchor), clamp(focus)
+	if el.caret == focus && el.selAnchor == anchor {
 		return
 	}
-	el.caret = caret
+	el.caret = focus
+	el.selAnchor = anchor
 	el.onChanged()
 	ensureCaretVisible(doc, el)
 }

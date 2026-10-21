@@ -34,6 +34,45 @@ func TestDecodeKeyDownEvent(t *testing.T) {
 	}
 }
 
+func TestDecodeKeyDownModifiers(t *testing.T) {
+	var buf [eventBufferSize]byte
+	// keysym.mod 是 Uint16，紧跟 sym 之后（偏移 24），不是 32 位。
+	put32(buf[0:], eventKeyDown)
+	put32(buf[20:], 'a')
+	buf[24] = byte(kmodCtrl) // KMOD_LCTRL|KMOD_RCTRL = 0xC0
+	buf[25] = 0
+
+	ev := decodeEvent(&buf)
+	if ev.sym != 'a' {
+		t.Fatalf("sym = 0x%X, want 'a'", ev.sym)
+	}
+	if ev.mod&kmodCtrl == 0 {
+		t.Fatalf("mod = 0x%X, want Ctrl 位（读错 keysym.mod 偏移/宽度，Ctrl+A 会失效）", ev.mod)
+	}
+}
+
+func TestDecodeMouseMotionEvent(t *testing.T) {
+	var buf [eventBufferSize]byte
+	// SDL_MouseMotionEvent：windowID@8 which@12 state@16 x@20 y@24
+	put32(buf[0:], eventMouseMotion)
+	put32(buf[8:], 1)
+	put32(buf[12:], 0)
+	buf[16] = 1 // SDL_BUTTON_LMASK（左键按住拖选）
+	put32(buf[20:], 321)
+	put32(buf[24:], 123)
+
+	ev := decodeEvent(&buf)
+	if ev.typ != eventMouseMotion {
+		t.Fatalf("typ = 0x%X, want 0x%X", ev.typ, eventMouseMotion)
+	}
+	if ev.state != 1 {
+		t.Fatalf("state = %d, want 1（左键按住）", ev.state)
+	}
+	if ev.x != 321 || ev.y != 123 {
+		t.Fatalf("x,y = %d,%d want 321,123（读错 MouseMotion 偏移，拖选会画到别处）", ev.x, ev.y)
+	}
+}
+
 func TestDecodeTextInputEvent(t *testing.T) {
 	var buf [eventBufferSize]byte
 	// SDL_TextInputEvent: type@0 ts@4 windowID@8 text[32]@12（UTF-8 NUL 结尾）

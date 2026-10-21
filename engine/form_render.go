@@ -89,6 +89,13 @@ func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p
 	if comp != nil {
 		dec = comp.TextDecoration()
 	}
+	// 选区高亮先整体绘制，再画文本：跨行选区每行一块，空行也有窄块。
+	// 与文本行共用同一套盒外过滤规则，避免高亮溢出到相邻内容。
+	if focused {
+		for _, sr := range textareaSelectionRects(g, b, l, px, bold, family, clipOK) {
+			g.DrawColor(sr.x, sr.y, sr.w, sr.h, selectionColor)
+		}
+	}
 	for i, ln := range l.lines {
 		y := l.y + i*l.lh
 		if ln.text == "" {
@@ -103,7 +110,7 @@ func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p
 		}
 		g.DrawText(l.x, y, ln.w, l.lh, p, ln.text)
 		if dec != TextDecorationNone {
-			drawDecoration(g, dec, l.x, y, ln.w, l.lh, px, p)
+			drawDecoration(g, dec, l.x, y, ln.w, l.lh, l.asc, px, p)
 		}
 	}
 	if !focused {

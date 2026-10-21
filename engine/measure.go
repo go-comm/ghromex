@@ -734,6 +734,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			if it.tn != nil {
 				it.tn.node.runs = append(it.tn.node.runs, textRun{
 					text: it.token, x: it.x + dx, y: y, w: it.w, h: it.asc + it.desc,
+					asc: it.asc,
 				})
 			} else if it.el != nil {
 				if dy := y - it.y; dy != 0 {

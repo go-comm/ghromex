@@ -74,10 +74,23 @@ func TestLinkNavigation(t *testing.T) {
 		t.Fatalf("起始页地址栏 = %q, want %q", got, homeURL)
 	}
 
-	// 地址栏是可编辑 input：点右侧后键入应追加到末尾（真实窗口可直接输入）。
-	addrBox := h.doc.QuerySelector("#ghromex-addr")
+	// 地址栏是固定工具条里的 input：鼠标拖选必须命中并产生选区，
+	// 再点右侧可折叠选区继续输入（用户报告过 input 无法选中文字）。
 	h.doc.Refresh()
+	addrBox := h.doc.QuerySelector("#ghromex-addr")
 	r := addrBox.GetBoundingClientRect()
+	midY := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
+	if !engine.OnDocumentMouseDown(h.doc, r.Left().Pixel()+2, midY) ||
+		!engine.OnDocumentMouseDrag(h.doc, r.Right().Pixel()-2, midY) {
+		t.Fatal("地址栏未进入拖选状态（固定工具条的 input 命中失败）")
+	}
+	engine.OnDocumentMouseUp(h.doc)
+	if got, ok := engine.SelectedText(h.doc); !ok || got != homeURL {
+		t.Fatalf("地址栏拖选 = %q, ok=%v, want %q", got, ok, homeURL)
+	}
+
+	// 地址栏是可编辑 input：点右侧后键入应追加到末尾（真实窗口可直接输入）。
+	r = addrBox.GetBoundingClientRect()
 	engine.OnDocumentClick(h.doc, r.Right().Pixel()-4, (r.Top().Pixel()+r.Bottom().Pixel())/2)
 	if !engine.OnDocumentTextInput(h.doc, "x") {
 		t.Fatal("地址栏没有消费键盘输入")

@@ -292,10 +292,21 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 		fam = comp.FontFamily()
 	}
 	// 度量与渲染路径一致走 Fake 估算口径（dump 无 Graphics 实例）
+	fg := NewFakeGraphics()
 	emitText := func(x, y int, text string) {
 		fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d" font-family="%s" fill="%s">%s</text>`+"\n",
 			x, y, fs, escapeXML(svgFontStack(fam)), fill, escapeXML(text))
 	}
+	// 选区高亮：与渲染路径同色同位置（fill-opacity 对应 selectionColor
+	// 的 alpha 0x82/255）。SVG 是静态导出，仍导出当前选区状态，便于无头
+	// 测试核对拖选/Ctrl+A 后的高亮几何。
+	emitSelection := func(r clipRect) {
+		// 颜色/透明度直接取渲染用的 selectionColor，避免两处各写一份常量。
+		cr, cg, cb, ca := selectionColor.RGBA()
+		fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.2f"/>`+"\n",
+			r.x, r.y, r.w, r.h, hexColor(cr, cg, cb), float64(ca)/255)
+	}
+	bold := comp.FontWeight() == FontWeightBold
 
 	if strings.EqualFold(base.tagName, "select") {
 		// 与渲染路径同口径：可用宽 = 内容宽 - 箭头位，超宽舍尾保留头。
@@ -314,10 +325,13 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 	}
 
 	if strings.EqualFold(base.tagName, "textarea") {
-		l := layoutTextarea(NewFakeGraphics(), base)
+		l := layoutTextarea(fg, base)
 		// 与渲染路径同口径：有裁剪盒（overflow 非 visible）时只丢与盒子
 		// 不相交的行，半截行交给 clip-path 截断；否则整行丢弃。
 		clipOK := isClippingBox(base)
+		for _, sr := range textareaSelectionRects(fg, base, l, fs, bold, fam, clipOK) {
+			emitSelection(sr)
+		}
 		for i, ln := range l.lines {
 			y := l.y + i*l.lh
 			if ln.text == "" {
@@ -346,18 +360,11 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 		}
 		return
 	}
-	val := displayValue(base) // password 在此按 ● 掩码，与渲染路径同口径
+	val, cut, w, h := inputVisibleWindow(fg, base, fs, bold, fam)
 	if val == "" {
 		return
 	}
-	w, h := fakeMeasureText(val, fs)
-	runes := []rune(val)
 	buttonLike := typ == "submit" || typ == "reset" || typ == "button"
-	for !buttonLike && w > base.width-4 && len(runes) > 1 {
-		runes = runes[1:]
-		val = string(runes)
-		w, h = fakeMeasureText(val, fs)
-	}
 	tx := base.x
 	if buttonLike && base.width > w {
 		tx = base.x + (base.width-w)/2
@@ -365,6 +372,11 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 	ty := base.y
 	if h < base.height {
 		ty += (base.height - h) / 2
+	}
+	if lo, hi, ok := selectionRange(base); ok {
+		for _, sr := range inputSelectionRects(fg, val, cut, tx, ty, h, fs, bold, fam, lo, hi) {
+			emitSelection(sr)
+		}
 	}
 	emitText(tx, ty+h, val)
 }

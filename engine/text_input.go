@@ -4,18 +4,31 @@ import "strings"
 
 // 输入编辑用到的控制键码。ASCII 区取值对齐 SDL2 SDL_keysym.sym
 // （SDL_keyboard.h 的 SDLK_* 定义），SDL 后端可直接透传；
-// 方向/Home/End 属扫描码区：SDLK = 0x40000000 | SDL_SCANCODE_*。
+// 方向/Home/End 属扫描码区：SDLK = 0x40000000 | SDL_SCANCODE_*；
+// Delete 是例外：SDL_keycode.h 直接把它定义为 ASCII DEL(0x7F)。
 const (
 	KeyBackspace = 0x08
 	KeyTab       = 0x09
 	KeyEnter     = 0x0D
 	KeyEscape    = 0x1B
 	KeyHome      = 0x4000004A // SDL_SCANCODE_HOME  (74)
+	KeyDelete    = 0x7F       // SDLK_DELETE（SDL_keycode.h 直接定义为 ASCII DEL，不是扫描码区！）
 	KeyEnd       = 0x4000004D // SDL_SCANCODE_END   (77)
 	KeyRight     = 0x4000004F // SDL_SCANCODE_RIGHT (79)
 	KeyLeft      = 0x40000050 // SDL_SCANCODE_LEFT  (80)
 	KeyDown      = 0x40000051 // SDL_SCANCODE_DOWN  (81)
 	KeyUp        = 0x40000052 // SDL_SCANCODE_UP    (82)
+)
+
+// 修饰键位掩码，取值对齐 SDL2 SDL_Keymod（SDL_keycode.h）：
+// KMOD_LSHIFT/RESHIFT = 0x1/0x2、LCTRL/RCTRL = 0x40/0x80、
+// LALT/RALT = 0x100/0x200、LGUIM/RGUIM = 0x400/0x800。
+// 后端把 KeyDown 的 keysym.mod 原样传入，引擎据此识别 Ctrl+A / Ctrl+C。
+const (
+	ModShift = 0x0003
+	ModCtrl  = 0x00C0
+	ModAlt   = 0x0300
+	ModGUI   = 0x0C00
 )
 
 // editableInput 判断元素是否为可编辑输入：<input> 的 text/password 类型
@@ -72,10 +85,16 @@ func SetFocusedElement(doc HTMLDocument, el HTMLElement) {
 		el = nil
 	}
 	if d.focus != el {
+		// 失焦即折叠旧选区：与浏览器「点别处后输入框内高亮消失」一致，
+		// 也避免 SVG 静态导出在控件已失焦时仍画出旧选区。
+		if old := inner(d.focus); old != nil {
+			old.selAnchor = old.caret
+		}
 		d.focus = el
 		if el != nil {
 			if b := inner(el); b != nil {
 				b.caret = len([]rune(b.GetAttribute("value")))
+				b.selAnchor = b.caret // 聚焦不继承旧的选区
 				// Tab/程序化聚焦时光标可能落在可视区外（textarea 多行），
 				// 立刻滚动到光标行，否则聚焦后首帧看不到光标。
 				ensureCaretVisible(doc, b)
@@ -103,7 +122,8 @@ func focusTargets(doc HTMLDocument) []HTMLElement {
 
 // OnDocumentTextInput 向聚焦输入插入一段可打印文本（1 个或多个字符；
 // 中文等 IME 组合完成的字符串走 SDL_TEXTINPUT 到这里）。插入点为当前
-// 光标位置（默认值末尾），随后光标后移。返回是否被消费。
+// 光标位置（默认值末尾），随后光标后移；若有选区则先删除选区再插入
+// （浏览器同语义）。返回是否被消费。
 func OnDocumentTextInput(doc HTMLDocument, s string) bool {
 	f := FocusedElement(doc)
 	if f == nil || s == "" {
@@ -114,6 +134,7 @@ func OnDocumentTextInput(doc HTMLDocument, s string) bool {
 		return false
 	}
 	r := []rune(b.GetAttribute("value"))
+	lo, hi, hasSel := selectionRange(b)
 	c := b.caret
 	if c < 0 {
 		c = 0
@@ -121,14 +142,51 @@ func OnDocumentTextInput(doc HTMLDocument, s string) bool {
 	if c > len(r) {
 		c = len(r)
 	}
-	b.SetAttribute("value", string(r[:c])+s+string(r[c:]))
+	if hasSel {
+		c = lo
+	} else {
+		hi = c
+	}
+	b.SetAttribute("value", string(r[:c])+s+string(r[hi:]))
 	setCaret(doc, b, c+len([]rune(s)))
 	return true
 }
 
 // OnDocumentKeyDown 向聚焦输入派发一个控制键（key 为 SDL keysym 值）。
-// 消费：Backspace、Enter（仅 textarea 换行）、方向键、Home/End、Tab。
+// 消费：Backspace、Delete、Enter（仅 textarea 换行）、方向键、Home/End、Tab。
+// 这是无修饰键入口（保持既有调用方兼容）；带 Shift/Ctrl 的按键走
+// OnDocumentKeyDownMods。
 func OnDocumentKeyDown(doc HTMLDocument, key int) bool {
+	return onDocumentKeyDown(doc, key)
+}
+
+// OnDocumentKeyDownMods 处理带修饰键的按键：Ctrl+A 全选、Ctrl+C 表示
+// 「有选区可复制」（真正的剪贴板写入由后端完成——引擎不依赖 SDL）。
+// 其余按键行为与 OnDocumentKeyDown 相同。
+func OnDocumentKeyDownMods(doc HTMLDocument, key int, mods uint16) bool {
+	f := FocusedElement(doc)
+	if f == nil {
+		return false
+	}
+	b := inner(f)
+	if b == nil {
+		return false
+	}
+	if mods&ModCtrl != 0 {
+		switch key {
+		case 'a', 'A':
+			n := len([]rune(b.GetAttribute("value")))
+			setSelection(doc, b, 0, n)
+			return true
+		case 'c', 'C':
+			_, _, ok := selectionRange(b)
+			return ok
+		}
+	}
+	return onDocumentKeyDown(doc, key)
+}
+
+func onDocumentKeyDown(doc HTMLDocument, key int) bool {
 	f := FocusedElement(doc)
 	if f == nil {
 		return false
@@ -145,30 +203,61 @@ func OnDocumentKeyDown(doc HTMLDocument, key int) bool {
 	if caret > len(r) {
 		caret = len(r)
 	}
+	lo, hi, hasSel := selectionRange(b)
 	multiline := strings.EqualFold(b.tagName, "textarea")
 
 	switch key {
 	case KeyBackspace:
+		if hasSel {
+			b.SetAttribute("value", string(r[:lo])+string(r[hi:]))
+			setCaret(doc, b, lo)
+			return true
+		}
 		if caret == 0 {
 			return false
 		}
 		b.SetAttribute("value", string(r[:caret-1])+string(r[caret:]))
 		setCaret(doc, b, caret-1)
 		return true
+	case KeyDelete:
+		if hasSel {
+			b.SetAttribute("value", string(r[:lo])+string(r[hi:]))
+			setCaret(doc, b, lo)
+			return true
+		}
+		if caret >= len(r) {
+			return false
+		}
+		b.SetAttribute("value", string(r[:caret])+string(r[caret+1:]))
+		setCaret(doc, b, caret)
+		return true
 	case KeyEnter:
 		if !multiline {
 			return false
+		}
+		if hasSel {
+			b.SetAttribute("value", string(r[:lo])+"\n"+string(r[hi:]))
+			setCaret(doc, b, lo+1)
+			return true
 		}
 		b.SetAttribute("value", string(r[:caret])+"\n"+string(r[caret:]))
 		setCaret(doc, b, caret+1)
 		return true
 	case KeyLeft:
+		if hasSel {
+			setCaret(doc, b, lo)
+			return true
+		}
 		if caret == 0 {
 			return true
 		}
 		setCaret(doc, b, caret-1)
 		return true
 	case KeyRight:
+		if hasSel {
+			setCaret(doc, b, hi)
+			return true
+		}
 		if caret >= len(r) {
 			return true
 		}
@@ -179,8 +268,14 @@ func OnDocumentKeyDown(doc HTMLDocument, key int) bool {
 	case KeyEnd:
 		return moveCaretToLineEdge(doc, b, false)
 	case KeyUp:
+		if hasSel {
+			setCaret(doc, b, caret) // 先折叠，再按折叠后的位置上下移
+		}
 		return moveCaretVertical(doc, b, -1)
 	case KeyDown:
+		if hasSel {
+			setCaret(doc, b, caret)
+		}
 		return moveCaretVertical(doc, b, 1)
 	case KeyTab:
 		list := focusTargets(doc)
@@ -285,21 +380,13 @@ func moveCaretVertical(doc HTMLDocument, b *htmlElement, dy int) bool {
 }
 
 // setControlCaretFromPoint 按点击坐标定位光标（textarea 按行/列，
-// 单行 input 按前缀宽度就近吸附）。
+// 单行 input 按前缀宽度就近吸附），并折叠选区。
 func setControlCaretFromPoint(doc HTMLDocument, el HTMLElement, x, y int) {
 	b := inner(el)
 	if b == nil {
 		return
 	}
-	g := docGraphics(doc)
-	px, bold, family := fontOf(b.computed)
-	var c int
-	if strings.EqualFold(b.tagName, "textarea") {
-		c = layoutTextarea(g, b).caretFromPoint(g, x, y, px, bold, family)
-	} else {
-		c = controlLayout(doc, b).caretFromPoint(g, x, y, px, bold, family)
-	}
-	setCaret(doc, b, c)
+	setCaret(doc, b, controlCaretFromPoint(doc, b, x, y))
 }
 
 // updateClickFocus 在点击派发后更新焦点：命中可编辑输入（或其子盒）
