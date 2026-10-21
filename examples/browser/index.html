@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ghromex 浏览器 · 起始页</title>
+<style>
+	body { margin: 0; padding: 24px 0 16px 0; background-color: #F1F5F9; color: #0F172A; font-family: system-ui; font-size: 14px; }
+
+	.hero { padding: 0 32px; }
+	.hero h1 { margin: 0 0 6px 0; font-size: 22px; }
+	.hero p { margin: 0; color: #475569; }
+
+	.hint { margin: 12px 32px 0 32px; padding: 10px 12px; background-color: #FFFFFF;
+		border: 1px solid #E2E8F0; border-radius: 6px; color: #64748B; font-size: 12px; }
+
+	.list { margin: 16px 32px 0 32px; }
+	.card { background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;
+		padding: 14px 16px; margin-bottom: 8px; }
+	.card a { color: #1D4ED8; font-size: 16px; }
+	.card p { margin: 6px 0 0 0; color: #475569; }
+	.card .path { color: #94A3B8; font-family: monospace; font-size: 12px; }
+
+	.foot { margin: 20px 32px 0 32px; padding-top: 14px; border-top: 1px solid #E2E8F0; color: #475569; }
+	.foot h2 { font-size: 14px; margin: 0 0 8px 0; }
+	.foot li { margin: 4px 0; }
+	.foot a { color: #1D4ED8; }
+</style>
+</head>
+<body>
+	<div class="hero">
+		<h1>Ghromex 浏览器</h1>
+		<p>最小本地浏览器示例：顶部工具条固定，切换到任意页面后依然存在</p>
+	</div>
+
+	<p class="hint">地址栏输入本地 HTML 路径（相对路径以当前页面目录为基准，也支持 file://）后点「打开」，或直接点击下面的链接。工具条由示例程序注入到每一份文档，外部链接与缺失文件也会保留地址栏和导航按钮。</p>
+
+	<div class="list">
+		<div class="card">
+			<a href="../login/index.html">登录页</a>
+			<p>登录/重置按钮交互与状态文本更新</p>
+			<p class="path">../login/index.html</p>
+		</div>
+		<div class="card">
+			<a href="../form/index.html">常规表单</a>
+			<p>员工登记表：定位、层叠、盒模型与可输入控件</p>
+			<p class="path">../form/index.html</p>
+		</div>
+		<div class="card">
+			<a href="../ua/index.html">原生 UA 与常用标签</a>
+			<p>零作者 CSS 的表单控件与常用标签，可与 Chrome 直接对照</p>
+			<p class="path">../ua/index.html</p>
+		</div>
+		<div class="card">
+			<a href="../scroll/index.html">滚动与裁剪</a>
+			<p>文档级滚动、overflow 容器、textarea 滚轮与 wheel 事件回显</p>
+			<p class="path">../scroll/index.html</p>
+		</div>
+	</div>
+
+	<div class="foot">
+		<h2>试试边界行为</h2>
+		<ul>
+			<li><a href="https://example.com">外部链接</a>：不联网，显示提示页（工具条保留）</li>
+			<li><a href="missing.html">不存在的页面</a>：显示错误页，可用顶部「后退」返回</li>
+		</ul>
+	</div>
+</body>
+</html>

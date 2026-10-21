@@ -23,7 +23,7 @@
 - Go 1.20+（go.mod 基线，作库供其他项目引用，1.20 以上工具链均可构建；无需 CGO）
 - 渲染后端目前提供 Windows 实现（`backend/sdl2`，加载 `SDL2.dll` 2.28 与 `SDL2_ttf.dll`）
 - 把 `SDL2.dll`、`SDL2_ttf.dll`（及 `zlib1.dll`）放到工程根目录 `libs/`，或保证系统可搜索到它们
-- 平台边界：`engine` 包是纯 Go、可移植的（任意平台 `go build ./...` 均通过）；`backend/sdl2`、`browser` 与 `examples/` 下各示例以 `//go:build windows` 标注，仅 Windows 可用，其它平台编译得到空实现（示例运行时提示"仅支持 Windows"）
+- 平台边界：`engine` 包是纯 Go、可移植的；`backend/sdl2` 是平台实现层——Windows 提供 SDL2 实现，其它平台 `NewWindow` 返回 `ErrUnsupported`；`browser` 与 `examples/` 都不带构建标签，任意平台 `go build ./...` / `go test ./...` 都能通过，非 Windows 启动窗口时会打印明确提示
 
 ## 快速开始
 
@@ -37,6 +37,7 @@
 | `examples/form` | `go run ./examples/form` | 常规表单（员工登记表）：定位/层叠/盒模型/可输入控件 |
 | `examples/ua` | `go run ./examples/ua` | 原生 UA 表单 + 常用标签：零作者 CSS，可与 Chrome/Edge 直接对照 |
 | `examples/scroll` | `go run ./examples/scroll` | 滚动/裁剪：文档级滚动、overflow 容器、textarea 滚轮、`OnWheel` 回显 |
+| `examples/browser` | `go run ./examples/browser` | 迷你本地浏览器：顶部常驻地址栏与后退/前进/刷新/首页按钮（换页后仍在），地址栏可打开本地路径（相对路径/`file://`），支持 `about:home`/`about:back`/`about:forward`，外部链接与缺失文件显示提示页；需在仓库内运行 |
 
 每个示例都支持同一组调试参数：
 
@@ -45,7 +46,7 @@ go run ./examples/ua -exit-after 3s     # 指定时长后自动退出（调试/C
 go run ./examples/ua -dump-svg out.svg  # 无头导出 SVG（不需要显示器）
 ```
 
-窗口交互示例：`examples/login` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘；`examples/form` 覆盖 11 项布局特性（负 inset 角标、fixed 底条、水印、包含块链锚定、z-index 层序、box-sizing 跨内核一致等），可点击输入框直接键入文字；`examples/scroll` 演示滚轮滚动（文档级长页、overflow 容器横/纵滚动、overflow:hidden 裁剪、textarea 滚轮、`OnWheel` 事件位移回显）。
+窗口交互示例：`examples/login` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘；`examples/form` 覆盖 11 项布局特性（负 inset 角标、fixed 底条、水印、包含块链锚定、z-index 层序、box-sizing 跨内核一致等），可点击输入框直接键入文字；`examples/scroll` 演示滚轮滚动（文档级长页、overflow 容器横/纵滚动、overflow:hidden 裁剪、textarea 滚轮、`OnWheel` 事件位移回显）；`examples/browser` 用 `SetOnNavigate` 接管链接点击：读取目标 HTML 并在同一窗口重新 `OpenDocument`，每次换页后把 `position:fixed` 的地址栏与导航按钮重新注入文档（引擎没有独立的窗口 chrome 层），浏览历史支持后退/前进/刷新/首页，未知协议与读取失败会生成带返回链接的提示页。
 
 ## 代码示例
 
@@ -126,6 +127,7 @@ examples/          可独立运行的示例（每个目录 main.go + index.html�
   form/              常规表单（员工登记表：布局特性 + 可输入控件）
   ua/                原生 UA 表单 + 常用标签（零作者 CSS，与 Chrome 对照）
   scroll/            滚动/裁剪（文档级滚动、overflow、textarea、wheel 事件）
+  browser/           迷你本地浏览器（常驻工具条、历史/刷新、链接导航、错误提示页）
 libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll）
 ```
 
