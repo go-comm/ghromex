@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-comm/ghromex/backend/sdl2"
+	"github.com/go-comm/ghromex/core"
 	"github.com/go-comm/ghromex/engine"
 	"github.com/go-comm/ghromex/runtime/clipboard"
 )
@@ -95,15 +96,31 @@ func (win *Window) RenderFrame() {
 	win.sdl.Present()
 }
 
-// clearCanvas 清屏：先白底，再用文档的画布背景色（CSS canvas propagation，
-// html/body 背景）铺满整个视口——否则内容高度以下的区域会露出白底，
-// 窗口看起来“铺不满”。
+// clearCanvas 清屏：铺满整个视口——没有画布背景时用白底，有的话用画布
+// 背景色（CSS canvas propagation，html/body 背景）。否则内容高度以下的
+// 区域会露出白底，窗口看起来"铺不满"。
 func (win *Window) clearCanvas() {
 	g := win.sdl.Graphics()
-	g.DrawColor(0, 0, win.sdl.ViewportWidth(), win.sdl.ViewportHeight(), engine.NewColor(255, 255, 255, 255))
-	if bg := engine.CanvasBackground(win.doc); bg != nil {
-		g.DrawColor(0, 0, win.sdl.ViewportWidth(), win.sdl.ViewportHeight(), bg)
+	w, h := win.sdl.ViewportWidth(), win.sdl.ViewportHeight()
+	for _, c := range clearLayers(win.doc) {
+		g.DrawColor(0, 0, w, h, c)
 	}
+}
+
+// clearLayers 返回清屏要铺的颜色层（自底向上）。
+//
+// 画布背景**不透明**时，白底那层是完全被盖住的重复填充——大窗体下就是
+// 一整屏的像素（软件光栅器下 2560×1440 要 0.3ms），没必要画。
+func clearLayers(doc engine.HTMLDocument) []core.Color {
+	white := engine.NewColor(255, 255, 255, 255)
+	bg := engine.CanvasBackground(doc)
+	if bg == nil {
+		return []core.Color{white}
+	}
+	if _, _, _, a := bg.RGBA(); a != 255 {
+		return []core.Color{white, bg}
+	}
+	return []core.Color{bg}
 }
 
 // Screenshot 回读渲染目标当前内容（原生字节+格式+尺寸）。

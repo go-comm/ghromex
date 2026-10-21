@@ -913,9 +913,29 @@ func (g *Graphics) DrawColor(x, y, w, h int, color core.Color) {
 		return
 	}
 	r, gr, b, a := color.RGBA()
+	// 混合模式按**本次填充的 alpha** 选：不透明用 NONE（直接写像素），半透明
+	// 才用 BLEND（逐像素混合）。
+	//
+	// 之前渲染器全局设成 BLEND（见 NewWindow），于是**每次填充都是逐像素
+	// 混合**：软件光栅器下约 2.1ns/像素（同样的直接写像素只要 0.2ns）。门户页
+	// 一帧要填 1700 万像素（清屏两块 + 页面背景 + 卡片），2560×1440 窗体
+	// 下单帧 37ms —— 最大化后滚动直接掉到 27fps。小窗体看不出来（像素少），
+	// 最大化后才发现是填充率的问题。
+	//
+	// 画完一律复原成 BLEND：后面的贴图拷贝（精灵、文字的抗锯齿边缘）要靠
+	// 混合。SDL 各后端对「拷贝用纹理的混合模式还是渲染器的」处理不一致，
+	// 保持渲染器状态是 BLEND 最稳。
+	blend := blendModeBlend
+	if a == 255 {
+		blend = blendModeNone
+	}
+	sdlSetRenderDrawBlendMode(g.renderer, uintptr(blend))
 	sdlSetRenderDrawColor(g.renderer, uintptr(r), uintptr(gr), uintptr(b), uintptr(a))
 	rect := sdlRect{int32(x), int32(y), int32(w), int32(h)}
 	checkDraw("SDL_RenderFillRect", sdlRenderFillRect(g.renderer, uintptr(unsafe.Pointer(&rect))))
+	if blend == blendModeNone {
+		sdlSetRenderDrawBlendMode(g.renderer, blendModeBlend)
+	}
 }
 
 // DrawImage 暂不支持（预留接口）。
