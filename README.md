@@ -229,6 +229,8 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 - `<select>` 仅鼠标交互（展开/收起/选中），无键盘上下键选择、无 multiple、无 optgroup；选项浮层不随视口裁剪（超出视口的选项画到窗口外）；收起态按内容收缩（文字 + 箭头位 16px，与 Chrome 同口径）
 - `<textarea>` 无剪切（Ctrl+X）、无按词扩展选区（Ctrl+Shift+方向键）；滚轮可滚动（超盒高的行随滚动偏移平移、半截行按裁剪截断；后端未实现 `Clipper` 时退化为整行丢弃）
 - 行高（`line-height: normal`）由 SDL_ttf 的 `TTF_FontAscent`/`TTF_FontDescent`
+  计算（两者都是 **int32 有符号**返回值，`TTF_FontDescent` 为负——不按 int32 重解释
+  会被当成巨大正数再钳成 0，所有字体的行盒就会短 2~3px）
   计算，与 Chrome/DirectWrite 可能有 1~4px 差异，不再是逐像素同口径；且布局
   全程为整数像素，浏览器的小数边距/行盒（如 h3 的 `margin: 1em` = 18.72px、
   h2 的 0.83em = 19.92px）只能取整，逐段累积后整页可漂移数像素；

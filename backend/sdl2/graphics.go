@@ -736,8 +736,13 @@ func (g *Graphics) lineMetricsOf(path string, size int, bold bool) (int, int, bo
 	if f == nil {
 		return 0, 0, false
 	}
-	asc := int(ttfFontAscent(f.handle))
-	desc := -int(ttfFontDescent(f.handle))
+	// nativeCall 统一返回 uintptr，而 TTF_FontAscent/Descent 返回的是**有符号
+	// int32**（Descent 为负）。不按 int32 重解释，负数会变成巨大的正数
+	// （-3 → 4294967293），取负后仍是负 → 被下面的钳制吞成 0：所有字体的
+	// descent 恒为 0，行盒比 Chrome 短 2~3px（文字行距偏紧、按钮内文字居中
+	// 也偏下）。
+	asc := int(int32(ttfFontAscent(f.handle)))
+	desc := -int(int32(ttfFontDescent(f.handle)))
 	if asc < 0 {
 		asc = 0
 	}
