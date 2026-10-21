@@ -38,11 +38,11 @@
 // / ClipboardText / SetClipboardText）——引擎只管文本，剪贴板读写留在
 // 平台侧（engine 保持纯 Go、可在无显示环境测试）。
 //
-// # 原生文件对话框
+// # 原生对话框
 //
-// Window.OpenFileDialog / OpenDirectoryDialog / SaveFileDialog 弹 Windows
-// 原生对话框（Shell 的 IFileDialog，Vista 起的现代外观，支持文件类型
-// 过滤与多选）：
+// Window.OpenFileDialog / OpenMultipleFilesDialog / OpenDirectoryDialog /
+// SaveFileDialog 弹 Windows 原生文件对话框（Shell 的 IFileDialog，
+// Vista 起的现代外观，支持文件类型过滤与多选）：
 //
 //	paths, err := win.OpenFileDialog(browser.DialogOptions{
 //		Title:      "打开",
@@ -55,6 +55,16 @@
 //	if err == nil && len(paths) > 0 {
 //		// 用户选中了文件（取消时 paths 为空、err 为 nil）
 //	}
+//
+// Window.MessageDialog 弹原生消息框（信息/警告/错误/询问，OK、是-否等
+// 按钮组合），返回用户点击的按钮：
+//
+//	res, err := win.MessageDialog(browser.MessageOptions{
+//		Title:   "确认",
+//		Message: "文件已存在，要覆盖吗？",
+//		Icon:    browser.IconQuestion,
+//		Buttons: browser.ButtonsYesNo,
+//	})
 //
 // 对话框是模态的：调用期间阻塞当前线程（父窗口的 SDL 事件循环随之
 // 暂停），因此在按钮/菜单的回调里直接调用即可。非 Windows 平台返回

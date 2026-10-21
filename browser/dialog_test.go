@@ -14,11 +14,17 @@ func TestDialogWithoutWindow(t *testing.T) {
 	if _, err := win.OpenFileDialog(DialogOptions{}); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("OpenFileDialog 错误 = %v, want ErrUnsupported", err)
 	}
+	if _, err := win.OpenMultipleFilesDialog(DialogOptions{}); !errors.Is(err, ErrUnsupported) {
+		t.Errorf("OpenMultipleFilesDialog 错误 = %v, want ErrUnsupported", err)
+	}
 	if _, err := win.OpenDirectoryDialog(DialogOptions{}); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("OpenDirectoryDialog 错误 = %v, want ErrUnsupported", err)
 	}
 	if _, err := win.SaveFileDialog(DialogOptions{}); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("SaveFileDialog 错误 = %v, want ErrUnsupported", err)
+	}
+	if _, err := win.MessageDialog(MessageOptions{}); !errors.Is(err, ErrUnsupported) {
+		t.Errorf("MessageDialog 错误 = %v, want ErrUnsupported", err)
 	}
 }
 

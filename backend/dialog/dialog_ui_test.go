@@ -68,10 +68,13 @@ func TestOpenFileDialogUI(t *testing.T) {
 	}
 }
 
-// 多选模式（MultiSelect=true）走的是另一条取值路径：GetResults 返回
-// IShellItemArray，再逐项取路径。这条路径依赖 IFileOpenDialog::GetResults
-// 的虚表下标——不同 Windows 版本上它落在不同的槽位，实现是运行时探测的，
-// 这里验一遍（驱动脚本只选一个文件，够验证取值链路了）。
+// 多选模式走的是另一条取值路径：GetResults 返回 IShellItemArray，再逐项
+// 取路径。这条路径依赖 IFileOpenDialog::GetResults 的虚表下标——不同
+// Windows 版本上它落在不同的槽位，实现是运行时探测的，这里验一遍。
+//
+// 驱动脚本在文件名框里填带引号的多个文件名（Shell 对话框表达多选的
+// 写法），真的选两个文件：只选一个的话，FOS_ALLOWMULTISELECT 没置上
+// 也看不出来。
 func TestOpenFilesDialogMultiUI(t *testing.T) {
 	if os.Getenv("GHROMEX_DIALOG_UI") == "" {
 		t.Skip("需要真实桌面交互：设置 GHROMEX_DIALOG_UI=1 运行")
@@ -80,6 +83,10 @@ func TestOpenFilesDialogMultiUI(t *testing.T) {
 	dir := t.TempDir()
 	first := filepath.Join(dir, "a.txt")
 	if err := os.WriteFile(first, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second := filepath.Join(dir, "b.txt")
+	if err := os.WriteFile(second, []byte("y"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -95,26 +102,82 @@ func TestOpenFilesDialogMultiUI(t *testing.T) {
 
 	const title = "多选（UI 测试）"
 	done := make(chan error, 1)
-	go func() { done <- driveFileDialog(title, "a.txt") }()
+	go func() { done <- driveFileDialog(title, `"`+first+`" "`+second+`"`) }()
 
-	got, err := OpenFileDialog(hwnd, Options{
-		Title:       title,
-		DefaultDir:  dir,
-		Filters:     []FileFilter{{Name: "文本文件 (*.txt)", Pattern: "*.txt"}},
-		MultiSelect: true,
+	got, err := OpenMultipleFilesDialog(hwnd, Options{
+		Title:      title,
+		DefaultDir: dir,
+		Filters:    []FileFilter{{Name: "文本文件 (*.txt)", Pattern: "*.txt"}},
 	})
 	if err != nil {
 		t.Fatalf("打开多选对话框失败: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("选中文件数 = %d (%v), want 1", len(got), got)
+	if len(got) != 2 {
+		t.Fatalf("选中文件数 = %d (%v), want 2", len(got), got)
 	}
 	if !samePath(got[0], first) {
 		t.Errorf("选中路径 = %q, want %q", got[0], first)
 	}
+	if !samePath(got[1], second) {
+		t.Errorf("选中路径 = %q, want %q", got[1], second)
+	}
 	if err := <-done; err != nil {
 		t.Errorf("驱动对话框失败: %v", err)
 	}
+}
+
+// TestMessageDialogUI 真弹一次消息框，在后台线程里按下「确定」。
+func TestMessageDialogUI(t *testing.T) {
+	if os.Getenv("GHROMEX_DIALOG_UI") == "" {
+		t.Skip("需要真实桌面交互：设置 GHROMEX_DIALOG_UI=1 运行")
+	}
+
+	win, err := sdl2.NewWindow(400, 300, "message-ui-test")
+	if err != nil {
+		t.Fatalf("创建窗口失败: %v", err)
+	}
+	defer win.Close()
+	hwnd, err := win.NativeHandle()
+	if err != nil {
+		t.Fatalf("取父窗口句柄失败: %v", err)
+	}
+
+	const title = "消息框（UI 测试）"
+	done := make(chan error, 1)
+	go func() { done <- driveMessageBox(title) }()
+
+	got, err := MessageDialog(hwnd, MessageOptions{
+		Title:   title,
+		Message: "这是一条测试消息。",
+		Icon:    IconInfo,
+		Buttons: ButtonsOK,
+	})
+	if err != nil {
+		t.Fatalf("弹消息框失败: %v", err)
+	}
+	if got != ResultOK {
+		t.Errorf("消息框结果 = %v, want ResultOK", got)
+	}
+	if err := <-done; err != nil {
+		t.Errorf("驱动消息框失败: %v", err)
+	}
+}
+
+// driveMessageBox 在后台线程里等消息框出现并按下「确定」。
+func driveMessageBox(title string) error {
+	dlg := waitForWindow(classDialog, title, 20*time.Second)
+	if dlg == 0 {
+		return errors.New("消息框窗口没有出现")
+	}
+	time.Sleep(dialogSettleDelay)
+	// 消息框的按钮控件 ID 不是 IDOK（实测是 2），但 MessageBoxW 的返回值
+	// 仍是 IDOK=1——所以按「第一个按钮」点，不按 ID 找。
+	btn := firstButton(dlg)
+	if btn == 0 {
+		return errors.New("找不到消息框的按钮")
+	}
+	postMessage(btn, bmClick, 0, 0)
+	return nil
 }
 
 // driveFileDialog 在后台线程里等对话框出现，填入文件名并按下「打开」。
@@ -262,6 +325,18 @@ func buttonByID(dlg uintptr, id int) uintptr {
 			if int(got) == id {
 				return child
 			}
+		}
+		child, _, _ = procFindWindowEx.Call(dlg, child, 0, 0)
+	}
+	return 0
+}
+
+// firstButton 取窗口里的第一个按钮控件。
+func firstButton(dlg uintptr) uintptr {
+	child, _, _ := procFindWindowEx.Call(dlg, 0, 0, 0)
+	for child != 0 {
+		if className(child) == classButton {
+			return child
 		}
 		child, _, _ = procFindWindowEx.Call(dlg, child, 0, 0)
 	}

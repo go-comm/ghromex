@@ -14,6 +14,11 @@ func OpenFileDialog(parent uintptr, opts Options) ([]string, error) {
 	return nil, ErrUnsupported
 }
 
+// OpenMultipleFilesDialog 在非 Windows 平台总是返回 ErrUnsupported。
+func OpenMultipleFilesDialog(parent uintptr, opts Options) ([]string, error) {
+	return nil, ErrUnsupported
+}
+
 // OpenDirectoryDialog 在非 Windows 平台总是返回 ErrUnsupported。
 func OpenDirectoryDialog(parent uintptr, opts Options) (string, error) {
 	return "", ErrUnsupported

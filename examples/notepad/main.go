@@ -410,12 +410,20 @@ func (n *notepad) pickFiles(title string, multi bool) []string {
 	if n.win == nil {
 		return nil
 	}
-	paths, err := n.win.OpenFileDialog(browser.DialogOptions{
-		Title:       title,
-		DefaultDir:  n.currentDir(),
-		Filters:     fileFilters(),
-		MultiSelect: multi,
-	})
+	opts := browser.DialogOptions{
+		Title:      title,
+		DefaultDir: n.currentDir(),
+		Filters:    fileFilters(),
+	}
+	var (
+		paths []string
+		err   error
+	)
+	if multi {
+		paths, err = n.win.OpenMultipleFilesDialog(opts)
+	} else {
+		paths, err = n.win.OpenFileDialog(opts)
+	}
 	if err != nil {
 		n.message("打开对话框失败：" + err.Error())
 		return nil

@@ -79,7 +79,10 @@ const (
 	fosNoChangeDir     = 0x00000008 // 不改进程当前目录
 	fosPickFolders     = 0x00000020 // 只选文件夹
 	fosForceFileSystem = 0x00000040 // 只显示文件系统里的目录
-	fosAllMultiSelect  = 0x00000100 // 允许多选
+	// FOS_ALLOWMULTISELECT 才是「允许多选」：0x00000200。
+	// 0x00000100 是 FOS_NOVALIDATE（关闭路径校验）——写错的话多选会
+	// 失效（而且顺带关掉了文件存在性检查）。
+	fosAllowMultiSelect = 0x00000200
 
 	sigdnFileSysPath = 0x80058000 // SIGDN_FILESYSPATH：取文件系统路径
 
@@ -141,17 +144,28 @@ type dialogConfig struct {
 	save     bool         // 另存为（写模式）
 }
 
-// OpenFileDialog 弹出「打开文件」对话框。
+// OpenFileDialog 弹出「打开文件」对话框（单选）。
 //
 // parent 是父窗口的原生 HWND（0 = 无父窗口，对话框照样能弹）。
-// 返回用户选中的文件路径（多选时返回多个，顺序同对话框里的选择顺序）。
-// 用户取消返回 (nil, nil)——取消不是错误。
+// 返回用户选中的文件路径。用户取消返回 (nil, nil)——取消不是错误。
 func OpenFileDialog(parent uintptr, opts Options) ([]string, error) {
 	return showFileDialog(parent, dialogConfig{
 		title:   opts.Title,
 		dir:     opts.DefaultDir,
 		filters: opts.Filters,
-		multi:   opts.MultiSelect,
+	})
+}
+
+// OpenMultipleFilesDialog 弹出「打开文件」对话框（允许多选）。
+//
+// 返回用户选中的文件路径（多个，顺序同对话框里的选择顺序）。用户取消
+// 返回 (nil, nil)——取消不是错误。
+func OpenMultipleFilesDialog(parent uintptr, opts Options) ([]string, error) {
+	return showFileDialog(parent, dialogConfig{
+		title:   opts.Title,
+		dir:     opts.DefaultDir,
+		filters: opts.Filters,
+		multi:   true,
 	})
 }
 
@@ -278,7 +292,7 @@ func configureFileDialog(dlg unsafe.Pointer, cfg dialogConfig) error {
 		opts |= fosPickFolders | fosForceFileSystem
 	}
 	if cfg.multi {
-		opts |= fosAllMultiSelect
+		opts |= fosAllowMultiSelect
 	}
 	if err := comCall(comMethod(dlg, idxSetOptions), dlg, uintptr(opts)); err != nil {
 		return fmt.Errorf("设置对话框选项失败: %w", err)

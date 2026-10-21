@@ -1,4 +1,4 @@
-// 本文件是 browser 门面的原生文件对话框转发；包文档见 doc.go。
+// 本文件是 browser 门面的原生对话框转发；包文档见 doc.go。
 
 package browser
 
@@ -23,14 +23,53 @@ type DialogOptions struct {
 	DefaultName string
 	// Filters 是文件类型过滤器；留空则不过滤（显示全部文件）。
 	Filters []FileFilter
-	// MultiSelect 允许一次选择多个文件（仅「打开文件」有效）。
-	MultiSelect bool
 }
 
-// OpenFileDialog 弹出原生「打开文件」对话框，返回用户选中的文件路径。
+// 消息框的类型直接复用 backend/dialog（类型别名），门面不另造一套。
+type (
+	// MessageOptions 是消息框的选项。
+	MessageOptions = dialog.MessageOptions
+	// MessageIcon 是消息框的图标。
+	MessageIcon = dialog.MessageIcon
+	// MessageButtons 是消息框的按钮组合。
+	MessageButtons = dialog.MessageButtons
+	// MessageResult 是用户在消息框里点击的按钮。
+	MessageResult = dialog.MessageResult
+)
+
+const (
+	// IconInfo 是信息图标（字母 i）。
+	IconInfo = dialog.IconInfo
+	// IconWarning 是警告图标（感叹号）。
+	IconWarning = dialog.IconWarning
+	// IconError 是错误图标（红叉）。
+	IconError = dialog.IconError
+	// IconQuestion 是询问图标（问号）。
+	IconQuestion = dialog.IconQuestion
+
+	// ButtonsOK 只有「确定」。
+	ButtonsOK = dialog.ButtonsOK
+	// ButtonsOKCancel 是「确定」「取消」。
+	ButtonsOKCancel = dialog.ButtonsOKCancel
+	// ButtonsYesNo 是「是」「否」。
+	ButtonsYesNo = dialog.ButtonsYesNo
+	// ButtonsYesNoCancel 是「是」「否」「取消」。
+	ButtonsYesNoCancel = dialog.ButtonsYesNoCancel
+
+	// ResultOK 是「确定」。
+	ResultOK = dialog.ResultOK
+	// ResultCancel 是「取消」。
+	ResultCancel = dialog.ResultCancel
+	// ResultYes 是「是」。
+	ResultYes = dialog.ResultYes
+	// ResultNo 是「否」。
+	ResultNo = dialog.ResultNo
+)
+
+// OpenFileDialog 弹出原生「打开文件」对话框（单选），返回用户选中的文件路径。
 //
-// 多选时返回多个路径。用户取消返回 (nil, nil)——取消不是错误，调用方
-// 按「用户没选」处理即可。平台不支持时返回 ErrUnsupported。
+// 用户取消返回 (nil, nil)——取消不是错误，调用方按「用户没选」处理即可。
+// 平台不支持时返回 ErrUnsupported。
 //
 // 对话框是模态的：调用期间会阻塞当前线程（父窗口的 SDL 事件循环随之
 // 暂停），因此应在按钮/菜单的回调里直接调用。
@@ -43,10 +82,28 @@ func (win *Window) OpenFileDialog(opts DialogOptions) ([]string, error) {
 		return nil, err
 	}
 	return dialog.OpenFileDialog(parent, dialog.Options{
-		Title:       opts.Title,
-		DefaultDir:  opts.DefaultDir,
-		Filters:     toDialogFilters(opts.Filters),
-		MultiSelect: opts.MultiSelect,
+		Title:      opts.Title,
+		DefaultDir: opts.DefaultDir,
+		Filters:    toDialogFilters(opts.Filters),
+	})
+}
+
+// OpenMultipleFilesDialog 弹出原生「打开文件」对话框（允许多选），返回
+// 用户选中的多个文件路径。
+//
+// 用户取消返回 (nil, nil)；平台不支持时返回 ErrUnsupported。
+func (win *Window) OpenMultipleFilesDialog(opts DialogOptions) ([]string, error) {
+	if win == nil || win.sdl == nil {
+		return nil, ErrUnsupported
+	}
+	parent, err := win.sdl.NativeHandle()
+	if err != nil {
+		return nil, err
+	}
+	return dialog.OpenMultipleFilesDialog(parent, dialog.Options{
+		Title:      opts.Title,
+		DefaultDir: opts.DefaultDir,
+		Filters:    toDialogFilters(opts.Filters),
 	})
 }
 
@@ -84,6 +141,32 @@ func (win *Window) SaveFileDialog(opts DialogOptions) (string, error) {
 		DefaultName: opts.DefaultName,
 		Filters:     toDialogFilters(opts.Filters),
 	})
+}
+
+// MessageDialog 弹一个原生消息框，返回用户点击的按钮。
+//
+// 例如「是否覆盖已存在的文件？」：
+//
+//	res, err := win.MessageDialog(browser.MessageOptions{
+//		Title:   "确认",
+//		Message: "文件已存在，要覆盖吗？",
+//		Icon:    browser.IconQuestion,
+//		Buttons: browser.ButtonsYesNo,
+//	})
+//	if err == nil && res == browser.ResultYes {
+//		// 用户点了「是」
+//	}
+//
+// 消息框是模态的：调用期间会阻塞当前线程。平台不支持时返回 ErrUnsupported。
+func (win *Window) MessageDialog(opts MessageOptions) (MessageResult, error) {
+	if win == nil || win.sdl == nil {
+		return ResultOK, ErrUnsupported
+	}
+	parent, err := win.sdl.NativeHandle()
+	if err != nil {
+		return ResultOK, err
+	}
+	return dialog.MessageDialog(parent, opts)
 }
 
 // toDialogFilters 把门面的过滤器转成对话框包的类型（对话框包不认识

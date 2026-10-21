@@ -268,6 +268,46 @@ func TestDefaultExtension(t *testing.T) {
 // 「无窗口时应用层拿到 ErrUnsupported」由 browser 门面的测试覆盖
 // （browser.TestDialogWithoutWindow）。
 
+// 多选对话框要真的置上 FOS_ALLOWMULTISELECT：标志位写错（例如误用
+// 0x00000100 —— 那是 FOS_NOVALIDATE）时，多选会失效，而且顺带关掉了
+// 文件存在性检查。
+func TestMultiSelectOption(t *testing.T) {
+	withCOM(t, func() {
+		dlg, err := createFileDialog(dialogConfig{title: "打开文件", multi: true})
+		if err != nil {
+			t.Fatalf("创建多选对话框失败: %v", err)
+		}
+		defer comRelease(dlg)
+
+		var opts uint32
+		if err := comCall(comMethod(dlg, idxGetOptions), dlg, uintptr(unsafe.Pointer(&opts))); err != nil {
+			t.Fatalf("读对话框选项失败: %v", err)
+		}
+		if opts&fosAllowMultiSelect == 0 {
+			t.Errorf("多选对话框选项 = 0x%X, want 含 FOS_ALLOWMULTISELECT", opts)
+		}
+	})
+}
+
+// 单选对话框不能带多选标志（否则用户能勾多个，调用方只取一个）。
+func TestSingleSelectHasNoMultiSelectFlag(t *testing.T) {
+	withCOM(t, func() {
+		dlg, err := createFileDialog(dialogConfig{title: "打开文件"})
+		if err != nil {
+			t.Fatalf("创建对话框失败: %v", err)
+		}
+		defer comRelease(dlg)
+
+		var opts uint32
+		if err := comCall(comMethod(dlg, idxGetOptions), dlg, uintptr(unsafe.Pointer(&opts))); err != nil {
+			t.Fatalf("读对话框选项失败: %v", err)
+		}
+		if opts&fosAllowMultiSelect != 0 {
+			t.Errorf("单选对话框选项 = 0x%X, want 不含 FOS_ALLOWMULTISELECT", opts)
+		}
+	})
+}
+
 // samePath 比较两个路径（Windows 上大小写不敏感，尾部斜杠可省略）。
 func samePath(a, b string) bool {
 	na := strings.TrimRight(strings.ToLower(a), `\/`)

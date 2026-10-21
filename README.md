@@ -8,7 +8,8 @@
 
 - 纯 Go 渲染引擎：HTML 解析、CSS 级联、选择器（标签 / `.class` / `#id` / 简单组合，含特异度）、块级与行内（inline / inline-block）布局、文本按词/按字换行
 - 定位与层叠：`position: relative / absolute / fixed`、`top/right/bottom/left`（含负值）、`z-index`；脱流盒第二遍布局，包含块 = 最近非 static 祖先 padding box / 视口；绘制分常规层 + 定位层（z 升序，同 z 按文档序），`z-index` 非 0 的定位元素与 `fixed` 元素建立层叠上下文，内部定位子树先局部排序再整体落层
-- 原生文件对话框：Windows Shell 的 `IFileDialog`（Vista 起的现代对话框），支持打开文件（可多选）、选择文件夹、另存为，带文件类型过滤与初始目录；纯 Win32 COM 调用，无 CGO、非 Windows 返回 `ErrUnsupported`
+- 原生文件对话框：Windows Shell 的 `IFileDialog`（Vista 起的现代对话框），支持打开文件、打开多个文件、选择文件夹、另存为，带文件类型过滤与初始目录；纯 Win32 COM 调用，无 CGO、非 Windows 返回 `ErrUnsupported`
+- 原生消息框：user32 的 `MessageBoxW`（信息/警告/错误/询问四种图标，OK、确定-取消、是-否、是-否-取消四种按钮组合），不走 COM、不需要 STA
 - 可编辑输入：点击聚焦（蓝框 + 按点击位置落光标）、键入文字（含中文输入法）、Backspace / Delete 删除、鼠标拖选 / Ctrl+A 全选、Ctrl+C 复制选区（后端写系统剪贴板）、Ctrl+V 粘贴（后端读系统剪贴板；单行 input 粘贴多行文本折成单行，textarea 保留换行）、方向键 / Home / End 移动光标、Shift+方向键 / Shift+Home/End 扩展选区（锚点不动、活动端随按键移动，越过锚点后选区反向）、输入与退格替换选区、Tab 循环切换（text / password / textarea；password 可聚焦可输入，值全程按 ● 掩码，光标与点击定位同掩码口径，明文不落画不进 SVG，但 Ctrl+C 复制真实值）；`<textarea>` 多行编辑（折行显示、Enter 换行、跨行拖选、超出盒高的行不绘制、纵向滚动跟随光标并支持滚轮）；其余 input type 按 UA 外观区分渲染：radio/checkbox 13x13 控件、submit/reset/button 按钮外观（value 居中）
 - 表单与链接控件：`<select>`/`<option>` 下拉（点击展开选项浮层，点选项选中并派发 `change`，下方放不下且上方放得下时整组上移，浮层压过流内容与定位层、命中测试同层序）；`<button>` 内容按 HTML 规范垂直居中（Chrome/Edge 同款，定高按钮尤其明显）、`<a href>` 链接（UA 蓝色 + 下划线，`SetOnNavigate` 注册导航回调，导航在 click 冒泡之后执行）
 - 勾选控件：`<input type=radio|checkbox>` 点击切换选中（`checked` 布尔属性按存在性判定，API `IsChecked` / `SetChecked`）；选中态绘制强调色方块 + 白色对勾、强调色圆环 + 实心圆（Chrome 口径），radio 盒恒为正圆；radio 仅 name 非空且相同的项互斥（实测无 name / `name=""` 各自独立）；点 label（包裹其控件或 `for` 指向）等效点该控件
@@ -104,10 +105,10 @@ engine.RenderNode(buf, doc)
 _ = buf.SavePNG("out.png") // 或直接 buf.ColorAt(x, y) 断言像素
 ```
 
-### 原生文件对话框
+### 原生对话框
 
-Windows 上可弹系统原生的文件对话框（打开文件 / 选择文件夹 / 另存为），
-外观与资源管理器一致，支持文件类型过滤与多选：
+Windows 上可弹系统原生的文件对话框（打开文件 / 打开多个文件 / 选择文件夹 /
+另存为），外观与资源管理器一致，支持文件类型过滤与多选：
 
 ```go
 win, _ := browser.New(900, 620, "记事本")
@@ -120,11 +121,29 @@ paths, err := win.OpenFileDialog(browser.DialogOptions{
 	},
 })
 // 用户取消时 paths 为空、err 为 nil；非 Windows 平台 err 为 browser.ErrUnsupported。
+
+// 一次选多个文件用 OpenMultipleFilesDialog（返回多个路径）。
+many, err := win.OpenMultipleFilesDialog(browser.DialogOptions{Title: "批量打开"})
+```
+
+还有原生消息框（提示 / 警告 / 询问），走 user32 的 `MessageBoxW`：
+
+```go
+res, err := win.MessageDialog(browser.MessageOptions{
+	Title:   "确认",
+	Message: "文件已存在，要覆盖吗？",
+	Icon:    browser.IconQuestion,
+	Buttons: browser.ButtonsYesNo,
+})
+if err == nil && res == browser.ResultYes {
+	// 用户点了「是」
+}
 ```
 
 对话框是模态的：调用期间阻塞当前线程（父窗口的 SDL 事件循环随之暂停），
-在按钮/菜单的回调里直接调用即可。实现走 Shell 的 `IFileDialog`（纯 Win32
-COM 调用，无 CGO），细节见 `backend/dialog/dialog.go`。
+在按钮/菜单的回调里直接调用即可。文件对话框走 Shell 的 `IFileDialog`（纯
+Win32 COM 调用，无 CGO），消息框走 user32 的 `MessageBoxW`（不需要 COM、
+不需要 STA），细节见 `backend/dialog/dialog.go`。
 
 ## 项目结构
 
@@ -151,8 +170,9 @@ backend/sdl2/      SDL2 后端：窗口、事件循环、SDL_ttf 文本纹理缓
                    页面文本段数超限时不再逐帧重渲染）、
                    剪贴板读写（Ctrl+C 写 / Ctrl+V 读，引擎只管文本）、
                    原生窗口句柄（NativeHandle，供原生对话框当父窗口）
-backend/dialog/     Windows 原生文件对话框（Shell IFileDialog，纯 Win32 COM，无 CGO）：
-                   打开文件（可多选）/ 选择文件夹 / 另存为。与渲染后端无关，
+backend/dialog/     Windows 原生对话框：文件对话框（Shell IFileDialog，纯 Win32
+                   COM，无 CGO：打开文件 / 打开多个文件 / 选择文件夹 / 另存为）
+                   与消息框（user32 MessageBoxW，不需要 COM）。与渲染后端无关，
                    父窗口句柄由调用方传入，故单列一包
 examples/          可独立运行的示例（每个目录 main.go + index.html）：
   login/             登录页（按钮交互、状态文本）
