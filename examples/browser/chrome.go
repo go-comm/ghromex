@@ -64,8 +64,12 @@ const chromeCSS = `
 	top: 6px;
 	height: 32px;
 	padding: 0;
-	background-color: #2563EB;
-	border: 1px solid #3B82F6;
+	/* 不用蓝色：深色工具条上唯一一处高饱和色，与整条工具条不搭（页面下方
+	   的蓝色点缀反而把它衬得更突兀）。改成与导航按钮同族的深板岩 + 白字，
+	   边框比导航按钮亮一档，位置与体量靠右缘（引擎没有 margin:auto，
+	   位置由程序按视口宽度算）自然区分。 */
+	background-color: #1E293B;
+	border: 1px solid #64748B;
 	border-radius: 8px;
 	color: #FFFFFF;
 	font-size: 13px;
