@@ -41,6 +41,12 @@ func TestDisplayNoneElementNotHit(t *testing.T) {
 	// 隐藏后一个：命中应落到前一个，而不是被隐藏的那个。
 	box.SetAttribute("style", "display:none")
 	doc.Refresh()
+	// 隐藏的元素连盒子也没了：应用层查矩形不该拿到旧盒子。
+	if r := box.GetBoundingClientRect(); r.Right().Pixel()-r.Left().Pixel() != 0 ||
+		r.Bottom().Pixel()-r.Top().Pixel() != 0 {
+		t.Fatalf("隐藏后的盒 = %dx%d, want 0x0",
+			r.Right().Pixel()-r.Left().Pixel(), r.Bottom().Pixel()-r.Top().Pixel())
+	}
 	hit := engine.ElementAt(doc, 40, 40)
 	if hit == box {
 		t.Fatal("display:none 的元素仍被命中（旧盒子没清）")
