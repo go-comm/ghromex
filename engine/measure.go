@@ -219,8 +219,7 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH i
 	}
 	disp := comp.Display()
 	if disp == DisplayNone {
-		el.layoutH = 0
-		el.contentW, el.contentH = 0, 0
+		hideBox(el)
 		return 0, 0
 	}
 
@@ -526,7 +525,11 @@ func applyRelativeOffset(e HTMLElement, el *htmlElement, vw int) {
 func layoutPositioned(g Graphics, el *htmlElement, vw, vh int) {
 	for _, child := range el.children {
 		che := inner(child)
-		if che == nil || che.computed == nil || che.computed.Display() == DisplayNone {
+		if che == nil || che.computed == nil {
+			continue
+		}
+		if che.computed.Display() == DisplayNone {
+			hideBox(che) // 隐藏的盒不能留旧盒子（见 hideBox 的说明）
 			continue
 		}
 		switch che.computed.Position() {
@@ -537,6 +540,23 @@ func layoutPositioned(g Graphics, el *htmlElement, vw, vh int) {
 		}
 		layoutPositioned(g, che, vw, vh)
 	}
+}
+
+// hideBox 清掉元素的布局盒：元素变成 display:none 后必须清。
+//
+// 命中测试按盒子判定（零尺寸盒不参与命中），不清的话元素会保留旧盒子——
+// 明明看不见，点上去却还能命中。真实症状：记事本的菜单项执行后菜单收起，
+// 在原位置再点一次仍会命中那个已隐藏的菜单项，「时间/日期」就连插两次。
+//
+// 渲染层按 display:none 直接跳过，命中层靠零尺寸盒跳过——两边同口径
+// （见 doc.go 的不变量 4）。
+func hideBox(el *htmlElement) {
+	el.setX(0)
+	el.setY(0)
+	el.setWidth(0)
+	el.setHeight(0)
+	el.layoutH = 0
+	el.contentW, el.contentH = 0, 0
 }
 
 // ---------------------------------------------------------------------------
@@ -923,6 +943,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 		cdisp := che.computed.Display()
 		if cdisp == DisplayNone {
+			hideBox(che) // 隐藏的盒不能留旧盒子（见 hideBox 的说明）
 			continue
 		}
 		if che.computed.Position().isOutFlow() {

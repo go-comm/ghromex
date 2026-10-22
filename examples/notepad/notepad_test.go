@@ -324,3 +324,43 @@ func TestToggleStatusBar(t *testing.T) {
 		t.Fatalf("状态栏样式 = %q, want 含 display:none", got)
 	}
 }
+
+// 菜单项执行后菜单收起：收起的菜单项不该再被点到。
+//
+// 引擎曾把 display:none 元素的旧盒子留着，命中测试照样命中它——于是在菜单
+// 项原来的位置再点一次，会又执行一次动作（「时间/日期」连插两次日期）。
+func TestClosedMenuItemNotClickable(t *testing.T) {
+	np := newTestNotepad(t)
+	np.editor.SetAttribute("value", "x")
+	np.doc.Refresh()
+
+	// 打开「编辑」菜单，记下「时间/日期」项的位置，再点它。
+	head := np.menuLabels[1]
+	hr := head.GetBoundingClientRect()
+	engine.OnDocumentClick(np.doc, hr.Left().Pixel()+2, hr.Top().Pixel()+2)
+	np.doc.Refresh()
+	x, y := 0, 0
+	for _, item := range np.menuPop.Children() {
+		if item.InnerText() == "时间/日期" {
+			ir := item.GetBoundingClientRect()
+			x = (ir.Left().Pixel() + ir.Right().Pixel()) / 2
+			y = (ir.Top().Pixel() + ir.Bottom().Pixel()) / 2
+		}
+	}
+	if x == 0 && y == 0 {
+		t.Fatal("菜单里没有「时间/日期」项")
+	}
+	engine.OnDocumentClick(np.doc, x, y)
+	first := np.editor.GetAttribute("value")
+	if first == "x" {
+		t.Fatal("「时间/日期」没有插入日期")
+	}
+
+	// 菜单已收起：在菜单项原来的位置再点一次（现在落在编辑区上），
+	// 不该再执行「时间/日期」。
+	np.doc.Refresh()
+	engine.OnDocumentClick(np.doc, x, y)
+	if got := np.editor.GetAttribute("value"); got != first {
+		t.Fatalf("菜单收起后再点原位置，编辑区 = %q, want %q（菜单项不该再被点到）", got, first)
+	}
+}
