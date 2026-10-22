@@ -121,9 +121,11 @@
 		.va-top { vertical-align: top; }
 		.va-bottom { vertical-align: bottom; }
 
-		/* 伪类：悬停/按下/焦点/选中态的样式变化 */
+		/* 伪类：悬停/按下/焦点/选中态的样式变化。
+		   盒宽要放得下文字：定宽盒装不下时文字会折行并溢出盒外
+		   （Chrome 同款），在对照页上会与下一行文字叠在一起。 */
 		.ps-box {
-			display: inline-block; width: 140px; height: 44px; line-height: 44px;
+			display: inline-block; width: 200px; height: 44px; line-height: 44px;
 			text-align: center; background: #F1F5F9; border: 1px solid #CBD5E1;
 		}
 		.ps-box:hover { background: #FEF9C3; border-color: #EAB308; }
@@ -207,7 +209,7 @@
 	<div class="lh-factor">line-height:1.8：倍数，相对自身字号，行与行拉开 1.8 倍。</div>
 	<div class="lh-len">line-height:32px：绝对行高，与字号无关。</div>
 	<div class="lh-pct">line-height:150%：百分比，与 1.5 同义。</div>
-	<div class="lh-factor lh-child">line-height:1.8 + font-size:24px：倍数按**自身**字号解析 → 43.2px。</div>
+	<div class="lh-factor lh-child">line-height:1.8 + font-size:24px：倍数按自身字号解析 → 43.2px。</div>
 	<div>
 		文字 <span class="va-middle">middle</span> 文字
 		<span class="va-raise">raise 8px</span> 文字
