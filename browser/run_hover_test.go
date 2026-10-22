@@ -52,6 +52,16 @@ func TestRunUpdatesHoverState(t *testing.T) {
 		t.Fatalf("初始宽 = %d, want 60", w)
 	}
 
+	// 先空跑一段把平台自身的首帧事件排空：dummy 驱动在窗口显示（首帧
+	// Present）时会把鼠标位置“瞬移”到窗口中心，那条 SDL_MOUSEMOTION 会
+	// 在注入的事件之后到达——位置不在盒子上，悬停态会被合法地清掉，
+	// 于是断言随机失败。真实平台同样会在显示/聚焦时发这类事件，
+	// 所以这里不是绕开问题，而是按真实时序先把它们消费掉。
+	win.SetAutoExit(120 * time.Millisecond)
+	if err := win.Run(); err != nil {
+		t.Fatal(err)
+	}
+
 	mouseMotion(win, 30, 20)
 	win.SetAutoExit(200 * time.Millisecond)
 	if err := win.Run(); err != nil {

@@ -34,17 +34,29 @@
 //	GHROMEX_BENCH=1 go run ./examples/portal
 //	GHROMEX_BENCH=1 GHROMEX_BENCH_FRAMES=600 go run ./examples/portal
 //
-// 输出示例（软件路径，dummy 驱动）：
+// 输出示例（软件路径，dummy 驱动，1280×820）：
 //
-//	ghromex bench: renderer=software (driver=software; 强制软件：…)
-//	  窗口=2560x1440  样本=300  帧周期 p50=11.5ms
-//	  布局 p50=0.02ms p95=0.03ms p99=0.05ms
-//	  清屏 p50=0.31ms p95=0.34ms p99=0.40ms
-//	  重绘 p50=1.10ms p95=1.21ms p99=1.90ms
-//	  呈现 p50=0.02ms p95=0.03ms p99=0.04ms   ← 软件路径：只是拷贝
-//	  空闲 p50=10.00ms p95=10.05ms p99=10.10ms ← 主循环的节���休眠
-//	  工作合计 p50=1.45ms（不含呈现与空闲）
-//	  堆常驻 6.2MB（GC 后读数，量级参考）
+//	ghromex bench: renderer=software (driver=software; 强制软件：GHROMEX_SOFTWARE/dummy)
+//	  窗口=1280x820  样本=400  帧周期 p50=3.04ms
+//	  布局 p50=0.00ms p95=0.00ms p99=0.00ms
+//	  清屏 p50=0.00ms p95=0.00ms p99=0.52ms
+//	  重绘 p50=1.19ms p95=2.23ms p99=2.75ms  ← 软件光栅器：此处只是命令入队，像素在「呈现」段才填
+//	  呈现 p50=1.87ms p95=3.34ms p99=3.90ms  ← 软件路径：只是拷贝，无 vsync
+//	  空闲 p50=0.00ms p95=0.00ms p99=0.00ms  ← 基准模式不进入休眠（模拟持续动画，量最大吞吐）
+//	  工作合计（布局+清屏+重绘）p50=1.20ms p95=2.28ms p99=2.85ms
+//	  每帧分配 246KB（Go 侧累计分配）
+//	  绘制调用 p50=1194 p95=1194 p99=1194（每帧）
+//	  堆常驻 3.1MB（GC 后；开跑基线 3.0MB）
+//
+// 同一页面同一尺寸走加速路径时：
+//
+//	ghromex bench: renderer=accelerated(GPU, driver=direct3d)
+//	  窗口=1280x820  样本=400  帧周期 p50=16.47ms
+//	  重绘 p50=1.32ms p95=2.43ms p99=3.08ms
+//	  呈现 p50=14.62ms p95=15.84ms p99=16.19ms  ← 含等 vsync≈14.05ms（关 vsync 实测纯拷贝 0.57ms）
+//
+// 注意两边的「帧周期」不可横比：软件路径按工作量跑（3ms），加速路径被
+// vsync 锁在 16.6ms，其中 14ms 是纯等待。要比就比真实工作（重绘 + 拷贝）。
 package browser
 
 import (

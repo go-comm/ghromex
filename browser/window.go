@@ -244,7 +244,14 @@ func (win *Window) Run() error {
 			// 布局期可能又标记了变更（滚动动画的下一帧）：此时不能睡 10ms，
 			// 否则每帧白等 10ms，120ms 的动画会被拖到 200ms 以上；空闲时仍
 			// 保留 10ms 休眠省 CPU（present 有 vsync 时本就会自然限帧）。
+			//
+			// 基准模式**不进空闲休眠**：它已强制每帧重绘（模拟持续动画），
+			// 再睡 10ms 量的就是「静态页白等」——既不是真实吞吐，还把
+			// vsync 等待藏进休眠里看不见。
 			pending = doc.ChangeCount() != win.lastChange || engine.ScrollAnimating(doc)
+			if bench != nil {
+				pending = true
+			}
 		}
 
 		if !pending {
