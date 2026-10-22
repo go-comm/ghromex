@@ -20,6 +20,15 @@ type Window struct{}
 // NewWindow 在非 Windows 平台总是返回 ErrUnsupported。
 func NewWindow(w, h int, title string) (*Window, error) { return nil, ErrUnsupported }
 
+// NewWindowWithOptions 在非 Windows 平台总是返回 ErrUnsupported。
+func NewWindowWithOptions(WindowOptions) (*Window, error) { return nil, ErrUnsupported }
+
+// SetSize 在非 Windows 平台为空操作（窗口从来没能创建）。
+func (*Window) SetSize(int, int) {}
+
+// MoveTo 在非 Windows 平台为空操作（窗口从来没能创建）。
+func (*Window) MoveTo(int, int) {}
+
 // ViewportWidth 实现 core.Viewport（仅在 Window 可用时有效）。
 func (*Window) ViewportWidth() int { return 0 }
 

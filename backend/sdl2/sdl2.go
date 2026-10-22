@@ -44,14 +44,18 @@ var (
 	dllSDL *windows.LazyDLL
 	dllTTF *windows.LazyDLL
 
-	sdlInit                   nativeCall
-	sdlQuit                   nativeCall
-	sdlGetError               nativeCall
-	sdlCreateWindow           nativeCall
-	sdlShowWindow             nativeCall
-	sdlRaiseWindow            nativeCall
-	sdlGetWindowFlags         nativeCall
-	sdlSetWindowTitle         nativeCall
+	sdlInit           nativeCall
+	sdlQuit           nativeCall
+	sdlGetError       nativeCall
+	sdlCreateWindow   nativeCall
+	sdlShowWindow     nativeCall
+	sdlRaiseWindow    nativeCall
+	sdlGetWindowFlags nativeCall
+	sdlSetWindowTitle nativeCall
+	// 悬浮截图窗：无边框、置顶、不占任务栏；预览阶段还要把窗口
+	// 原地缩到选区大小，所以运行期位置/尺寸也要能改。
+	sdlSetWindowPosition      nativeCall
+	sdlSetWindowSize          nativeCall
 	sdlDestroyWindow          nativeCall
 	sdlCreateRenderer         nativeCall
 	sdlGetRendererInfo        nativeCall
@@ -128,8 +132,13 @@ const (
 	windowShown = 0x00000004
 	// SDL_WINDOW_HIDDEN：SDL2 建窗默认可见（漏传时 CreateWindow 会自动
 	// 补 SHOWN，实测 flags=0x24），要“首帧后再显示”必须显式隐藏。
-	windowHidden       = 0x00000008
-	windowResizable    = 0x00000020
+	windowHidden    = 0x00000008
+	windowResizable = 0x00000020
+	// 截图工具的悬浮窗：没有标题栏/边框，压在其他窗口上方，且不进
+	// 任务栏（Alt+Tab 里也不该出现一个截图预览）。
+	windowBorderless   = 0x00000010
+	windowAlwaysOnTop  = 0x00008000
+	windowSkipTaskbar  = 0x00010000
 	windowPosCenteredX = 0x2FFF0000
 
 	// SDL_ttf 提示模式（TTF_SetFontHinting 参数，整型走 GP 寄存器）。
@@ -244,6 +253,10 @@ func doLoad() error {
 	// 测试用：核对“建窗即隐藏、首帧后才显示”的窗口标志。
 	sdlGetWindowFlags = bindSdl("SDL_GetWindowFlags")
 	sdlSetWindowTitle = bindSdl("SDL_SetWindowTitle")
+	// SDL_SetWindowPosition / SDL_SetWindowSize：截图预览从“整屏选区”
+	// 原地缩成“悬浮小窗”，以及拖动悬浮窗时用。
+	sdlSetWindowPosition = bindSdl("SDL_SetWindowPosition")
+	sdlSetWindowSize = bindSdl("SDL_SetWindowSize")
 	sdlDestroyWindow = bindSdl("SDL_DestroyWindow")
 	sdlCreateRenderer = bindSdl("SDL_CreateRenderer")
 	sdlGetRendererInfo = bindSdl("SDL_GetRendererInfo")

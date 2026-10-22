@@ -28,7 +28,7 @@
 - Go 1.20+（go.mod 基线，作库供其他项目引用，1.20 以上工具链均可构建；无需 CGO）
 - 渲染后端目前提供 Windows 实现（`backend/sdl2`，加载 `SDL2.dll` 2.28 与 `SDL2_ttf.dll`）
 - 把 `SDL2.dll`、`SDL2_ttf.dll`（及 `zlib1.dll`）放到工程根目录 `libs/`，或保证系统可搜索到它们
-- 平台边界：`engine` 包是纯 Go、可移植的；`backend/sdl2` 是渲染后端——Windows 提供 SDL2 实现，其它平台 `NewWindow` 返回 `ErrUnsupported`；`runtime/` 是平台能力的通用调用入口（`runtime/dialog` 原生对话框、`runtime/clipboard` 系统剪贴板），平台实现在 `backend/dialog`、`backend/clipboard`；Windows 用纯 Win32 / SDL2 调用实现，其它平台返回 `ErrUnsupported` 或空操作；`browser` 与 `examples/` 都不带构建标签，任意平台 `go build ./...` / `go test ./...` 都能通过，非 Windows 启动窗口时会打印明确提示
+- 平台边界：`engine` 包是纯 Go、可移植的；`backend/sdl2` 是渲染后端——Windows 提供 SDL2 实现，其它平台 `NewWindow` 返回 `ErrUnsupported`；`runtime/` 是平台能力的通用调用入口（`runtime/dialog` 原生对话框、`runtime/clipboard` 系统剪贴板、`runtime/screen` 桌面抓屏），平台实现在 `backend/dialog`、`backend/clipboard`、`runtime/screen` 内部；Windows 用纯 Win32 / SDL2 调用实现，其它平台返回 `ErrUnsupported` 或空操作；`browser` 与 `examples/` 都不带构建标签，任意平台 `go build ./...` / `go test ./...` 都能通过，非 Windows 启动窗口时会打印明确提示
 - 依赖方向：`core`（契约：Graphics/Viewport/Paint/Color…，叶子包）← `engine` 与 `backend/*` 各自向上依赖它，再由 `browser`（应用层：窗口 + 文档 + 主循环）把两者缝起来。平台层不 import 引擎，`core/arch_test.go` 把这条规则钉死
 
 ## 快速开始
@@ -46,12 +46,19 @@
 | `examples/browser` | `go run ./examples/browser` | 迷你本地浏览器：顶部常驻地址栏与后退/前进/刷新/首页按钮、底部常驻状态栏（页标题 + 说明，换页后仍在），地址栏可打开本地路径（相对路径/`file://`），支持 `about:home`/`about:back`/`about:forward`，外部链接与缺失文件显示提示页；需在仓库内运行 |
 | `examples/portal` | `go run ./examples/portal` | 购物门户：fixed 工具条/品牌头/导航、层叠上下文、分类栏、秒杀与商品网格、搜索提示和购物车计数交互 |
 | `examples/notepad` | `go run ./examples/notepad` | 仿 Windows 记事本：真菜单（文件/编辑/格式/视图/帮助，点标签弹出浮层菜单）、工具栏（新建/打开/保存/另存为/撤销/重做）、原生「打开/另存为/选择文件夹」对话框、查找替换栏、铺满窗口的多行编辑区、状态栏（文件名/行列/字符数）；`-file` 启动时打开文件 |
+| `examples/snip` | `go run ./examples/snip` | 截图工具：冻结主屏拖选，松开后同一窗口原地缩成置顶无边框的悬浮预览（图片区即选区大小），拖动图片移动窗口，Ctrl+S 保存 PNG，Esc/关闭退出；`-delay` 留时间整理窗口 |
 
 每个示例都支持同一组调试参数：
 
 ```powershell
 go run ./examples/ua -exit-after 3s     # 指定时长后自动退出（调试/CI）
 go run ./examples/ua -dump-svg out.svg  # 无头导出 SVG（不需要显示器）
+```
+
+`examples/snip` 另有截图专用的无头出图参数：`-source` 用一张图片代替真实桌面，`-shot-overlay`/`-shot-preview` 把选区页、预览页各渲染成 PNG 后退出；配合 `SDL_VIDEO_DRIVER=dummy` 即可在无显示器环境检查观感。
+
+```powershell
+go run ./examples/snip -source examples/kit/screenshot.png -shot-overlay overlay.png -shot-preview preview.png
 ```
 
 窗口交互示例：`examples/login` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘；`examples/form` 覆盖 11 项布局特性（负 inset 角标、fixed 底条、水印、包含块链锚定、z-index 层序、box-sizing 跨内核一致等），可点击输入框直接键入文字；`examples/scroll` 演示滚轮滚动（文档级长页、overflow 容器横/纵滚动、overflow:hidden 裁剪、textarea 滚轮、`OnWheel` 事件位移回显）；`examples/browser` 用 `SetOnNavigate` 接管链接点击：读取目标 HTML 并在同一窗口重新 `OpenDocument`，每次换页后把 `position:fixed` 的地址栏、导航按钮与底部状态栏重新注入文档（引擎没有独立的窗口 chrome 层；让位用插在页面内容之前的占位块，既不改页面自己的 padding，也不动 body 的 margin——后者会让固定工具条掉出 body 的命中区），浏览历史支持后退/前进/刷新/首页（没有可后退的页面时按钮置灰），地址栏里按回车直接打开当前输入的地址，未知协议与读取失败会生成带返回链接的提示页；`examples/portal` 用固定顶栏 + 绝对定位侧栏组成购物门户，搜索框聚焦后显示热门提示，所有「加入购物车」按钮共享一个计数徽标。
@@ -158,6 +165,103 @@ if err == nil && res == browser.ResultYes {
 Win32 COM 调用，无 CGO），消息框走 user32 的 `MessageBoxW`（不需要 COM、
 不需要 STA），细节见 `runtime/dialog/dialog.go`。
 
+## 组件库 ui
+
+`ui` 是建在 `browser` 之上的一层「应用外壳」：菜单栏（下拉浮层、快捷键、
+禁用态）、工具栏、状态栏、主题，外加一套只写类名的页面组件。应用侧只需
+一张命令表（`save`/`about` 是返回 `error` 的函数，`editor.Dirty` 是
+`func() bool`）：
+
+```go
+spec := ui.Spec{
+	Title: "我的应用", Width: 900, Height: 700,
+	Status: "就绪", StatusRight: "Ctrl+S 保存",
+	Menus: []ui.Menu{{Title: "文件", Items: []ui.Action{
+		ui.Item("保存", "Ctrl+S", save).WithIcon("save").When(editor.Dirty),
+		ui.Sep(),
+		ui.Item("退出", "Alt+Q", ui.Quit),
+	}}},
+	Tools: []ui.Action{
+		ui.Button("保存", save).WithIcon("save").When(editor.Dirty),
+		ui.Sep(),
+		ui.Button("关于", about).WithIcon("info"),
+	},
+}
+
+app, err := ui.New(spec)
+if err != nil {
+	return err
+}
+defer app.Close()
+if _, err := app.LoadHTML(page); err != nil {
+	return err
+}
+return app.Run()
+```
+
+页面内容只写类名，样式全部来自注入的主题样式表：
+
+```html
+<div class="ui-page">
+	<span class="ui-badge">新</span>
+	<div class="ui-title">文件管理器</div>
+	<div class="ui-subtitle">一行说明</div>
+	<div class="ui-card">
+		<div class="ui-h2">快捷操作</div>
+		<div class="ui-text">正文</div>
+		<span class="ui-label">名称</span>
+		<input class="ui-input" type="text">
+		<div class="ui-actions">
+			<div class="ui-btn is-primary">保存</div>
+			<div class="ui-btn">预览</div>
+		</div>
+	</div>
+</div>
+```
+
+可用组件类：`ui-page`/`ui-title`/`ui-subtitle`/`ui-badge`/`ui-card`/`ui-h2`/
+`ui-text`/`ui-label`/`ui-input`/`ui-btn`（配合 `is-primary`）/`ui-actions`/
+`ui-list`/`ui-muted`。
+
+![组件库示例](examples/kit/screenshot.png)
+
+![下拉菜单](examples/kit/menu.png)
+
+几个设计约定：
+
+- **命令与呈现分离**：`Action` 同时给菜单项和工具栏按钮用，快捷键只写一次；
+  `Run` 返回 `error`，错误直接写到状态栏，`ui.Quit` 请求关窗。
+- **可用性是拉取的**：`When(f)` 在菜单打开时、`Refresh()` 时求值，不做每帧
+  轮询；禁用项点击无效、快捷键仍会被吞掉（不会漏到页面里）。
+- **快捷键先于页面**：走 `browser.Window.SetKeyHandler`，输入框聚焦时
+  `Ctrl+S` 也先到应用。修饰键按家族匹配（左右 Ctrl 都算），字母不分大小写。
+- **换文档自动重装**：外壳是文档的一部分（`position:fixed` + body 首尾占位块），
+  `App` 通过 `SetOnDocument` 在每次 `OpenDocument` 后重装；只想要文档层
+  （无头导出、嵌进已有窗口）时直接用 `ui.Install(doc, spec)`。
+- **主题是令牌**：`ui.Light()` 生成一整张样式表，改 `ui.Theme` 的字段即可换色/
+  换圆角（`spec.Theme = &theme`）。只使用引擎支持的 CSS 子集，没有阴影和过渡，
+  横向排列靠 `inline-block`，分隔线是 1px 的实体元素。
+- **图标是字体字形**：`WithIcon("save")` 从内置表取 Segoe MDL2 Assets 的码位
+  （`new`/`open`/`save`/`copy`/`cut`/`paste`/`undo`/`redo`/`search`/`replace`/
+  `settings`/`info`/`delete`/`refresh`/`print`/`sort`/`download`/`upload`/
+  `home`/`back`/`forward`/`help`/`play`/`pause`/`document`），也可以直接传字符。
+  工具栏有图标时只画图标（30×30 方形按钮），没图标时退回文字；菜单里只要有一项
+  带图标，整张菜单就预留图标列。图标字体是 Windows 10/11 自带的 `segmdl2.ttf`
+  （颜色跟随 `color`，悬停/禁用自动变色）；其他平台在 `Theme.IconFont` 里换一个
+  同编码的字体，或者不调 `WithIcon` 只用文字。
+
+限制：`ui` 不接管原生窗口菜单；菜单只支持鼠标操作（`Esc` 收起，没有方向键/
+回车导航）；页面里 `z-index` 高于外壳（1100）的元素会盖住菜单栏；窗口很窄时
+靠右的菜单浮层可能超出右边缘（浮层左对齐菜单标签，不做翻转）；主题只带浅色，
+深色留给应用自己定义。
+
+跑一下示例（`-shot` 用真实字体截图，`-shot-menu` 连菜单一起拍）：
+
+```
+go run ./examples/kit
+go run ./examples/kit -shot kit.png -shot-menu 文件
+```
+
 ## 项目结构
 
 ```
@@ -198,11 +302,15 @@ backend/dialog/     原生对话框的平台实现（Windows）：文件对话�
                    MessageBoxW（不需要 COM）。父窗口句柄由调用方传入
 backend/clipboard/   剪贴板的平台实现（复用 SDL2 的剪贴板接口——引擎内部的
                    Ctrl+C / Ctrl+V 走的是同一条路径）
+ui/                应用外壳组件库（在 browser 之上）：菜单栏/工具栏/状态栏、
+                   下拉浮层、快捷键分发、主题令牌与页面组件样式；
+                   `ui.App` 把「建窗 + 装外壳 + 换页重装」封装成十来行
 examples/          可独立运行的示例（每个目录 main.go + index.html）：
   login/             登录页（按钮交互、状态文本）
   form/              常规表单（员工登记表：布局特性 + 可输入控件）
   ua/                原生 UA 表单 + 常用标签（零作者 CSS，与 Chrome 对照）
   scroll/            滚动/裁剪（文档级滚动、overflow、textarea、wheel 事件）
+  kit/               组件库演示（菜单/工具栏/状态栏 + 卡片式页面，零作者 CSS）
   browser/           迷你本地浏览器（常驻工具条 + 状态栏、历史/刷新、链接导航、错误提示页、
                      外部样式表加载：examples/browser/assets.go）
   portal/            购物门户（fixed 顶栏、层叠上下文、商品网格、秒杀、购物车交互）
@@ -213,9 +321,10 @@ libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll，见 li
 
 **包内文档**：每个包的入口说明写在各自的 `doc.go`（`go doc ./engine` 可读，
 也进 pkg.go.dev）：engine 讲分层地图与「改代码前必读的不变量」、backend/sdl2
-讲平台边界与线程约束、browser 讲三方分工与用法骨架；`runtime/` 的分层
-约定（后端 vs 平台能力）见 `runtime/README.md`；`libs/` 里第三方 DLL 的
-版本、出处、许可与查找顺序见 `libs/README.md`。
+讲平台边界与线程约束、browser 讲三方分工与用法骨架、ui 讲命令模型（Action/
+Spec）与外壳的三条约定（换文档重装、快捷键先行、只用手册内的 CSS 子集）；
+`runtime/` 的分层约定（后端 vs 平台能力）见 `runtime/README.md`；`libs/`
+里第三方 DLL 的版本、出处、许可与查找顺序见 `libs/README.md`。
 
 ## 已支持的 CSS 子集
 

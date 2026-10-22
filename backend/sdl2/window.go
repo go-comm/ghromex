@@ -51,6 +51,21 @@ type Window struct {
 // 当前 goroutine 到 OS 线程，Close 时解锁；调用方应在同一个 goroutine
 // 中依次使用 NewWindow → Run → Close（典型即 main goroutine）。
 func NewWindow(w, h int, title string) (*Window, error) {
+	return NewWindowWithOptions(WindowOptions{
+		Width: w, Height: h, Title: title,
+		Centered: true, Resizable: true,
+	})
+}
+
+// NewWindowWithOptions 同 NewWindow，可指定位置与窗口类型。
+//
+// 无论哪种窗口都先隐藏，等首帧 Present 后再显示（见 Present 的说明）：
+// 截图遮罩如果建窗即显示，会先闪一帧黑底再出现桌面冻结图。
+func NewWindowWithOptions(o WindowOptions) (*Window, error) {
+	w, h, title := o.Width, o.Height, o.Title
+	if w <= 0 || h <= 0 {
+		return nil, fmt.Errorf("窗口尺寸非法: %dx%d", w, h)
+	}
 	runtime.LockOSThread()
 	if err := Load(); err != nil {
 		runtime.UnlockOSThread()
@@ -71,9 +86,25 @@ func NewWindow(w, h int, title string) (*Window, error) {
 	// 在首次 Present 前不含任何有效画面——窗口若建窗即可见，从建窗到解析/
 	// 级联/布局/首绘（含首次字体加载，可达数百毫秒）会一直显示黑底，表现为
 	// “先黑一下再闪出页面”。
+	flags := uintptr(windowHidden)
+	if o.Resizable {
+		flags |= windowResizable
+	}
+	if o.Borderless {
+		flags |= windowBorderless
+	}
+	if o.AlwaysOnTop {
+		flags |= windowAlwaysOnTop
+	}
+	if o.SkipTaskbar {
+		flags |= windowSkipTaskbar
+	}
+	x, y := uintptr(windowPosCenteredX), uintptr(windowPosCenteredX)
+	if !o.Centered {
+		x, y = uintptr(o.X), uintptr(o.Y)
+	}
 	b, p := cBytes(title)
-	hwnd := sdlCreateWindow(p, windowPosCenteredX, windowPosCenteredX,
-		uintptr(w), uintptr(h), windowHidden|windowResizable)
+	hwnd := sdlCreateWindow(p, x, y, uintptr(w), uintptr(h), flags)
 	runtime.KeepAlive(b)
 	if hwnd == 0 {
 		// 与上方各失败分支保持一致：解锁 OS 线程 + 退出 SDL 子系统。
@@ -453,6 +484,27 @@ func (win *Window) hwnd() uintptr {
 	}
 	runtime.KeepAlive(&info)
 	return info.winWindow
+}
+
+// SetSize 运行期修改窗口尺寸（截图预览从整屏缩成选区大小）。
+//
+// 立即更新视口尺寸：SDL_SetWindowSize 的 WINDOWEVENT 要到下一轮事件
+// 才到，而调用方通常在同一轮里还要打开新文档/重排——等事件会让第一帧
+// 按旧尺寸布局。事件到达后再写一次同样的值，没有副作用。
+func (win *Window) SetSize(w, h int) {
+	if win == nil || win.closed || win.win == 0 || w <= 0 || h <= 0 {
+		return
+	}
+	win.w, win.h = w, h
+	sdlSetWindowSize(win.win, uintptr(w), uintptr(h))
+}
+
+// MoveTo 运行期移动窗口（拖动悬浮预览）。坐标是虚拟桌面的全局坐标。
+func (win *Window) MoveTo(x, y int) {
+	if win == nil || win.closed || win.win == 0 {
+		return
+	}
+	sdlSetWindowPosition(win.win, uintptr(x), uintptr(y))
 }
 
 // SetTitle 设置窗口标题（应用层可随时更新，如编辑器显示当前文件名）。

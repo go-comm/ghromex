@@ -54,6 +54,10 @@ type HTMLElement interface {
 	SetStyle(style interface{})
 
 	AppendChild(e HTMLElement, es ...HTMLElement)
+	// InsertBefore 把 e 插到 before 之前（before 为 nil 或不是直接子节点时
+	// 追加到末尾）。UI 外壳要在页面内容之前插占位块，没有它就只能在
+	// 「摘掉全部子节点再按序接回」里打转。
+	InsertBefore(e HTMLElement, before HTMLElement)
 	RemoveChild(e HTMLElement, es ...HTMLElement)
 	Children() []HTMLElement
 	ParentElement() HTMLElement
@@ -271,6 +275,33 @@ func (element *htmlElement) AppendChild(e HTMLElement, es ...HTMLElement) {
 		}
 	}
 	element.onChanged()
+}
+
+// InsertBefore 把 e 插到 before 之前。
+//
+// before 为 nil 或不是直接子节点时退回 AppendChild：DOM 标准里
+// insertBefore 对「参照节点不属于本元素」是抛错，但这里的选择是
+// 「尽量放到用户想放的位置、放不了就放到末尾」——外壳占位块只需要
+// 「插在第一个内容之前」，参照节点通常就是 Children()[0]，不会走到退路。
+func (element *htmlElement) InsertBefore(e HTMLElement, before HTMLElement) {
+	if e == nil {
+		return
+	}
+	if before == nil {
+		element.AppendChild(e)
+		return
+	}
+	for i, child := range element.children {
+		if child == before {
+			element.children = append(element.children, nil)
+			copy(element.children[i+1:], element.children[i:])
+			element.children[i] = e
+			e.setParentElement(element.self)
+			element.onChanged()
+			return
+		}
+	}
+	element.AppendChild(e)
 }
 
 func (element *htmlElement) RemoveChild(e HTMLElement, es ...HTMLElement) {

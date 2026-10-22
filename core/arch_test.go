@@ -15,6 +15,7 @@ import (
 //	core  ←  engine（渲染引擎，纯 Go）
 //	core  ←  backend/*（平台实现）
 //	engine + backend/*  ←  browser（应用层：窗口 + 文档 + 主循环）
+//	engine + browser  ←  ui（组件库：菜单/工具栏/状态栏/页面组件）
 //
 // 平台层（backend）一旦 import 引擎，就成了「平台层依赖它上面的层」：
 // 引擎的每一次改动都会牵动后端，后端也没法被别的引擎/工具复用。这个
@@ -31,6 +32,14 @@ func TestLayeringHasNoBackwardDependency(t *testing.T) {
 		{dir: "backend/clipboard", allow: []string{"backend/sdl2"}},
 		{dir: "runtime/dialog", allow: []string{"backend/dialog"}},
 		{dir: "runtime/clipboard", allow: []string{"backend/clipboard"}},
+		// 桌面抓屏只碰操作系统的 GDI/user32，不依赖仓库内任何渲染包：
+		// 反过来让 engine/backend 依赖它就会把“截图工具的系统调用”
+		// 拖进渲染链路。
+		{dir: "runtime/screen", allow: nil},
+		// 组件库在最上层：只用引擎（文档/DOM）与 browser（窗口）。
+		// 反过来不行——引擎和 browser 都不该知道「菜单/工具栏」的存在，
+		// 否则想要一个空壳窗口的应用会被迫拖上整套 UI。
+		{dir: "ui", allow: []string{"engine", "browser"}},
 	}
 	for _, c := range cases {
 		allowed := map[string]bool{"core": true}

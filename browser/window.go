@@ -44,11 +44,66 @@ type Window struct {
 	selecting    bool
 	dragSelect   bool
 	downX, downY int
+
+	// onDocument 在每次成功打开文档后调用。
+	//
+	// 应用外壳（菜单/工具栏/状态栏）是文档的一部分，换文档就没了；把
+	// 「重装」挂在这里，应用不必在自己的每个导航入口记得重装一遍。
+	onDocument func(engine.HTMLDocument)
+	// keyHandler 是应用级按键钩子：在 Ctrl+C/V 与文档处理**之前**调用，
+	// 返回 true 表示已消费。
+	//
+	// 快捷键必须能先于页面拿到按键：输入框聚焦时 Ctrl+S 也会先到文档，
+	// 不拦截就成了「输入框里的保存」——不是应用想要的行为。
+	keyHandler func(key int, mods uint16) bool
+
+	// backdrop 是窗口背景图：清屏之后、文档之前 1:1 贴合在 (0,0)。
+	//
+	// 引擎没有 <img>/background-image，截图工具要显示抓到的位图，只能在
+	// 这一层给窗口加一块背景。文档仍画在它上面（暗化遮罩、边框、工具条）。
+	// 位图必须是 RGBA 且 alpha=255——DrawSprite 走 alpha 混合，alpha=0
+	// 会被当成“不着色”。
+	backdrop *core.Sprite
+
+	// mouseHandler 是窗口级原始鼠标钩子：在引擎的点击/拖选语义之前调用，
+	// 返回 true 表示已消费。
+	//
+	// 引擎的 OnDocumentMouseDown/Up 面向文本选择（Up 还不带坐标），画
+	// 截图选区需要按下/移动/抬起的原始坐标，所以在事件循环这一层留口。
+	mouseHandler func(ev MouseEvent) bool
+}
+
+// Options 是建窗参数。零值表示位于 (0,0) 的固定尺寸普通窗口（带边框）；
+// 截图工具的悬浮窗显式设置 Borderless/AlwaysOnTop/SkipTaskbar。
+type Options struct {
+	Width, Height int
+	Title         string
+	// X/Y 是窗口左上角；Centered 为 true 时忽略。
+	X, Y     int
+	Centered bool
+
+	Borderless  bool
+	AlwaysOnTop bool
+	SkipTaskbar bool
+	Resizable   bool
 }
 
 // New 创建一个窗口。坐标体系 1:1（1 CSS px = 1 物理像素）。
 func New(w, h int, title string) (*Window, error) {
-	sdl, err := sdl2.NewWindow(w, h, title)
+	return NewWithOptions(Options{
+		Width: w, Height: h, Title: title,
+		Centered: true, Resizable: true,
+	})
+}
+
+// NewWithOptions 同 New，可指定位置与窗口类型（无边框/置顶/不占任务栏）。
+func NewWithOptions(o Options) (*Window, error) {
+	sdl, err := sdl2.NewWindowWithOptions(sdl2.WindowOptions{
+		Width: o.Width, Height: o.Height, Title: o.Title,
+		X: o.X, Y: o.Y, Centered: o.Centered,
+		Borderless: o.Borderless, AlwaysOnTop: o.AlwaysOnTop,
+		SkipTaskbar: o.SkipTaskbar, Resizable: o.Resizable,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -82,10 +137,74 @@ func (win *Window) OpenDocumentWith(src string, opts engine.DocumentOptions) (en
 	win.doc = doc
 	win.lastChange = doc.ChangeCount()
 	win.dirty = true // 首次打开强制出一帧
+	if win.onDocument != nil {
+		win.onDocument(doc)
+	}
 	if t := doc.Title(); t != "" {
 		win.SetTitle(t)
 	}
 	return doc, nil
+}
+
+// SetOnDocument 注册文档生命周期回调：每次 OpenDocument/OpenDocumentWith
+// 成功后调用一次。传 nil 取消。
+//
+// 回调里可以改 DOM（外壳注入、占位块、样式表）：变更会让文档计数 +1，
+// 主循环下一帧自然重排重绘。
+func (win *Window) SetOnDocument(f func(engine.HTMLDocument)) { win.onDocument = f }
+
+// SetKeyHandler 注册应用级按键处理器：key 为引擎键码（字母是 rune），
+// mods 为引擎修饰位（engine.ModCtrl/ModShift/ModAlt）。返回 true 表示
+// 事件已消费，不再交给 Ctrl+C/V 与文档。
+//
+// 放在这一层而不是 engine：谁先看到按键是**事件循环**的策略——应用命令
+// 优先于页面，页面优先于默认动作。
+func (win *Window) SetKeyHandler(f func(key int, mods uint16) bool) { win.keyHandler = f }
+
+// MouseEventKind 是原始鼠标事件的类型。
+type MouseEventKind uint8
+
+const (
+	MouseDown MouseEventKind = iota
+	MouseMove
+	MouseUp
+)
+
+// MouseEvent 是窗口级原始鼠标事件。Button 用 SDL 的编号（1 左、2 中、3 右）；
+// Move 事件的 Button 没有意义。
+type MouseEvent struct {
+	Kind   MouseEventKind
+	X, Y   int
+	Button int
+}
+
+// SetMouseHandler 注册窗口级原始鼠标钩子：在引擎的点击/文本选择之前调用，
+// 返回 true 表示事件已消费。传 nil 取消。
+//
+// 放在这一层而不是引擎：选区/拖动悬浮窗这类交互属于应用，不需要页面元素
+// 参与；引擎也不该为每个工具加一套专用事件。
+func (win *Window) SetMouseHandler(f func(ev MouseEvent) bool) { win.mouseHandler = f }
+
+// SetBackdrop 设置窗口背景图（nil 清除）。清屏之后、文档之前贴在 (0,0)。
+//
+// 背景图不参与布局：宽高应与窗口视口一致，像素格式为 RGBA8888 且
+// alpha=255（见 backdrop 字段的说明）。传新精灵后下一帧生效。
+func (win *Window) SetBackdrop(s *core.Sprite) {
+	win.backdrop = s
+	win.dirty = true
+}
+
+// MoveTo 移动窗口（拖动截图预览）。坐标是虚拟桌面的全局坐标。
+func (win *Window) MoveTo(x, y int) { win.sdl.MoveTo(x, y) }
+
+// Resize 改变窗口尺寸并强制下一帧重排。
+//
+// 只改尺寸不换文档时也要重排（文档变更计数不会动），所以这里把
+// lastChange 置 -1：主循环的“计数变了才布局”判断因此必然成立。
+func (win *Window) Resize(w, h int) {
+	win.sdl.SetSize(w, h)
+	win.lastChange = -1
+	win.dirty = true
 }
 
 // SetAutoExit 让 Run 在窗口打开指定时长后自动返回（调试/CI 用）。
@@ -113,6 +232,13 @@ func (win *Window) clearCanvas() {
 	w, h := win.sdl.ViewportWidth(), win.sdl.ViewportHeight()
 	for _, c := range clearLayers(win.doc) {
 		g.DrawColor(0, 0, w, h, c)
+	}
+	// 背景图铺在底色之上、文档之下：页面里的半透明遮罩/边框/工具条
+	// 才能压在截图上看。
+	if win.backdrop != nil {
+		if sd, ok := g.(core.SpriteDrawer); ok {
+			sd.DrawSprite(0, 0, win.backdrop)
+		}
 	}
 }
 
@@ -305,6 +431,11 @@ func (win *Window) onKeyDown(ev sdl2.Event) {
 	if win.doc == nil {
 		return
 	}
+	// 应用命令优先：窗口有菜单/快捷键时，Ctrl+S 之类的组合不该先被页面
+	// 消化掉（输入框聚焦时也一样）。返回 true 表示应用已处理完。
+	if win.keyHandler != nil && win.keyHandler(ev.Key, ev.Mod) {
+		return
+	}
 	// Ctrl+C：引擎只给选区文本，写系统剪贴板由平台能力完成。
 	// 无选区时 SelectedText 返回 false，保留用户原有剪贴板
 	//（浏览器 Ctrl+C 无选区也不会清空剪贴板）。
@@ -343,6 +474,12 @@ func (win *Window) onTextInput(ev sdl2.Event) {
 
 // onMouseDown 记录按下点，准备拖选。
 func (win *Window) onMouseDown(ev sdl2.Event) {
+	// 应用级钩子先看：截图选区、拖动悬浮窗都在这里接管。
+	if win.mouseHandler != nil && win.mouseHandler(MouseEvent{
+		Kind: MouseDown, X: ev.X, Y: ev.Y, Button: int(ev.Button),
+	}) {
+		return
+	}
 	if ev.Button != sdl2.MouseButtonLeft {
 		return
 	}
@@ -356,6 +493,11 @@ func (win *Window) onMouseDown(ev sdl2.Event) {
 
 // onMouseMove 更新悬停态；拖动超过阈值才当作拖选（否则是普通移动）。
 func (win *Window) onMouseMove(ev sdl2.Event) {
+	if win.mouseHandler != nil && win.mouseHandler(MouseEvent{
+		Kind: MouseMove, X: ev.X, Y: ev.Y,
+	}) {
+		return
+	}
 	if win.doc == nil {
 		return
 	}
@@ -382,6 +524,11 @@ func (win *Window) onMouseMove(ev sdl2.Event) {
 
 // onMouseUp 抬起：拖选过就不派发 click（拖过链接会误导航）。
 func (win *Window) onMouseUp(ev sdl2.Event) {
+	if win.mouseHandler != nil && win.mouseHandler(MouseEvent{
+		Kind: MouseUp, X: ev.X, Y: ev.Y, Button: int(ev.Button),
+	}) {
+		return
+	}
 	if ev.Button != sdl2.MouseButtonLeft {
 		return
 	}
