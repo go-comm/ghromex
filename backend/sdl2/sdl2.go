@@ -388,13 +388,35 @@ func cBytes(s string) ([]byte, uintptr) {
 
 // goString 从 C 侧 char*（uintptr）读回 UTF-8 字符串。
 // 说明：ptr 来自 SDL 函数返回值（如 SDL_GetError），指向 C 堆内存，
-// 生命周期由 SDL 保证，并非 Go 指针的 uintptr 中转。直接写
-// unsafe.Pointer(ptr) 会被 go vet 的 unsafeptr 检查误报，这里采用
-// 内存重解释（按位读取局部变量的值）绕过误报，语义完全等价。
-//
-//go:noinline
+// 生命周期由 SDL 保证，并非 Go 指针的 uintptr 中转。指针值的传递方式见
+// goCString 的说明（不取形参地址）。
 func goString(uptr uintptr) string {
 	return goCString(uptr, 4096)
+}
+
+// cPointer 把 C 侧地址（uintptr）变成可解引用的 unsafe.Pointer。
+//
+// 两种常见写法都有坑，这里说清楚选哪个：
+//
+//   - 直接 unsafe.Pointer(uintptr) —— 语义上就是「把 C 地址当 Go 指针用」，
+//     go vet 的 unsafeptr 检查会报错；
+//   - 取形参地址再按位重解释成指针 —— 绕过了 vet，但**脆**：形参可能被
+//     寄存器传递、内联展开、栈槽复用，读到的是没落栈的垃圾值。实测踩过：
+//     读出来的是随机地址，第一次访问就崩。
+//
+// 这里的做法：先把 uintptr 存进一个**堆上的槽**（值一定落在内存里），再从
+// 那个槽按位重解释成指针。存进去的值和读出来的一致，不依赖编译器是否把
+// 形参落到栈上；堆槽也不会被栈槽复用影响。
+//
+// 传入的地址必须是 **C 侧内存**（SDL 分配的），不是 Go 堆对象——Go 的 GC
+// 不移动堆对象，但把 Go 指针当 C 指针用仍然是越界的。
+func cPointer(u uintptr) unsafe.Pointer {
+	if u == 0 {
+		return nil
+	}
+	slot := new(uintptr)
+	*slot = u
+	return *(*unsafe.Pointer)(unsafe.Pointer(slot))
 }
 
 // goCString 从 C 侧 char* 读回 UTF-8 字符串，最多读 max 字节（超出按
@@ -402,12 +424,12 @@ func goString(uptr uintptr) string {
 // 剪贴板内容可能很长，需按更大的上限读取——否则长文本会被截断成
 // 前 4096 字节（goString 找不到 NUL 时返回已读到的部分）。
 //
-//go:noinline
+// 指针值的传递见 cPointer 的说明。
 func goCString(uptr uintptr, max int) string {
 	if uptr == 0 || max <= 0 {
 		return ""
 	}
-	base := *(*unsafe.Pointer)(unsafe.Pointer(&uptr))
+	base := cPointer(uptr)
 	buf := make([]byte, 0, 256)
 	for n := 0; n < max; n++ {
 		c := *(*byte)(unsafe.Add(base, uintptr(n)))

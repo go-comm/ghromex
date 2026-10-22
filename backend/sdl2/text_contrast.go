@@ -42,10 +42,9 @@ func contrastAlpha(a byte, k float64) byte {
 	return byte(v + 0.5)
 }
 
-// surfPtr 把局部 uintptr 变量的位模式按指针值读出（非 uintptr 运算直转，
-// vet 友好——与测试侧 ptrAt 同一手法）。
+// surfPtr 把 C 侧地址（uintptr）变成可解引用的指针（手法见 cPointer）。
 func surfPtr(u uintptr) unsafe.Pointer {
-	return *(*unsafe.Pointer)(unsafe.Pointer(&u))
+	return cPointer(u)
 }
 
 // applyTextContrast 对 blended 字形 surface 施加 tone 曲线（原地修改）。

@@ -907,15 +907,29 @@ func (g *Graphics) ascentOf(path string, size int, bold bool) int32 {
 	return int32(asc)
 }
 
-// rendererInfoSize 是 SDL_RendererInfo 的**实测**占用字节数。
+// sdlRendererInfo 对应 SDL2 的 SDL_RendererInfo（64 位下 **88 字节**）：
 //
-// 不能照抄 SDL 头文件里 32 字节的 SDL2 定义：本仓库随附的 SDL2.dll 实际
-// 写了 88 字节（实测：把缓冲区填成 0xAA，调用后最后一个被改写的字节在
-// 第 87 位）。按 32 字节申请缓冲会**越界写坏调用者的栈**——现场症状是
-// 调用之后局部变量（渲染器句柄）变成 0、随后调用空指针崩溃。
+//	const char *name;            // 8
+//	Uint32 flags;                // 4
+//	Uint32 num_texture_formats;  // 4
+//	Uint32 texture_formats[16];  // 64 —— **内联数组**，不是指针
+//	int max_texture_width;       // 4
+//	int max_texture_height;      // 4
 //
-// 缓冲区按 128 字节申请（> 88，留余量），并且只读前 8 字节（name 指针）。
-const rendererInfoSize = 128
+// 注意 texture_formats 是**内联数组**：早先按「指针 + 32 字节」估大小，
+// 申请 40 字节缓冲 → SDL 按真实的 88 字节写，**越界写坏调用者的栈**
+// （现场症状：调用之后渲染器句柄变成 0、随后空指针崩溃）。
+// 结构体大小必须与运行库一致，不是「够读 name 就行」。
+//
+// 大小用 unsafe.Sizeof 断言（见 sdl_struct_test.go）。
+type sdlRendererInfo struct {
+	name              uintptr
+	flags             uint32
+	numTextureFormats uint32
+	textureFormats    [16]uint32
+	maxTextureWidth   int32
+	maxTextureHeight  int32
+}
 
 // RendererDriver 返回渲染后端的驱动名（"direct3d11" / "opengl" /
 // "software" / "llvmpipe" …），取自 SDL_GetRendererInfo。
@@ -927,19 +941,16 @@ func RendererDriver(renderer uintptr) string {
 	if renderer == 0 || sdlGetRendererInfo == nil {
 		return ""
 	}
-	var info [rendererInfoSize]byte
-	if sdlGetRendererInfo(renderer, uintptr(unsafe.Pointer(&info[0]))) != 0 {
+	var info sdlRendererInfo
+	if sdlGetRendererInfo(renderer, uintptr(unsafe.Pointer(&info))) != 0 {
 		return ""
 	}
-	// name 是结构体第一个字段（char*，指向驱动名）。
-	namePtr := *(*uintptr)(unsafe.Pointer(&info[0]))
-	if namePtr == 0 {
+	if info.name == 0 {
 		return ""
 	}
-	// 读 C 侧字符串：用 goCString（标了 //go:noinline——「取形参地址再
-	// 重解释」的写法在形参被内联展开时可能读到没落栈的垃圾值）。驱动名很短，
-	// 64 字节足够。
-	return goCString(namePtr, 64)
+	// 读 C 侧字符串：用 goCString（指针值的传递方式见那里的说明）。驱动名
+	// 很短，64 字节足够。
+	return goCString(info.name, 64)
 }
 
 // DrawColor 实现 core.Graphics。
