@@ -11,12 +11,26 @@ type Viewport = core.Viewport
 
 // OpenDocument 解析 HTML/CSS 源码并完成首次级联与布局。
 func OpenDocument(v Viewport, src string) (HTMLDocument, error) {
+	return OpenDocumentWith(v, src, DocumentOptions{})
+}
+
+// OpenDocumentWith 同 OpenDocument，额外传入文档选项（外部样式表加载器与
+// 地址基准）。
+//
+// 选项必须在这里给、而不是等文档建好再设置：<link rel="stylesheet"> 与
+// CSS 的 @import 都在**解析阶段**就解析并加载，文档返回时引用已经处理完了
+// ——事后 SetStylesheetLoader 只影响此后新增的链接，页面里原有的引用不会
+// 补加载。
+func OpenDocumentWith(v Viewport, src string, opts DocumentOptions) (HTMLDocument, error) {
 	if v == nil {
 		return nil, &engineError{msg: "viewport is required"}
 	}
 	doc := NewDocument()
+	impl := doc.(*htmlDocument)
+	impl.baseURL = opts.BaseURL
+	impl.loadSheet = opts.LoadStylesheet
 	parseInto(doc, doc.Head(), doc.Body(), src, doc)
-	doc.(*htmlDocument).viewport = v
+	impl.viewport = v
 	LayoutDocument(doc)
 	return doc, nil
 }

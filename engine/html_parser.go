@@ -7,7 +7,8 @@ import (
 
 // ParseHTMLInto 将 HTML 源码解析进既有文档：
 // <head>/<body> 内容路由到文档结构节点，<style> 编译进文档样式表，
-// <title> 写入 head 的 title 元素，<script>/<link>/<meta> 被忽略。
+// <link rel="stylesheet" href> 交给文档的样式表加载器（见 DocumentOptions），
+// <title> 写入 head 的 title 元素，<script>/<meta> 与其余 <link> 被忽略。
 func ParseHTMLInto(doc HTMLDocument, src string) {
 	parseInto(doc, doc.Head(), doc.Body(), src, doc)
 }
@@ -253,6 +254,11 @@ func parseInto(htmlNode HTMLElement, headEl, bodyEl HTMLElement, src string, doc
 			i = after
 			continue
 		case "meta", "link", "base":
+			// 样式表链接必须在这里收：<link> 是空元素，跳过之后没有第二次
+			// 机会（DOM 里不留节点，不会触发后续扫描）。
+			if doc != nil && tag == "link" && linkIsStylesheet(attrs) {
+				doc.AddStylesheetLink(decodeEntities(attrValue(attrs, "href")))
+			}
 			i = after
 			continue
 		}
@@ -271,6 +277,30 @@ func parseInto(htmlNode HTMLElement, headEl, bodyEl HTMLElement, src string, doc
 func isTagChar(ch byte) bool {
 	return ch == '-' || ch == '_' || ch == ':' ||
 		(ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
+}
+
+// attrValue 取属性值（属性名在 parseAttributes 里已小写化）。
+func attrValue(attrs [][2]string, name string) string {
+	for _, kv := range attrs {
+		if kv[0] == name {
+			return kv[1]
+		}
+	}
+	return ""
+}
+
+// linkIsStylesheet 判断 <link> 是不是样式表引用：rel 按空白分隔的 token
+// 匹配（不区分大小写），因此 rel="alternate stylesheet" 也算。
+//
+// media / type 属性不做判断：引擎不分媒体（@media 同样被忽略），
+// 屏幕渲染器把 rel 里带 stylesheet 的都当作者样式表处理。
+func linkIsStylesheet(attrs [][2]string) bool {
+	for _, tok := range strings.Fields(strings.ToLower(attrValue(attrs, "rel"))) {
+		if tok == "stylesheet" {
+			return true
+		}
+	}
+	return false
 }
 
 // parseAttributes 从 pos（标签名结束处）解析属性，返回属性列表、'>' 之后的下标与自闭合标记。

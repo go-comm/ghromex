@@ -3,7 +3,7 @@
 //
 // # 分层
 //
-//	解析   html_parser.go / css_parser.go / selector.go
+//	解析   html_parser.go / css_parser.go / css_url.go / selector.go
 //	级联   style_cascade.go（选择器匹配 + 特异度 + 继承）+ style_ua.go（UA 默认样式）
 //	       pseudo.go（伪类状态：hover/focus/active 与结构伪类）
 //	布局   measure.go（盒模型/行盒/换行/定位）+ line_box.go（line-height 的
@@ -62,6 +62,23 @@
 // 应用层若自建主循环（非 browser 门面），需自己把鼠标事件喂进来：
 // OnDocumentMouseMove（更新悬停）、OnDocumentMouseDown/Up（按下态）、
 // SetFocusedElement（焦点）。browser 门面已自动接好。
+//
+// # 外部样式表
+//
+// <link rel="stylesheet" href> 与 CSS 的 @import（可嵌套）都在**解析阶段**
+// 同步加载，规则并入作者样式表并按文档顺序参与级联；@import 的规则排在
+// 导入方之前（同特异度时导入方胜出，与浏览器一致）。
+//
+// 引擎不碰 I/O：加载器由宿主经 DocumentOptions.LoadStylesheet 提供。相对
+// 引用由引擎解析成绝对地址——<link> 相对 BaseURL，@import 相对**上一层
+// 样式表**的地址（css_url.go），所以加载器拿到的地址可以直接用。加载失败
+// 只跳过那一份样式表（页面照常打开）；@import 的循环引用在链上截断
+// （深度上限 maxStylesheetDepth）。
+//
+// 加载发生在解析期，所以加载器只能在 OpenDocumentWith 时传入；文档建好
+// 之后再 SetStylesheetLoader 不会补加载页面里已有的引用（只影响此后新增
+// 的引用）。加载器跑在打开文档的 goroutine 上——要联网的宿主应自己缓存或
+// 预取，引擎没有「样式到货后再重排」的链路。
 //
 // # 后端可选扩展
 //

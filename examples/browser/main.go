@@ -153,6 +153,9 @@ type browserApp struct {
 // 视口替代，从而不需要真实窗口。
 type opener interface {
 	OpenDocument(src string) (engine.HTMLDocument, error)
+	// OpenDocumentWith 允许传文档选项：<link rel="stylesheet"> 与 @import
+	// 在解析阶段就要加载器，打开后再补是补不上的。
+	OpenDocumentWith(src string, opts engine.DocumentOptions) (engine.HTMLDocument, error)
 	ViewportWidth() int
 }
 
@@ -164,7 +167,11 @@ type headlessWindow struct {
 }
 
 func (h *headlessWindow) OpenDocument(src string) (engine.HTMLDocument, error) {
-	doc, err := engine.OpenDocument(h.vp, src)
+	return h.OpenDocumentWith(src, engine.DocumentOptions{})
+}
+
+func (h *headlessWindow) OpenDocumentWith(src string, opts engine.DocumentOptions) (engine.HTMLDocument, error) {
+	doc, err := engine.OpenDocumentWith(h.vp, src, opts)
 	if err == nil {
 		h.doc = doc
 	}
@@ -281,7 +288,10 @@ func (b *browserApp) show(addr, dir string, data []byte, commit bool) bool {
 	if commit {
 		b.commit(addr)
 	}
-	doc, err := b.win.OpenDocument(string(data))
+	doc, err := b.win.OpenDocumentWith(string(data), engine.DocumentOptions{
+		BaseURL:        pageBaseURL(addr, dir),
+		LoadStylesheet: loadLocalStylesheet,
+	})
 	if err != nil {
 		b.showMessage("HTML 解析失败", addr, err.Error())
 		return false

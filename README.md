@@ -165,7 +165,8 @@ core/             引擎与后端之间的契约（Graphics/Viewport/Paint/Color
                   叶子包：engine 与 backend 都只依赖它，依赖方向保持单向
 engine/            渲染引擎（纯 Go，不依赖任何图形后端）
   html_parser.go     HTML 解析 → DOM 树
-  css_parser.go      CSS / 内联样式解析
+  css_parser.go      CSS / 内联样式解析（含 @import 引用提取）
+  css_url.go         外部样式表引用解析：相对引用 → 绝对地址（纯字符串）
   style_cascade.go   选择器匹配 + 特异度级联 + 继承
   style_ua.go        UA 样式表（默认值对齐 Chrome，含表单控件 border-box）
   measure.go         盒模型布局、行盒、换行、定位布局（relative/absolute/fixed）
@@ -202,7 +203,8 @@ examples/          可独立运行的示例（每个目录 main.go + index.html�
   form/              常规表单（员工登记表：布局特性 + 可输入控件）
   ua/                原生 UA 表单 + 常用标签（零作者 CSS，与 Chrome 对照）
   scroll/            滚动/裁剪（文档级滚动、overflow、textarea、wheel 事件）
-  browser/           迷你本地浏览器（常驻工具条 + 状态栏、历史/刷新、链接导航、错误提示页）
+  browser/           迷你本地浏览器（常驻工具条 + 状态栏、历史/刷新、链接导航、错误提示页、
+                     外部样式表加载：examples/browser/assets.go）
   portal/            购物门户（fixed 顶栏、层叠上下文、商品网格、秒杀、购物车交互）
   notepad/           仿 Windows 记事本（菜单栏+浮层菜单/工具栏/查找替换栏/
                      编辑区/状态栏、文件读写、撤销重做栈、剪贴板）
@@ -314,9 +316,31 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
 走 LCD 子像素路径；
 选择器支持标签、`.class`、`#id`、类型+class/id 组合链（如 `div.wide`）与特异度排序。
 
+**外部样式表**：`<link rel="stylesheet" href>` 与 CSS 的 `@import`（可嵌套）都支持。
+相对引用由引擎解析成绝对地址——`<link>` 相对文档地址，`@import` 相对**上一层样式表**
+的地址（主题文件放在子目录里，`../` 也不会被解析到页面目录去）。引擎不碰 I/O，
+加载器由宿主提供：
+
+```go
+doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
+	BaseURL: "file:///C:/pages/index.html", // 本地文件先转成 file:// 地址
+	LoadStylesheet: func(href string) (string, error) {
+		// href 已是可直接使用的绝对地址（相对引用早在引擎里拼好了）
+		return os.ReadFile(pathFromFileURL(href))
+	},
+})
+```
+
+`OpenDocument` 等价于不传加载器（`<link>`/`@import` 被忽略，与旧行为一致）。加载是
+**同步**的、发生在解析阶段，所以选项必须在打开文档时给——事后再装加载器不会补加载
+页面里已有的引用。加载失败只跳过那一份样式表（页面照常打开、其余样式生效），错误由
+加载器自己上报；`@import` 的循环引用在链上截断（深度上限 32）。`media` 属性不参与
+筛选（引擎不分媒体，与 `@media` 被跳过同口径）。`examples/browser` 把它接到了本地
+文件系统（`assets.go`，只认 `file://`），演示页是 `external.html`。
+
 ## 已知限制
 
-- **绑定层的结构体大小必须与运行库一致**：SDL 的结构体按值跨越 DLL 边界（Go 侧申请内存、SDL 按自己的大小写），估小了就是**越界写坏调用者的栈**。实例：`SDL_RendererInfo` 曾按「name + flags + num_texture_formats + 指针」估成 32/40 字节，而运行库（SDL 2.28.4）写的是 **88 字节**（`texture_formats` 是**内联数组** `Uint32[16]`，不是指针）——越界 48 字节，调用之后渲染器句柄变成 0、随后空指针崩溃。现在按真实布局定义，并有测试逐个量（缓冲区填 0xAA，看最后一个被改写的字节）断言「运行库写入长度 ≤ Go 侧结构体大小」：`SDL_RendererInfo` 88/88、`SDL_Event` 56/56、`SDL_SysWMinfo` 32/32。同类问题也可能出现在别的跨界结构体上（`SDL_Surface`/`SDL_Texture`/`SDL_AudioSpec`/`GUITHREADINFO` 等——`GUITHREADINFO` 就有：末字段 `rcCaret` 是 RECT 16 字节，写成 int32 会让结构体少 8 字节，运行库越界写），新增按值跨界时要**先量再写**。另外，C 侧地址（uintptr）转可解引用的指针时不能用「取形参地址再按位重解释」——形参可能被寄存器传递/内联展开/栈槽复用，读到的是没落栈的垃圾值（实测读出随机地址直接崩）；现在先把地址存进**堆上的槽**（指针另存一份到 GC 可见的 `*unsafe.Pointer` 槽）再重解释，不依赖编译器是否落栈；该工具**只用于 C 侧内存**（C 内存不受 Go GC 管），Go 堆指针必须直接以 `unsafe.Pointer` 传递
+- **绑定层的结构体大小必须与运行库一致**：SDL 的结构体按值跨越 DLL 边界（Go 侧申请内存、SDL 按自己的大小写），估小了就是**越界写坏调用者的栈**。实例：`SDL_RendererInfo` 曾按「name + flags + num_texture_formats + 指针」估成 32/40 字节，而运行库（SDL 2.28.4）写的是 **88 字节**（`texture_formats` 是**内联数组** `Uint32[16]`，不是指针）——越界 48 字节，调用之后渲染器句柄变成 0、随后空指针崩溃。现在按真实布局定义，并有测试逐个量（缓冲区填 0xAA，看最后一个被改写的字节）断言「运行库写入长度 ≤ Go 侧结构体大小」：`SDL_RendererInfo` 88/88、`SDL_Event` 56/56、`SDL_SysWMinfo` 32/32。同类问题也可能出现在别的跨界结构体上（`SDL_Surface`/`SDL_Texture`/`SDL_AudioSpec`/`GUITHREADINFO` 等——`GUITHREADINFO` 就有：末字段 `rcCaret` 是 RECT 16 字节，写成 int32 会让结构体少 8 字节，运行库越界写），新增按值跨界时要**先量再写**。另外，C 侧地址（uintptr）转可解引用的指针统一走 `cMemPointer`（`backend/sdl2/sdl2.go`）：把位模式原样搬过去，**不做任何指针算术**；取地址的局部变量按 Go 的地址性规则一定在内存里，实测热循环一千万次读回一致。这个工具**只用于 C 侧内存**（C 内存不受 Go GC 管），并且**不提供任何 GC 保活**——Go 堆指针必须直接以 `unsafe.Pointer` 传递（`uintptr` 不是指针，`runtime.KeepAlive` 也救不了「已经被当成指针用的 uintptr」）。它是绕过 `go vet` 的 `unsafeptr` 检查的**唯一**入口，注释里已注明这是针对 C 内存的已知误报
   > 注：`b8b4817` 的 commit message 把上面这件事归因为「DLL 越界写」，**那是错的**——越界的是我们 Go 侧的结构体定义，DLL 写的就是它自己的结构体。以 `27ce6ea` 为准。
 
   **跨界结构体清单**（按值传给 C 函数的必须与头文件逐字段一致；不透明指针只

@@ -1,0 +1,35 @@
+<!doctype html>
+<!--
+  Ghromex 浏览器 · 外部样式表示例
+  位置：examples/browser/external.html
+
+  与其它示例页的区别：本页没有 <style>，样式全部来自磁盘上的
+  external.css（<link rel="stylesheet">）；external.css 又用 @import
+  引入 theme-extra.css。两层相对引用分别以「页面地址」和「上一层样式表
+  地址」为基准解析，用来验证外部导入这条链路。
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ghromex 浏览器 · 外部样式表</title>
+<link rel="stylesheet" href="external.css">
+</head>
+<body>
+	<div class="card">
+		<span class="badge">外部导入</span>
+		<h1>样式放在 .css 文件里</h1>
+		<p>本页没有任何 <code>&lt;style&gt;</code>：排版、配色、圆角都来自
+			<code>external.css</code>，标题与徽标的强调色则由它
+			<code>@import</code> 的 <code>theme-extra.css</code> 提供。</p>
+		<div class="note">
+			<b>相对引用怎么解析</b>
+			<ul>
+				<li><code>&lt;link href="external.css"&gt;</code> 相对<b>页面地址</b>；</li>
+				<li><code>@import "theme-extra.css"</code> 相对<b>上一层样式表地址</b>（同目录）。</li>
+			</ul>
+		</div>
+		<p class="foot">样式表加载失败时页面照常打开（只是没有样式），错误打到终端 ·
+			<a href="index.html">返回起始页</a></p>
+	</div>
+</body>
+</html>

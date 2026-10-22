@@ -35,13 +35,37 @@ func (s *Stylesheet) Merge(other *Stylesheet) {
 	}
 }
 
-// ParseCSS 解析一段 CSS 文本。不支持的语法（@media 等）会被跳过而不报错。
+// ParseCSS 解析一段 CSS 文本。不支持的语法（@media 等）会被跳过而不报错；
+// @import 只被识别（不加载）——需要加载外部样式表时走 parseCSSRules。
 func ParseCSS(src string) *Stylesheet {
+	rules, _ := parseCSSRules(src)
+	return &Stylesheet{rules: rules}
+}
+
+// parseCSSRules 解析 CSS，返回规则与 @import 引用（原样，未解析成绝对地址；
+// 解析与加载由文档层负责，见 htmlDocument.addStylesheetText）。
+//
+// at-rule 分两类：
+//   - 没有块、以分号结束的语句（@import / @charset…）：读到分号为止，
+//     @import 的 URL 记进 imports；
+//   - 带块的 at-rule（@media / @supports…）：整块跳过（引擎不分媒体）。
+func parseCSSRules(src string) (rules []cssRule, imports []string) {
 	src = stripCSSComments(src)
-	sheet := &Stylesheet{}
 	i := 0
 	for i < len(src) {
 		open := strings.IndexByte(src[i:], '{')
+		semi := strings.IndexByte(src[i:], ';')
+		// 先收掉「分号在花括号之前」的语句。不做这一步的话，@import 会和
+		// 下一条规则拼成 "@import url(x.css); body" 一起被当成 at-rule 跳过
+		// ——@import 之后的规则会全部不生效（页面看起来「样式只加载了一半」）。
+		if semi >= 0 && (open < 0 || semi < open) {
+			stmt := strings.TrimSpace(src[i : i+semi])
+			i += semi + 1
+			if ref, ok := parseImportRef(stmt); ok {
+				imports = append(imports, ref)
+			}
+			continue
+		}
 		if open < 0 {
 			break
 		}
@@ -70,14 +94,49 @@ func ParseCSS(src string) *Stylesheet {
 			if sel.isEmpty() {
 				continue
 			}
-			sheet.rules = append(sheet.rules, cssRule{
+			rules = append(rules, cssRule{
 				sels:  []*Selector{sel},
 				decls: decls,
-				order: len(sheet.rules),
+				order: len(rules),
 			})
 		}
 	}
-	return sheet
+	return rules, imports
+}
+
+// parseImportRef 从一条 @import 语句里取出样式表引用。
+//
+// 支持 @import "x.css" / @import url(x.css) / @import url('x.css')，以及
+// 后面的媒体查询（忽略——引擎不分媒体，与 @media 的处理一致）。
+func parseImportRef(stmt string) (string, bool) {
+	const keyword = "@import"
+	if len(stmt) < len(keyword) || !strings.EqualFold(stmt[:len(keyword)], keyword) {
+		return "", false
+	}
+	s := strings.TrimSpace(stmt[len(keyword):])
+	if strings.HasPrefix(strings.ToLower(s), "url(") {
+		end := strings.IndexByte(s, ')')
+		if end < 0 {
+			return "", false
+		}
+		s = strings.TrimSpace(s[4:end])
+	} else {
+		if s == "" || (s[0] != '"' && s[0] != '\'') {
+			return "", false
+		}
+		end := strings.IndexByte(s[1:], s[0])
+		if end < 0 {
+			return "", false
+		}
+		s = s[1 : 1+end]
+	}
+	// url("x.css") 与 @import 'x.css' 都会带引号（引号不是地址的一部分）。
+	s = strings.Trim(strings.TrimSpace(s), `"'`)
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", false
+	}
+	return s, true
 }
 
 func stripCSSComments(src string) string {

@@ -66,7 +66,16 @@ func (win *Window) Graphics() engine.Graphics { return win.sdl.Graphics() }
 
 // OpenDocument 解析并布局 HTML 源码，绑定到本窗口。
 func (win *Window) OpenDocument(src string) (engine.HTMLDocument, error) {
-	doc, err := engine.OpenDocument(win, src)
+	return win.OpenDocumentWith(src, engine.DocumentOptions{})
+}
+
+// OpenDocumentWith 同 OpenDocument，可传文档选项（外部样式表加载器、地址
+// 基准）。
+//
+// 选项只能在这里给：<link rel="stylesheet"> 与 @import 在解析阶段就加载，
+// 文档返回时已经处理完，事后再装加载器不会补加载页面里原有的引用。
+func (win *Window) OpenDocumentWith(src string, opts engine.DocumentOptions) (engine.HTMLDocument, error) {
+	doc, err := engine.OpenDocumentWith(win, src, opts)
 	if err != nil {
 		return nil, err
 	}

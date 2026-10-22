@@ -74,5 +74,12 @@ func (*Window) Closed() bool { return false }
 // Shown 在非 Windows 平台恒为 false（窗口从来没能创建）。
 func (*Window) Shown() bool { return false }
 
+// RendererInfo 在非 Windows 平台没有渲染器，返回空串（诊断输出里一眼看出
+// 「没跑在 SDL 上」）。
+func (*Window) RendererInfo() string { return "" }
+
+// SetVSync 在非 Windows 平台为空操作（没有渲染器可切换）。
+func (*Window) SetVSync(bool) {}
+
 // 平台无关地保持与 Windows 实现一致的接口实现。
 var _ core.Viewport = (*Window)(nil)

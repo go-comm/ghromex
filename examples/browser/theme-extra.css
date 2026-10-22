@@ -1,0 +1,16 @@
+/* 由 external.css 的 @import 加载：只提供徽标与标题的强调色。
+ *
+ * 它自己的引用（如果有）相对**本文件地址**解析，而不是页面地址——
+ * 所以把主题文件放进子目录也不会解析错（见 engine/css_url.go）。
+ */
+.badge {
+	display: inline-block;
+	padding: 3px 10px;
+	background-color: #ECFDF5;
+	border: 1px solid #A7F3D0;
+	border-radius: 999px;
+	color: #047857;
+	font-size: 12px;
+}
+
+h1 { color: #065F46; }

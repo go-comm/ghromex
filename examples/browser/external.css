@@ -1,0 +1,54 @@
+/* 本文件由 external.html 的 <link rel="stylesheet"> 加载。
+ *
+ * @import 必须写在最前面：导入的规则排在导入语句的位置（本文件规则之前），
+ * 同特异度时本文件的规则胜出——与浏览器行为一致。
+ *
+ * 引擎的 CSS 子集里没有 flex/grid/box-shadow/单边 border，层次靠纯色、
+ * 整圈 border 与 border-radius 拉开（同起始页）。
+ */
+@import "theme-extra.css";
+
+body {
+	margin: 0;
+	padding: 48px 40px 28px 40px;
+	background-color: #F1F5F9;
+	color: #0F172A;
+	font-family: system-ui;
+	font-size: 14px;
+}
+
+.card {
+	width: 640px;
+	padding: 28px 30px 24px 30px;
+	background-color: #FFFFFF;
+	border: 1px solid #E2E8F0;
+	border-radius: 14px;
+	box-sizing: border-box;
+}
+
+h1 { margin: 14px 0 10px 0; font-size: 26px; }
+
+p { margin: 0 0 12px 0; color: #475569; font-size: 14px; }
+
+code {
+	padding: 1px 5px;
+	background-color: #F1F5F9;
+	border-radius: 4px;
+	color: #1D4ED8;
+	font-size: 13px;
+}
+
+.note {
+	margin: 18px 0 0 0;
+	padding: 14px 16px;
+	background-color: #F8FAFC;
+	border: 1px solid #E2E8F0;
+	border-radius: 10px;
+	color: #475569;
+}
+.note b { color: #0F172A; }
+.note ul { margin: 8px 0 0 0; padding-left: 20px; }
+.note li { margin: 6px 0; color: #475569; }
+
+.foot { margin: 18px 0 0 0; color: #94A3B8; font-size: 12px; }
+.foot a { color: #1D4ED8; }

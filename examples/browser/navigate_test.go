@@ -16,7 +16,11 @@ type headlessOpener struct {
 }
 
 func (h *headlessOpener) OpenDocument(src string) (engine.HTMLDocument, error) {
-	doc, err := engine.OpenDocument(h.vp, src)
+	return h.OpenDocumentWith(src, engine.DocumentOptions{})
+}
+
+func (h *headlessOpener) OpenDocumentWith(src string, opts engine.DocumentOptions) (engine.HTMLDocument, error) {
+	doc, err := engine.OpenDocumentWith(h.vp, src, opts)
 	if err == nil {
 		h.doc = doc
 	}

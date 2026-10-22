@@ -1,5 +1,7 @@
 package engine
 
+import "strings"
+
 // HTMLDocument 是文档根节点，持有样式表与所属视口。
 type HTMLDocument interface {
 	HTMLElement
@@ -13,9 +15,18 @@ type HTMLDocument interface {
 
 	// Stylesheet 返回文档 <style> 编译出的样式表。
 	Stylesheet() *Stylesheet
-	// AddStylesheetText 解析并合并一段 CSS。
+	// AddStylesheetText 解析并合并一段 CSS（其中的 @import 会被加载）。
 	AddStylesheetText(css string)
+	// AddStylesheetLink 解析并合并 <link rel="stylesheet" href> 引用的样式表。
+	// 解析器遇到样式表链接时调用；运行期想动态挂样式表也可直接调它。
+	AddStylesheetLink(href string)
 	SetStylesheet(sheet *Stylesheet)
+	// SetStylesheetLoader 安装外部样式表加载器；nil 关闭外部样式表
+	// （<link rel="stylesheet"> 与 @import 都被忽略，其余照常）。
+	SetStylesheetLoader(f StylesheetLoader)
+	// SetBaseURL 设置文档地址：<link> 与第一层 @import 的相对引用按它解析。
+	// 嵌套 @import 的基准是上一层样式表的地址，由引擎自动接续。
+	SetBaseURL(base string)
 
 	// Title 返回 head > title 的文本。
 	Title() string
@@ -35,6 +46,33 @@ type HTMLDocument interface {
 	ChangeCount() int64
 
 	Close()
+}
+
+// StylesheetLoader 加载一份外部样式表，返回 CSS 文本；失败返回 error。
+//
+// href 是**已解析成绝对地址**的引用（见 resolveURL）：<link> 按文档的
+// BaseURL 解析，@import 按上一层样式表的地址解析，所以加载器拿到的永远
+// 是可以直接用的地址，不用自己再拼相对路径。
+//
+// 加载是**同步**的：在解析 <link>/@import 时当场调用，跑在打开文档的那个
+// goroutine（浏览器的 UI 线程）。要联网的宿主应在加载器里做缓存或预取，
+// 别在这里等一个慢请求——引擎没有「样式到货后再重排」的链路。
+//
+// 返回 error 时该样式表被忽略（页面继续渲染，其余样式照常生效），错误
+// 由宿主自己上报——引擎不打印、不弹窗：缺一份 CSS 不该让页面打不开。
+type StylesheetLoader func(href string) (string, error)
+
+// DocumentOptions 是 OpenDocumentWith 的可选能力。零值等同于 OpenDocument：
+// 不加载外部样式表。
+type DocumentOptions struct {
+	// BaseURL 是文档地址：<link rel="stylesheet" href> 的相对引用按它解析，
+	// 也是第一层 @import 的引用方。按 URL 口径用 `/` 分隔；本地文件先转成
+	// file:// 地址（见 examples/browser 的 fileURL），空串表示没有基准
+	// （此时相对引用原样交给加载器）。
+	BaseURL string
+	// LoadStylesheet 非 nil 时启用外部样式表：<link rel="stylesheet" href>
+	// 与 CSS 的 @import 都会经它加载。
+	LoadStylesheet StylesheetLoader
 }
 
 func NewDocument() HTMLDocument {
@@ -59,14 +97,19 @@ type htmlDocument struct {
 
 	viewport Viewport
 	sheet    *Stylesheet
-	head     HTMLHeadElement
-	body     HTMLBodyElement
-	focus    HTMLElement // 当前聚焦的元素（可编辑输入、按钮、链接等），nil 无焦点
+	// baseURL / loadSheet 是外部样式表的接线：baseURL 是文档地址（相对
+	// href 的基准），loadSheet 由宿主提供（引擎不碰 I/O）。两者都由
+	// OpenDocumentWith 在解析前装好——<link>/@import 是解析阶段就加载的。
+	baseURL   string
+	loadSheet StylesheetLoader
+	head      HTMLHeadElement
+	body      HTMLBodyElement
+	focus     HTMLElement // 当前聚焦的元素（可编辑输入、按钮、链接等），nil 无焦点
 	// hover 是鼠标当前悬停的元素（:hover 规则的依据），active 是鼠标
 	// 按下中的元素（:active 规则）。两者变化都会改样式，故与 focus 一样
 	// 走 markChanged → 重排重绘 → 级联重算。
-	hover   HTMLElement
-	active  HTMLElement
+	hover  HTMLElement
+	active HTMLElement
 	// dragInput 是鼠标按下时命中的可编辑控件。拖选期间活动端可移出控件
 	// 甚至窗口，仍应把坐标反推为同一控件的光标位置（浏览器同语义）；
 	// 因此不能在每次 MouseMotion 时重新命中测试。鼠标抬起即清空。
@@ -168,13 +211,81 @@ func (document *htmlDocument) Stylesheet() *Stylesheet {
 	return document.sheet
 }
 
+// maxStylesheetDepth 限制 @import 的嵌套层数。正常主题不会这么深，超过就
+// 按循环/异常处理——防止 A→B→A 这种互相引用无限递归到栈溢出。
+const maxStylesheetDepth = 32
+
 func (document *htmlDocument) AddStylesheetText(css string) {
-	parsed := ParseCSS(css)
+	document.addStylesheetText(css, document.baseURL, nil)
+	document.markChanged()
+}
+
+// AddStylesheetLink 按文档 BaseURL 解析 href，交给加载器读回 CSS。
+//
+// 加载失败（文件不存在、不联网、解析错误）时**静默忽略**：一份样式表缺失
+// 不该让页面打不开，其余样式照常生效。错误由加载器自己上报（它就住在宿主
+// 代码里，比引擎更清楚该怎么提示）。
+func (document *htmlDocument) AddStylesheetLink(href string) {
+	href = strings.TrimSpace(href)
+	if href == "" || document.loadSheet == nil {
+		return
+	}
+	abs := resolveURL(document.baseURL, href)
+	if abs == "" {
+		return
+	}
+	css, err := document.loadSheet(abs)
+	if err != nil {
+		return
+	}
+	document.addStylesheetText(css, abs, []string{abs})
+	document.markChanged()
+}
+
+func (document *htmlDocument) SetStylesheetLoader(f StylesheetLoader) {
+	document.loadSheet = f
+}
+
+func (document *htmlDocument) SetBaseURL(base string) {
+	document.baseURL = base
+}
+
+// addStylesheetText 解析 CSS 并把规则并入文档样式表。
+//
+// @import 按 CSS 语义**先**加载、先合并：被导入的规则落在导入语句的位置
+// （即本文件规则之前），同特异度时本文件的规则胜出。嵌套 @import 的基准
+// 是上一层样式表的地址（base 形参），不是页面地址——主题文件放在子目录里
+// 时这一点决定了它引用的相对路径对不对。
+func (document *htmlDocument) addStylesheetText(css, base string, chain []string) {
+	rules, imports := parseCSSRules(css)
+	for _, ref := range imports {
+		if document.loadSheet == nil || len(chain) >= maxStylesheetDepth {
+			continue
+		}
+		abs := resolveURL(base, ref)
+		if abs == "" || inChain(chain, abs) {
+			continue
+		}
+		text, err := document.loadSheet(abs)
+		if err != nil {
+			continue
+		}
+		document.addStylesheetText(text, abs, append(chain, abs))
+	}
 	if document.sheet == nil {
 		document.sheet = &Stylesheet{}
 	}
-	document.sheet.Merge(parsed)
-	document.markChanged()
+	document.sheet.Merge(&Stylesheet{rules: rules})
+}
+
+// inChain 判断 href 是否已在 @import 链上（直接或间接自引用）。
+func inChain(chain []string, href string) bool {
+	for _, s := range chain {
+		if s == href {
+			return true
+		}
+	}
+	return false
 }
 
 func (document *htmlDocument) SetStylesheet(sheet *Stylesheet) {

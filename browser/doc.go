@@ -43,6 +43,15 @@
 //	// ...绑定事件、注册 doc.SetOnChanged...
 //	err = win.Run()
 //
+// 需要外部样式表（页面里的 <link rel="stylesheet"> 与 CSS 的 @import）时
+// 改用 OpenDocumentWith 并传入加载器——引用于解析期就加载，事后再装加载器
+// 补不上：
+//
+//	doc, err := win.OpenDocumentWith(string(page), engine.DocumentOptions{
+//		BaseURL:        "file:///C:/pages/index.html",
+//		LoadStylesheet: loadFromDisk, // func(href string) (string, error)
+//	})
+//
 // 窗口标题、关窗等平台能力也由本层转发（SetTitle / RequestClose）——
 // 引擎只管文本，剪贴板读写留在平台侧（runtime/clipboard，engine 保持
 // 纯 Go、可在无显示环境测试）。
