@@ -158,7 +158,12 @@ func (win *Window) Run() error {
 		counter = &countingGraphics{inner: win.sdl.Graphics()}
 	}
 	for running {
-		frameStart := time.Now()
+		// 只有基准模式才取时间戳：正常路径上这行是白跑（time.Now 每次
+		// 几十纳秒，且不可被编译器消除），没理由为关闭的功能付代价。
+		var frameStart time.Time
+		if bench != nil {
+			frameStart = time.Now()
+		}
 		for {
 			ev, ok := win.sdl.PollEvent()
 			if !ok {
