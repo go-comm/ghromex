@@ -101,6 +101,67 @@ func TestStructSizesMatchRuntime(t *testing.T) {
 	}
 }
 
+// TestStructFieldOffsets 钉住**字段偏移**，不只是大小。
+//
+// 「大小对了但字段错位」同样致命：把 texture_formats 从 [16]uint32 改成
+// [20]uint32，大小变 104 > 88（上面的越界测试抓得到），但 maxTextureWidth
+// 的偏移从 80 挪到 96，读出来就是垃圾——而大小检查是绿的。偏移直接抄
+// SDL2 头文件（2.0.x 内稳定）。
+func TestStructFieldOffsets(t *testing.T) {
+	// SDL_RendererInfo（SDL_render.h，64 位）：
+	//   name@0 flags@8 num_texture_formats@12 texture_formats@16
+	//   max_texture_width@80 max_texture_height@84（总 88）
+	var info sdlRendererInfo
+	if got := unsafe.Offsetof(info.name); got != 0 {
+		t.Errorf("SDL_RendererInfo.name 偏移 = %d, want 0", got)
+	}
+	if got := unsafe.Offsetof(info.flags); got != 8 {
+		t.Errorf("SDL_RendererInfo.flags 偏移 = %d, want 8", got)
+	}
+	if got := unsafe.Offsetof(info.numTextureFormats); got != 12 {
+		t.Errorf("SDL_RendererInfo.num_texture_formats 偏移 = %d, want 12", got)
+	}
+	if got := unsafe.Offsetof(info.textureFormats); got != 16 {
+		t.Errorf("SDL_RendererInfo.texture_formats 偏移 = %d, want 16", got)
+	}
+	if got := unsafe.Offsetof(info.maxTextureWidth); got != 80 {
+		t.Errorf("SDL_RendererInfo.max_texture_width 偏移 = %d, want 80", got)
+	}
+	if got := unsafe.Offsetof(info.maxTextureHeight); got != 84 {
+		t.Errorf("SDL_RendererInfo.max_texture_height 偏移 = %d, want 84", got)
+	}
+	if got := unsafe.Sizeof(info); got != 88 {
+		t.Errorf("SDL_RendererInfo 大小 = %d, want 88", got)
+	}
+
+	// SDL_SysWMinfo（SDL_syswm.h，Windows 分支，64 位）：
+	//   version@0(SDL_version 3 字节 + 1 字节填充) subsystem@4
+	//   info.win: HWND@8 HDC@16 HINSTANCE@24（总 32）
+	var wmi sdlSysWMinfo
+	if got := unsafe.Offsetof(wmi.subsystem); got != 4 {
+		t.Errorf("SDL_SysWMinfo.subsystem 偏移 = %d, want 4", got)
+	}
+	if got := unsafe.Offsetof(wmi.winWindow); got != 8 {
+		t.Errorf("SDL_SysWMinfo.info.win.window 偏移 = %d, want 8", got)
+	}
+	if got := unsafe.Offsetof(wmi.winHInst); got != 24 {
+		t.Errorf("SDL_SysWMinfo.info.win.hinstance 偏移 = %d, want 24", got)
+	}
+	if got := unsafe.Sizeof(wmi); got != 32 {
+		t.Errorf("SDL_SysWMinfo 大小 = %d, want 32", got)
+	}
+
+	// SDL_Rect（SDL_rect.h）：x@0 y@4 w@8 h@12（总 16）——按值传给
+	// SDL_RenderFillRect / SDL_RenderCopy 等，布局错了 C 侧读到的就是错的。
+	var r sdlRect
+	if got := unsafe.Offsetof(r.w); got != 8 {
+		t.Errorf("SDL_Rect.w 偏移 = %d, want 8", got)
+	}
+	if got := unsafe.Sizeof(r); got != 16 {
+		t.Errorf("SDL_Rect 大小 = %d, want 16", got)
+	}
+}
+
 // TestSDLVersionRecord 记录运行库的版本号——结构体布局跟版本相关（不同
 // 小版本的 SDL_SysWMinfo.version 从 SDL_version 改成了 Uint32 等），排查
 // 布局问题时先对版本。

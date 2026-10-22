@@ -26,6 +26,9 @@ jobs:
         with:
           go-version: "1.24"
       - name: go vet
+        # 注意：Linux 上只 vet 得到 Linux 可编译的文件——backend/sdl2 与
+        # browser 的 Windows 标签文件不在内（那些是 //go:build windows）。
+        # 这里的 vet 是「纯 Go 部分的静态检查」，不是 sdl2 包过了 vet。
         run: go vet ./...
       - name: go test -race
         run: go test -race ./... -count=1

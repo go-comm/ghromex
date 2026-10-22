@@ -396,27 +396,30 @@ func goString(uptr uintptr) string {
 
 // cPointer 把 C 侧地址（uintptr）变成可解引用的 unsafe.Pointer。
 //
-// 两种常见写法都有坑，这里说清楚选哪个：
+// **只用于 C 侧内存**（SDL 分配的缓冲区、surface 的像素……）。C 内存不受
+// Go 的 GC 管，GC 收不走它。**绝不能**拿它转 Go 堆对象的地址——
+// 那属于「把 Go 指针当 C 指针用」，越界且会被 GC 移动/回收；Go 指针一律
+// 直接以 unsafe.Pointer 传递（GC 看得见，调用期间对象存活）。
 //
-//   - 直接 unsafe.Pointer(uintptr) —— 语义上就是「把 C 地址当 Go 指针用」，
-//     go vet 的 unsafeptr 检查会报错；
-//   - 取形参地址再按位重解释成指针 —— 绕过了 vet，但**脆**：形参可能被
-//     寄存器传递、内联展开、栈槽复用，读到的是没落栈的垃圾值。实测踩过：
-//     读出来的是随机地址，第一次访问就崩。
+// 两个槽的分工：
+//   - uintptr 槽：装 SDL 给的地址位模式。GC 看不见 uintptr 里的指针
+//     （Go 的规则：uintptr 不是指针类型），所以它只当「位模式容器」用；
+//   - unsafe.Pointer 槽：GC **看得见**的指针槽。指针存进去之后，即使在
+//     「存 → 读」之间发生 GC，这个地址指向的对象也不会被回收成悬空指针。
 //
-// 这里的做法：先把 uintptr 存进一个**堆上的槽**（值一定落在内存里），再从
-// 那个槽按位重解释成指针。存进去的值和读出来的一致，不依赖编译器是否把
-// 形参落到栈上；堆槽也不会被栈槽复用影响。
-//
-// 传入的地址必须是 **C 侧内存**（SDL 分配的），不是 Go 堆对象——Go 的 GC
-// 不移动堆对象，但把 Go 指针当 C 指针用仍然是越界的。
+// 为什么不用「直接 unsafe.Pointer(uintptr)」：go vet 的 unsafeptr 检查会报错。
+// 为什么不用「取形参地址再按位重解释」：形参可能被寄存器传递、内联展开、
+// 栈槽复用，读到的是没落栈的垃圾值（实测踩过：读出来是随机地址，直接崩）。
+// 堆上的槽一定在内存里，不依赖编译器是否把形参落到栈上。
 func cPointer(u uintptr) unsafe.Pointer {
 	if u == 0 {
 		return nil
 	}
-	slot := new(uintptr)
-	*slot = u
-	return *(*unsafe.Pointer)(unsafe.Pointer(slot))
+	slotU := new(uintptr)
+	*slotU = u
+	slotP := new(unsafe.Pointer)
+	*slotP = *(*unsafe.Pointer)(unsafe.Pointer(slotU))
+	return *slotP
 }
 
 // goCString 从 C 侧 char* 读回 UTF-8 字符串，最多读 max 字节（超出按

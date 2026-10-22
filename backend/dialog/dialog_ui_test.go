@@ -255,7 +255,12 @@ var (
 	procGetClassName    = user32.NewProc("GetClassNameW")
 )
 
-// guiThreadInfo 是 GUITHREADINFO 的前几个字段（hwndFocus 在第 8 个）。
+// guiThreadInfo 对应 Windows 的 GUITHREADINFO（64 位下 **72 字节**）。
+//
+// 布局必须与 winuser.h 一致：GetGUIThreadInfo 按**真实结构体大小**写，
+// Go 侧估小了就是越界写坏栈（与 backend/sdl2 里 SDL_RendererInfo 那条同类）。
+// 末字段 rcCaret 是 RECT（4×int32 = 16 字节），不是单个 int32——写成
+// int32 会让结构体只有 64 字节，GetGUIThreadInfo 越界写 8 字节。
 type guiThreadInfo struct {
 	cbSize        uint32
 	flags         uint32
@@ -265,7 +270,12 @@ type guiThreadInfo struct {
 	hwndMenuOwner uintptr
 	hwndMoveSize  uintptr
 	hwndCaret     uintptr
-	rcCaret       int32
+	rcCaret       guiRect
+}
+
+// guiRect 是 Windows 的 RECT（4×int32 = 16 字节）。
+type guiRect struct {
+	left, top, right, bottom int32
 }
 
 // findWindow 按窗口类名与标题找窗口。
