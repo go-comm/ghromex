@@ -555,6 +555,11 @@ func inputVisibleWindow(g Graphics, b *htmlElement, px int, bold bool, family st
 		runes = runes[1:]
 		tw, th = g.MeasureText(string(runes), px, bold, family)
 	}
+	// 声明的 line-height 决定控件内**一行**的高度：文本的垂直居中位置、
+	// 选区高亮与光标高度都按它算（Chrome 同口径）。
+	if decl := resolvedLineHeight(b.computed); decl >= 0 {
+		th = decl
+	}
 	return string(runes), len([]rune(full)) - len(runes), tw, th
 }
 

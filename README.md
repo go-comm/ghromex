@@ -7,6 +7,7 @@
 ## 特性
 
 - 纯 Go 渲染引擎：HTML 解析、CSS 级联、选择器（标签 / `.class` / `#id` / 简单组合，含特异度）、块级与行内（inline / inline-block）布局、文本按词/按字换行
+- 行内排版：`line-height`（normal / 倍数 / 百分比 / px；行距一半在文字之上、一半在之下，行盒高度严格等于声明值，倍数与百分比相对元素自身字号解析）、`vertical-align`（baseline / top / middle / bottom / text-top / text-bottom / sub / super / 长度 / 百分比；行内盒相对基线摆位，`<sup>`/`<sub>` 走同一条 UA 规则）
 - 定位与层叠：`position: relative / absolute / fixed`、`top/right/bottom/left`（含负值）、`z-index`；脱流盒第二遍布局，包含块 = 最近非 static 祖先 padding box / 视口；绘制分常规层 + 定位层（z 升序，同 z 按文档序），`z-index` 非 0 的定位元素与 `fixed` 元素建立层叠上下文，内部定位子树先局部排序再整体落层
 - 原生文件对话框：Windows Shell 的 `IFileDialog`（Vista 起的现代对话框），支持打开文件、打开多个文件、选择文件夹、另存为，带文件类型过滤与初始目录；纯 Win32 COM 调用，无 CGO、非 Windows 返回 `ErrUnsupported`
 - 原生消息框：user32 的 `MessageBoxW`（信息/警告/错误/询问四种图标，OK、确定-取消、是-否、是-否-取消四种按钮组合），不走 COM、不需要 STA
@@ -224,6 +225,13 @@ libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll，见 li
 `text-align(left/center/right)`、`text-decoration(underline/line-through/none，随父链继承)`、
 `white-space(pre)`（保留空白与制表符、按换行强制断行、不软换行；UA 的 `pre`/`code` 用它，
 `nowrap`/`pre-wrap` 未实现）、
+`line-height(normal/倍数/百分比/px)`（行距一半加在文字之上、一半加在之下，行盒高度
+严格等于声明值；倍数与百分比相对**元素自身**字号解析，随父链继承的是**原始形态**
+——父级 `1.5` + 子级 `font-size:32px` → 子级行高 48px）、
+`vertical-align(baseline/top/middle/bottom/text-top/text-bottom/sub/super/长度/百分比)`
+（不继承；只作用于行内级盒——引擎里行内元素都是「原子盒」，`middle` 的半个 x 高度
+按字号 0.52 估，SDL_ttf 无 x 高度接口；`super`/`sub` 的位移量取 Chrome 实测的
+「父字号/3+1」「父字号/5+1」，`<sup>`/`<sub>` 即走这条 UA 规则）、
 `position(relative/absolute/fixed)`、`top/right/bottom/left`(px 与 %，支持负值；
 absolute/fixed 相对包含块锚定，right/bottom 回推)、`z-index`（非 0 的定位元素与 fixed 元素建立层叠上下文；z:auto 与 z:0 暂不区分）、
 `overflow(visible/hidden/clip/scroll/auto：单值作用两轴、两值为 overflow-x overflow-y、
@@ -259,7 +267,9 @@ serif/Times → Noto Serif SC、monospace/cursive → 新宋体、system-ui → 
 `TTF_FontDescent`：行盒高 = 各内联盒「基线以上高度」的最大值 +
 「基线以下高度」的最大值，无内容时不加 strut。该口径是 FreeType 的像素
 取整，不再逐像素对齐 Chrome/DirectWrite（同一字体行高可能差 1~4px），
-换取不解析字体表的实现简化；
+换取不解析字体表的实现简化；声明了 `line-height` 时改按声明值分 Leading
+（一半在文字之上、一半在之下，half-leading 取 floor(leading/2+0.5)，
+与 Chrome 的基线落点一致），行盒高度严格等于声明值；
 粗体按字体族选**真粗体字文件**（雅黑 → msyhbd.ttc、Arial → arialbd.ttf、
 Segoe UI → segoeuib.ttf），不依赖 FreeType 对常规字形的合成加粗——合成加粗
 明显更重，24px 中文标题上还会出现笔画粘连/重影（浏览器按字体族选粗体字重，
@@ -345,8 +355,10 @@ surface 合成白底，与 `DrawText→RenderCopy→Screenshot` 落屏结果逐�
   列宽按**内容最大值**（不做浏览器的自动表格布局分配），separate 下用 2px
   间隙近似 border-spacing
 - 列表：缩进/外边距/标记已实现并与 Chrome 对齐（ul 的 •、ol 的序号；标记位置按内容左缘 −0.75em 近似）；仍无 `display:list-item` 与 `list-style-type`（作者自定义标记类型不生效）
-- 无 `vertical-align`（作者声明的垂直对齐不生效；`sub`/`sup` 的基线位移是 layout
-  内置行为）；`white-space` 仅 `pre` 一个关键字；无 `line-height` 属性
+- `white-space` 仅 `pre` 一个关键字；`line-height` 不支持 `em`/`rem`/`vh` 等单位
+  （只认无单位数字、百分比与 px；其余整条声明忽略，保留继承来的值）；
+  `vertical-align` 的 `top`/`bottom` 与行盒最终高度互相依赖，引擎迭代两轮收敛，
+  极端组合（同一行里多个 top 盒且高度各异）可能与浏览器差 1~2px
 - 级联为每次重排全量重算：逐元素重跑全部规则匹配并排序（元素数 × 规则数 × 祖先深度）——大样式表 + 大文档时每次输入都会触发一次全量级联，尚未做规则索引/失效缓存（字体路径与文本度量已有缓存，见「滚动」条；类名匹配已改为零分配扫描）
 - 灰度 AA（默认）无横向子像素分解，竖笔边缘锐度低于 LCD/ClearType（物理极限）；
   软硬由 hinting/tone 曲线档位决定（`GHROMEX_HINT` 默认 normal、`GHROMEX_CONTRAST`

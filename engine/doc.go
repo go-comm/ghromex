@@ -5,7 +5,9 @@
 //
 //	解析   html_parser.go / css_parser.go / selector.go
 //	级联   style_cascade.go（选择器匹配 + 特异度 + 继承）+ style_ua.go（UA 默认样式）
-//	布局   measure.go（盒模型/行盒/换行/定位）+ margin_collapse.go + table_layout.go
+//	布局   measure.go（盒模型/行盒/换行/定位）+ line_box.go（line-height 的
+//	       Leading 分配与 vertical-align 的基线位移）+ margin_collapse.go +
+//	       table_layout.go
 //	滚动   scroll.go（overflow 容器 + 文档级滚动 + wheel 分发）
 //	绘制   render.go（背景/边框/文本/装饰/层序/裁剪栈）+ form_render.go（表单控件）
 //	交互   event_dispatch.go（命中测试 + 冒泡派发）+ text_input.go / selection.go /
@@ -28,6 +30,12 @@
 //     尺寸）都要走 markChanged，后端按 ChangeCount 决定重排；**布局期不得
 //     触发 markChanged**（会形成重排↔变更死循环，见 style_cascade.go 的
 //     syncSelectValue）。
+//  6. 行盒只有一处口径：行盒高 = 各内联项**贡献**的最大 ascent + 最大
+//     descent，基线在距行顶 lineAsc 处。贡献 = 字体度量 ± line-height 的
+//     Leading（line_box.go 的 applyLeading）± vertical-align 的位移
+//     （line_box.go 的 verticalAlignShift）。绘制、命中测试、SVG 导出都
+//     从同一份文本片段与盒几何取数——三者任一改口径都会出现「画出来的
+//     和点到的不是同一个」。
 //
 // # 事件模型
 //

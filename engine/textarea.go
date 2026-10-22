@@ -113,6 +113,11 @@ func layoutTextarea(g Graphics, el *htmlElement) textareaLayout {
 	if lh <= 0 {
 		lh = px * 13 / 10
 	}
+	// 声明的 line-height 优先：textarea 内部的行距、光标行高、选区高度与
+	// 滚动范围都按 lh 算（行高变了这些必须一起变）。
+	if decl := resolvedLineHeight(comp); decl >= 0 {
+		lh = decl
+	}
 	asc, _ := g.FontMetrics("", px, bold, family)
 	if asc <= 0 {
 		asc = lh / 2

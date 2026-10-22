@@ -44,6 +44,10 @@ func resolveStylesTree(e HTMLElement, parentBase *htmlElement, author *Styleshee
 		comp.SetTextAlign(pc.TextAlign())
 		comp.SetTextDecoration(pc.TextDecoration())
 		comp.SetWhiteSpace(pc.WhiteSpace())
+		// line-height 继承**原始形态**（倍数/绝对长度），不是解析后的像素：
+		// 父级 line-height:1.5 + 子级 font-size:32px → 子级行高 48px，
+		// 继承成像素就锁死在父级字号上了。
+		comp.SetLineHeight(pc.LineHeight())
 		if pcs, ok := pc.(*cssStyleDeclaration); ok {
 			if cs, ok := comp.(*cssStyleDeclaration); ok {
 				cs.fontSizeExplicit = pcs.fontSizeExplicit

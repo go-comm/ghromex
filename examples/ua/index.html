@@ -29,6 +29,10 @@
   - sup/sub 基线位移（上 父字号/3+1、下 父字号/5+1）、pre 的 white-space: pre
     （空行、制表位、强制断行）、dt 不加粗、dd/ul/ol 缩进 40px、
     blockquote/figure 缩进、body 两侧边距 8px
+  - line-height：normal/倍数/百分比/绝对长度三种写法，行距一半加在文字之上、
+    一半加在之下，行盒高度严格等于声明值；倍数与百分比按**元素自身**字号
+    解析（父级 1.5 + 子级 24px → 43px）；vertical-align 的 baseline/middle/
+    super/sub/top/bottom/text-top/text-bottom 与长度、百分比偏移
   - radio/checkbox 点击切换选中（强调色 + 白色对勾/圆环实心核，按 Chrome 逐像素对齐）
   - 中英混排的整行宽度与换行点一致（分段 fallback 与浏览器同源）
   - 表格 `border-collapse: collapse`：列宽/行高/外盒逐项对齐（见下方「表格」条）
@@ -92,6 +96,21 @@
 		/* 表格：作者 CSS 给边框与内边距（列对齐由引擎的表格布局实现，见头注释） */
 		table.tb { border-collapse: collapse; }
 		table.tb th, table.tb td { border: 1px solid #767676; padding: 4px 8px; }
+
+		/* 行高与垂直对齐（对照项）：line-height 的三种写法 + vertical-align
+		   的各取值。文字在行内垂直居中、盒相对基线摆位，逐项与浏览器比。 */
+		.lh-factor { line-height: 1.8; }
+		.lh-len { line-height: 32px; }
+		.lh-pct { line-height: 150%; }
+		.lh-child { font-size: 24px; }
+		.va-middle { vertical-align: middle; }
+		.va-raise { vertical-align: 8px; }
+		.va-box {
+			display: inline-block; width: 72px; height: 28px;
+			border: 1px solid #2563EB; background: #DBEAFE;
+		}
+		.va-top { vertical-align: top; }
+		.va-bottom { vertical-align: bottom; }
 	</style>
 </head>
 <body>
@@ -153,6 +172,18 @@
 	<div class="fs32">32px：h1 同级</div>
 	<div class="fs80">80%：相对父级字号</div>
 	<div class="fs120">120%：相对父级字号</div>
+
+	<h3>行高与垂直对齐</h3>
+	<div class="lh-factor">line-height:1.8：倍数，相对自身字号，行与行拉开 1.8 倍。</div>
+	<div class="lh-len">line-height:32px：绝对行高，与字号无关。</div>
+	<div class="lh-pct">line-height:150%：百分比，与 1.5 同义。</div>
+	<div class="lh-factor lh-child">line-height:1.8 + font-size:24px：倍数按**自身**字号解析 → 43.2px。</div>
+	<div>
+		文字 <span class="va-middle">middle</span> 文字
+		<span class="va-raise">raise 8px</span> 文字
+		<span class="va-box va-top">top</span>
+		<span class="va-box va-bottom">bottom</span>
+	</div>
 
 	<h3>行内语义</h3>
 	<p>

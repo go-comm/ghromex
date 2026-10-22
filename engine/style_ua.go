@@ -66,9 +66,12 @@ a { display: inline; color: #0000EE; text-decoration: underline; } /* Chrome 默
    13px（其 monospace 通用族的默认字号）。引擎字号取整为 13px。 */
 code, kbd, samp { font-family: monospace; font-size: 13px; }
 small { font-size: 13px; }
-/* 上下标：Chrome UA 的 smaller = 13.33px（引擎取整 13），并在布局期按
-   垂直位移分开基线（见 measure.go 的 sub/sup 处理）。 */
+/* 上下标：Chrome UA 的 smaller = 13.33px（引擎取整 13），并用
+   vertical-align:super/sub 把基线分开（位移量按父级字号算，见
+   measure.go 的 verticalAlignShift）。 */
 sub, sup { font-size: 13px; }
+sub { vertical-align: sub; }
+sup { vertical-align: super; }
 /* 表单控件默认值对齐 Chrome（Windows）UA 样式：
    button: buttonface=#EFEFEF、文字色 buttontext=#000（不继承）、居中文本、
            边框灰 #767676、字号 13px（≈浏览器 13.33px Arial）。

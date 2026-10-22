@@ -316,6 +316,83 @@ func parseOverflow(v string) Overflow {
 	}
 }
 
+// parseLineHeight 解析 line-height：normal / 无单位数字（倍数）/ 百分比
+// （倍数）/ px（绝对长度）。
+//
+// 百分比与无单位数字语义相同——都相对**元素自身**的字号解析，且继承时
+// 继承的是倍数本身（父级 1.5 + 子级 font-size:32px → 子级行高 48px），
+// 故两者归一为倍数形态。非法值（负数、未知单位）返回 ok=false：CSS 语义
+// 是「整条声明非法 → 忽略该声明」，保留继承来的值。
+func parseLineHeight(v string) (LineHeight, bool) {
+	switch v {
+	case "normal":
+		return NewLineHeightNormal(), true
+	case "":
+		return LineHeight{}, false
+	}
+	if strings.HasSuffix(v, "%") {
+		f, err := strconv.ParseFloat(strings.TrimSuffix(v, "%"), 32)
+		if err != nil || f < 0 {
+			return LineHeight{}, false
+		}
+		return NewLineHeightFactor(float32(f / 100)), true
+	}
+	if strings.HasSuffix(v, "px") {
+		f, err := strconv.ParseFloat(strings.TrimSuffix(v, "px"), 32)
+		if err != nil || f < 0 {
+			return LineHeight{}, false
+		}
+		return NewLineHeightLength(float32(f)), true
+	}
+	// 无单位数字：倍数（如 1.5）。带未知单位（em/rem/vh…）暂不支持，
+	// 整条声明忽略。
+	if f, err := strconv.ParseFloat(v, 32); err == nil {
+		if f < 0 {
+			return LineHeight{}, false
+		}
+		return NewLineHeightFactor(float32(f)), true
+	}
+	return LineHeight{}, false
+}
+
+// parseVerticalAlign 解析 vertical-align。长度/百分比形式归为
+// VerticalAlignRaise（相对基线抬高；百分比相对元素自身的 line-height）。
+func parseVerticalAlign(v string) (VerticalAlign, Size, bool) {
+	switch v {
+	case "baseline":
+		return VerticalAlignBaseline, nil, true
+	case "top":
+		return VerticalAlignTop, nil, true
+	case "middle":
+		return VerticalAlignMiddle, nil, true
+	case "bottom":
+		return VerticalAlignBottom, nil, true
+	case "text-top":
+		return VerticalAlignTextTop, nil, true
+	case "text-bottom":
+		return VerticalAlignTextBottom, nil, true
+	case "sub":
+		return VerticalAlignSub, nil, true
+	case "super":
+		return VerticalAlignSuper, nil, true
+	}
+	if strings.HasSuffix(v, "%") {
+		f, err := strconv.ParseFloat(strings.TrimSuffix(v, "%"), 32)
+		if err != nil {
+			return VerticalAlignBaseline, nil, false
+		}
+		return VerticalAlignRaise, NewSize(SIZE_PERCENT, 0, float32(f)), true
+	}
+	if strings.HasSuffix(v, "px") {
+		n, err := strconv.Atoi(strings.TrimSuffix(v, "px"))
+		if err != nil {
+			return VerticalAlignBaseline, nil, false
+		}
+		return VerticalAlignRaise, NewSize(SIZE_PIXEL, n, 0), true
+	}
+	return VerticalAlignBaseline, nil, false
+}
+
 // applyDecl 将单条声明写入样式对象。未识别的属性被忽略。
 func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 	v := strings.ToLower(strings.TrimSpace(value))
@@ -466,6 +543,19 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 	case "font-size":
 		if s := parseLength(v); s != nil {
 			comp.SetFontSize(s)
+		}
+	case "line-height":
+		// 继承的是原始形态（倍数/绝对长度），解析成像素留到布局期——
+		// 倍数要相对元素**自身**的字号解析，级联期拿不到最终字号。
+		if lh, ok := parseLineHeight(v); ok {
+			comp.SetLineHeight(lh)
+		}
+	case "vertical-align":
+		if mode, off, ok := parseVerticalAlign(v); ok {
+			comp.SetVerticalAlign(mode)
+			if off != nil {
+				comp.SetVerticalAlignOffset(off)
+			}
 		}
 	case "font-weight":
 		if v == "bold" || v == "700" || v == "800" || v == "900" {

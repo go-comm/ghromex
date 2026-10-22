@@ -175,8 +175,11 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 			}
 		}
 		for _, run := range tn.node.runs {
+			// y 是 SVG 的基线坐标：基线 = 片段顶边 + 该片段的 ascent
+			// （与下划线等装饰同口径，见 drawDecoration）。用片段底边
+			// （y+h）会把文字整体画低一个 descent。
 			fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d"%s%s%s fill="%s">%s</text>`+"\n",
-				run.x, run.y+run.h, fs, ff, fw, decAttr, fill, escapeXML(run.text))
+				run.x, run.y+run.asc, fs, ff, fw, decAttr, fill, escapeXML(run.text))
 		}
 		return
 	}

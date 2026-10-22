@@ -195,6 +195,11 @@ func defaultFormControlHeight(g Graphics, comp CSSStyleDeclaration, pctW int) in
 	if h <= 0 {
 		h = fontPx
 	}
+	// 声明的 line-height 决定控件内容盒的高度（Chrome：控件的内容盒高 =
+	// 行高）。
+	if decl := resolvedLineHeight(comp); decl >= 0 {
+		h = decl
+	}
 	pd := resolveEdgeRect(comp.Padding(), pctW)
 	bd := resolveEdgeRect(comp.BorderStyleWidth(), pctW)
 	h += pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom]
@@ -570,8 +575,18 @@ type lineItem struct {
 	x     int
 	y     int
 	w     int
-	asc   int // 该项基线以上的高度（字体 ascent 或原子盒的基线位置）
-	desc  int // 该项基线以下的高度
+	asc   int // 该项自身的基线以上高度（字体 ascent 或原子盒的基线位置）
+	desc  int // 该项自身的基线以下高度
+	// leadAsc/leadDesc 是计入**行盒高度**的贡献：文本项 = 字体度量 ± 行距
+	// leading（line-height）；原子盒 = 盒自身度量 ± vertical-align 位移。
+	// 行盒高度取各项贡献的最大值（CSS 2.1 §10.8.1）。
+	leadAsc  int
+	leadDesc int
+	// shift 是 vertical-align 的位移（正=向上抬高），定位原子盒时用。
+	shift int
+	// valign 是原子盒的垂直对齐方式。top/bottom 的位移依赖行盒的最终
+	// ascent/descent，在 flushLine 里才定，故这里只留模式本身。
+	valign VerticalAlign
 }
 
 // inlineBoxBaseline 计算原子行内盒（inline-block 控件、行内元素等）的基线
@@ -661,11 +676,6 @@ func isButtonElement(el *htmlElement) bool {
 func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, cy int, align TextAlign) (flowW, flowH int) {
 	cursorX := cx
 	cursorY := cy
-	// 行盒按**基线**组织（与浏览器一致）：lineAsc/lineDesc 是本行各内联盒
-	// 基线以上/以下高度的最大值，行盒高度 = 二者之和，基线位于距行顶
-	// lineAsc 处。旧的实现是"取最大墨迹高 + 垂直居中"，与浏览器的
-	// line-height:normal 口径不同，逐行累积后整页错位数十像素。
-	lineAsc, lineDesc := 0, 0
 	var curLine []lineItem
 	maxRight := cx
 	// prevBlockMB：上一个相邻块级子的 margin-bottom；-1 = 尚无
@@ -685,10 +695,29 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 
 	// strut：行盒的"撑杆"——块级自身的字体。浏览器每个行盒都含 strut，
 	// 即使行内全是别的字体（或整行为空），行盒也按 strut 计高。
-	strutAsc, strutDesc := 0, 0
+	//
+	// fontAsc/fontDesc 是**字体内容区**（ascent+descent，不含行距）；
+	// strutAsc/strutDesc 是加上 line-height 的 Leading 后的高度——行盒
+	// 按后者计高，而 text-top/text-bottom 对齐的是前者（CSS 2.1 §10.1：
+	// 内容区不含 Leading）。
+	fontAsc, fontDesc := 0, 0
 	if g != nil {
-		strutAsc, strutDesc = g.FontMetrics("", fontPx, bold, family)
+		fontAsc, fontDesc = g.FontMetrics("", fontPx, bold, family)
 	}
+	// line-height：把 strut 的基线上下高度按声明的行高重算——行距一半加在
+	// 文字之上、一半加在之下（CSS 2.1 §10.8.1）。normal 时原样返回。
+	lhPx := resolvedLineHeight(el.computed)
+	strutAsc, strutDesc := applyLeading(fontAsc, fontDesc, lhPx)
+
+	// 行盒按**基线**组织（与浏览器一致）：lineAsc/lineDesc 是本行各内联盒
+	// 基线以上/以下高度的最大**贡献**（含行距 leading 与 vertical-align
+	// 位移），行盒高度 = 二者之和，基线位于距行顶 lineAsc 处。旧的实现是
+	// "取最大墨迹高 + 垂直居中"，与浏览器的 line-height:normal 口径不同，
+	// 逐行累积后整页错位数十像素。
+	//
+	// 初值取 strut：负值也保留——line-height 小于字体自然行高时 strut 的
+	// descent 为负（文字溢出行盒，Chrome 同样允许），不能被 0 顶掉。
+	lineAsc, lineDesc := minInt(0, strutAsc), minInt(0, strutDesc)
 
 	// 行内格式上下文里的空格：CSS 把连续空白折叠为单个空格，且只保留在
 	// 行内内容之间。tokenizeText 会丢弃首尾空白，纯空白文本节点因此整体
@@ -696,10 +725,12 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	// pendingSpace 把空格延迟到"下一个行内项"再落位：遇到块级子元素则
 	// 丢弃（CSS 移除行尾空格）。
 	spaceW := 0
-	spaceAsc, spaceDesc := strutAsc, strutDesc
+	spaceAsc, spaceDesc := fontAsc, fontDesc
+	spaceLeadAsc, spaceLeadDesc := fontAsc, fontDesc
 	if g != nil {
 		spaceW, _ = g.MeasureText(" ", fontPx, bold, family)
 		spaceAsc, spaceDesc = g.FontMetrics(" ", fontPx, bold, family)
+		spaceLeadAsc, spaceLeadDesc = applyLeading(spaceAsc, spaceDesc, lhPx)
 	}
 	pendingSpace := false
 	pendingTN := (*textNode)(nil)
@@ -717,13 +748,14 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			return
 		}
 		curLine = append(curLine, lineItem{tn: pendingTN, token: " ",
-			x: cursorX, y: cursorY, w: spaceW, asc: spaceAsc, desc: spaceDesc})
+			x: cursorX, y: cursorY, w: spaceW, asc: spaceAsc, desc: spaceDesc,
+			leadAsc: spaceLeadAsc, leadDesc: spaceLeadDesc})
 		cursorX += spaceW
-		if spaceAsc > lineAsc {
-			lineAsc = spaceAsc
+		if spaceLeadAsc > lineAsc {
+			lineAsc = spaceLeadAsc
 		}
-		if spaceDesc > lineDesc {
-			lineDesc = spaceDesc
+		if spaceLeadDesc > lineDesc {
+			lineDesc = spaceLeadDesc
 		}
 		if cursorX > maxRight {
 			maxRight = cursorX
@@ -753,6 +785,42 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			if desc < strutDesc {
 				desc = strutDesc
 			}
+			// vertical-align: top/bottom 的位移依赖行盒的最终 ascent/descent
+			// （盒顶/盒底与行盒顶/底对齐），而行盒高度又依赖这些盒的贡献
+			// ——互相依赖。迭代两轮即收敛：第一轮按当前高度定位，第二轮
+			// 按收敛后的高度重新定位。
+			for iter := 0; iter < 2; iter++ {
+				for i := range curLine {
+					it := &curLine[i]
+					switch it.valign {
+					case VerticalAlignTop:
+						// 盒顶与行盒顶对齐：盒整体上移到行盒上沿。
+						it.shift = asc - it.asc
+						it.leadAsc = it.asc + it.shift
+						it.leadDesc = it.desc - it.shift
+					case VerticalAlignBottom:
+						// 盒底与行盒底对齐：盒整体下移到行盒下沿。
+						it.shift = it.desc - desc
+						it.leadAsc = it.asc + it.shift
+						it.leadDesc = it.desc - it.shift
+					default:
+						continue
+					}
+				}
+				newAsc, newDesc := asc, desc
+				for _, it := range curLine {
+					if it.leadAsc > newAsc {
+						newAsc = it.leadAsc
+					}
+					if it.leadDesc > newDesc {
+						newDesc = it.leadDesc
+					}
+				}
+				if newAsc == asc && newDesc == desc {
+					break
+				}
+				asc, desc = newAsc, newDesc
+			}
 		}
 		// <button> 的内容垂直居中（HTML 规范的 button 布局：内容盒里的行盒
 		// 居中，Chrome/Edge 同款）。定高按钮（作者给了 height）才看得出差别：
@@ -766,11 +834,12 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			}
 		}
 		for _, it := range curLine {
-			// 基线对齐：各内联盒的顶边 = 行基线 − 自身 ascent，
-			// 于是不同字号的文字共享同一基线（浏览器的行盒语义）。
+			// 基线对齐：各内联盒的顶边 = 行基线 − 自身 ascent，于是不同字号
+			// 的文字共享同一基线（浏览器的行盒语义）。原子盒另按
+			// vertical-align 的位移 shift 摆位（正=向上抬高）。
 			// baselineAdjust 是与 Chrome 对照的全局微调（只挪基线，不动
 			// 行盒高度，故不影响行距与盒尺寸）。
-			y := it.y + dy + (asc - it.asc) + baselineAdjust
+			y := it.y + dy + (asc - it.asc - it.shift) + baselineAdjust
 			if it.tn != nil {
 				it.tn.node.runs = append(it.tn.node.runs, textRun{
 					text: it.token, x: it.x + dx, y: y, w: it.w, h: it.asc + it.desc,
@@ -788,7 +857,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		if asc+desc > 0 {
 			cursorY += asc + desc
 		}
-		lineAsc, lineDesc = 0, 0
+		lineAsc, lineDesc = minInt(0, strutAsc), minInt(0, strutDesc)
 		curLine = curLine[:0]
 		cursorX = cx
 	}
@@ -811,14 +880,16 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			w = 0
 		}
 		asc, desc := g.FontMetrics(tok, fontPx, bold, family)
+		leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
 		curLine = append(curLine, lineItem{tn: tn, token: tok,
-			x: cursorX, y: cursorY, w: w, asc: asc, desc: desc})
+			x: cursorX, y: cursorY, w: w, asc: asc, desc: desc,
+			leadAsc: leadAsc, leadDesc: leadDesc})
 		cursorX += w
-		if asc > lineAsc {
-			lineAsc = asc
+		if leadAsc > lineAsc {
+			lineAsc = leadAsc
 		}
-		if desc > lineDesc {
-			lineDesc = desc
+		if leadDesc > lineDesc {
+			lineDesc = leadDesc
 		}
 		if cursorX > maxRight {
 			maxRight = cursorX
@@ -885,11 +956,13 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 		curLine = append(curLine, it)
 		cursorX += it.w
-		if it.asc > lineAsc {
-			lineAsc = it.asc
+		// 行盒高度取各项**贡献**的最大值（贡献含行距 leading 与
+		// vertical-align 位移，见 lineItem 的说明）。
+		if it.leadAsc > lineAsc {
+			lineAsc = it.leadAsc
 		}
-		if it.desc > lineDesc {
-			lineDesc = it.desc
+		if it.leadDesc > lineDesc {
+			lineDesc = it.leadDesc
 		}
 		if cursorX > maxRight {
 			maxRight = cursorX
@@ -926,7 +999,9 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 					continue
 				}
 				asc, desc := g.FontMetrics(tok, fontPx, bold, family)
-				addItem(lineItem{tn: tnc, token: tok, x: cursorX, y: cursorY, w: tw, asc: asc, desc: desc})
+				leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
+				addItem(lineItem{tn: tnc, token: tok, x: cursorX, y: cursorY, w: tw,
+					asc: asc, desc: desc, leadAsc: leadAsc, leadDesc: leadDesc})
 			}
 			// 尾随空白：其后若还有行内内容则保留为间隙空格；若后面是块级
 			// 子元素则丢弃（CSS 移除行尾空格）。
@@ -1058,27 +1133,32 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			ow, oh = layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH)
 		}
 		asc, desc := inlineBoxBaseline(g, che, maxInt(oh, 1))
-		// 上下标：Chrome 实测（12/16/32px 三档、Arial/雅黑/Courier 同值）把
-		// 基线按「上方 1px + 父字号/3」「下方 1px + 父字号/5」位移，位移量
-		// 与字体无关。上标抬高行盒的 ascent、下标压低 descent——这正是含
-		// sub/sup 的段落比普通段落高的原因（Chrome 里 p 高 48.52 而非 42）。
-		switch strings.ToLower(che.tagName) {
-		case "sup":
-			shift := fontPx/3 + 1
-			asc += shift
-			desc -= shift
-		case "sub":
-			shift := fontPx/5 + 1
-			asc -= shift
-			desc += shift
+		// vertical-align：算盒相对基线的位移（正=向上抬高）以及计入行盒
+		// 高度的贡献。top/bottom 的位移依赖行盒的最终高度（盒顶/盒底与
+		// 行盒顶/底对齐），在 flushLine 里定；这里先按"不撑行盒"处理。
+		//
+		// <sup>/<sub> 走同一条路：UA 样式表给它们 vertical-align:super/sub，
+		// 位移量按 Chrome 实测（12/16/32px 三档、Arial/雅黑/Courier 同值）
+		// 取「父字号/3+1」「父字号/5+1」，与字体无关。上标抬高行盒的
+		// ascent、下标压低 descent——这正是含 sub/sup 的段落比普通段落高的
+		// 原因（Chrome 里 p 高 48.52 而非 42）。
+		valign := VerticalAlignBaseline
+		if che.computed != nil {
+			valign = che.computed.VerticalAlign()
 		}
-		if asc < 0 {
-			asc = 0
+		shift := 0
+		leadAsc, leadDesc := asc, desc
+		switch valign {
+		case VerticalAlignTop, VerticalAlignBottom:
+			leadAsc, leadDesc = 0, 0 // 位移待定，flushLine 里补
+		default:
+			shift = verticalAlignShift(valign, asc, desc, fontAsc, fontDesc,
+				fontPx, verticalAlignRaise(che.computed, ownLineHeight(g, che.computed)))
+			leadAsc, leadDesc = asc+shift, desc-shift
 		}
-		if desc < 0 {
-			desc = 0
-		}
-		it := lineItem{x: cursorX, y: cursorY, w: maxInt(ow, 1), asc: asc, desc: desc, el: che}
+		it := lineItem{x: cursorX, y: cursorY, w: maxInt(ow, 1),
+			asc: asc, desc: desc, leadAsc: leadAsc, leadDesc: leadDesc,
+			shift: shift, valign: valign, el: che}
 		addItem(it)
 	}
 

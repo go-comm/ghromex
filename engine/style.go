@@ -84,6 +84,78 @@ const (
 	WhiteSpacePre
 )
 
+// LineHeightKind 是 line-height 的取值形态。
+type LineHeightKind uint8
+
+const (
+	// LineHeightNormal 是 line-height: normal——行高取字体度量
+	// （ascent + descent），不做额外行距调整。
+	LineHeightNormal LineHeightKind = iota
+	// LineHeightFactor 是相对**元素自身字号**的倍数：line-height:1.5 与
+	// line-height:150% 同义（两者都按继承下来的倍数、相对各自元素的字号
+	// 解析），故归为同一形态。
+	LineHeightFactor
+	// LineHeightLength 是绝对行高（px）。
+	LineHeightLength
+)
+
+// LineHeight 是 line-height 的值：normal / 相对字号的倍数 / 绝对长度。
+//
+// 倍数与绝对长度都**继承原始形态**而非解析后的像素值——倍数要相对子元素
+// 自己的字号解析（父级 line-height:1.5 + 子级 font-size:32px → 子级行高
+// 48px），继承成像素就全错了。
+type LineHeight struct {
+	kind  LineHeightKind
+	value float32
+}
+
+// NewLineHeightNormal 造 line-height: normal。
+func NewLineHeightNormal() LineHeight { return LineHeight{kind: LineHeightNormal} }
+
+// NewLineHeightFactor 造相对字号的倍数行高（1.5 表示 1.5em）。
+func NewLineHeightFactor(f float32) LineHeight {
+	return LineHeight{kind: LineHeightFactor, value: f}
+}
+
+// NewLineHeightLength 造绝对行高（px）。
+func NewLineHeightLength(px float32) LineHeight {
+	return LineHeight{kind: LineHeightLength, value: px}
+}
+
+// Kind 返回取值形态。
+func (l LineHeight) Kind() LineHeightKind { return l.kind }
+
+// Factor 返回倍数（仅 LineHeightFactor 有效）。
+func (l LineHeight) Factor() float32 { return l.value }
+
+// Length 返回绝对行高（仅 LineHeightLength 有效）。
+func (l LineHeight) Length() float32 { return l.value }
+
+// VerticalAlign 是 vertical-align 的取值（**不继承**）。只作用于行内级盒
+// （引擎里行内元素都是"原子盒"，见 measure.go 的 inlineBoxBaseline）。
+type VerticalAlign uint8
+
+const (
+	// VerticalAlignBaseline 是默认值：盒的基线与父级基线对齐。
+	VerticalAlignBaseline VerticalAlign = iota
+	// VerticalAlignTop：盒的顶边与行盒顶边对齐。
+	VerticalAlignTop
+	// VerticalAlignMiddle：盒的垂直中点与「父级基线 + 半个 x 高度」对齐。
+	VerticalAlignMiddle
+	// VerticalAlignBottom：盒的底边与行盒底边对齐。
+	VerticalAlignBottom
+	// VerticalAlignTextTop：盒的顶边与父级内容区上沿（strut 的 ascent）对齐。
+	VerticalAlignTextTop
+	// VerticalAlignTextBottom：盒的底边与父级内容区下沿（strut 的 descent）对齐。
+	VerticalAlignTextBottom
+	// VerticalAlignSub：相对基线下移（父级字号/5+1，与 Chrome 的 <sub> 同口径）。
+	VerticalAlignSub
+	// VerticalAlignSuper：相对基线上移（父级字号/3+1，与 Chrome 的 <sup> 同口径）。
+	VerticalAlignSuper
+	// VerticalAlignRaise：长度/百分比，相对基线上移指定距离。
+	VerticalAlignRaise
+)
+
 // BorderCollapse 决定表格相邻单元格的边框是否合并（border-collapse），
 // 只被表格布局读取。separate 为 CSS 默认（单元格各自画四边边框，相邻两条各
 // 自 1px）；collapse 时相邻单元格共享一条线——浏览器把它实现成每个单元格只
@@ -165,6 +237,17 @@ type CSSStyleDeclaration interface {
 	// 不继承、仅表格布局读取。默认 separate。
 	BorderCollapse() BorderCollapse
 	SetBorderCollapse(b BorderCollapse) CSSStyleDeclaration
+	// LineHeight 是 line-height 的值（normal/倍数/绝对长度），沿父链继承
+	// 的是**原始形态**（倍数相对子元素自己的字号解析）。
+	LineHeight() LineHeight
+	SetLineHeight(lh LineHeight) CSSStyleDeclaration
+	// VerticalAlign 是 vertical-align 的值（不继承），只作用于行内级盒。
+	VerticalAlign() VerticalAlign
+	SetVerticalAlign(v VerticalAlign) CSSStyleDeclaration
+	// VerticalAlignOffset 是 vertical-align 为长度/百分比时的抬升值
+	// （百分比相对元素自身的 line-height）。
+	VerticalAlignOffset() Size
+	SetVerticalAlignOffset(s Size) CSSStyleDeclaration
 }
 
 func newStyle() CSSStyleDeclaration {
@@ -219,6 +302,9 @@ type cssStyleDeclaration struct {
 	overflowY        Overflow
 	whiteSpace       WhiteSpace
 	borderCollapse   BorderCollapse
+	lineHeight       LineHeight
+	verticalAlign    VerticalAlign
+	verticalAlignOff Size
 }
 
 // copyStyle 复制样式值（不含继承字段之外的引用语义差异）。
@@ -249,6 +335,9 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetOverflowY(s.OverflowY())
 	c.SetWhiteSpace(s.WhiteSpace())
 	c.SetBorderCollapse(s.BorderCollapse())
+	c.SetLineHeight(s.LineHeight())
+	c.SetVerticalAlign(s.VerticalAlign())
+	c.SetVerticalAlignOffset(s.VerticalAlignOffset())
 	if src, ok := s.(*cssStyleDeclaration); ok {
 		if dst, ok := c.(*cssStyleDeclaration); ok {
 			dst.fontSizeExplicit = src.fontSizeExplicit
@@ -503,5 +592,32 @@ func (style *cssStyleDeclaration) BorderCollapse() BorderCollapse {
 
 func (style *cssStyleDeclaration) SetBorderCollapse(b BorderCollapse) CSSStyleDeclaration {
 	style.borderCollapse = b
+	return style
+}
+
+func (style *cssStyleDeclaration) LineHeight() LineHeight {
+	return style.lineHeight
+}
+
+func (style *cssStyleDeclaration) SetLineHeight(lh LineHeight) CSSStyleDeclaration {
+	style.lineHeight = lh
+	return style
+}
+
+func (style *cssStyleDeclaration) VerticalAlign() VerticalAlign {
+	return style.verticalAlign
+}
+
+func (style *cssStyleDeclaration) SetVerticalAlign(v VerticalAlign) CSSStyleDeclaration {
+	style.verticalAlign = v
+	return style
+}
+
+func (style *cssStyleDeclaration) VerticalAlignOffset() Size {
+	return style.verticalAlignOff
+}
+
+func (style *cssStyleDeclaration) SetVerticalAlignOffset(s Size) CSSStyleDeclaration {
+	style.verticalAlignOff = s
 	return style
 }
