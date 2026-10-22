@@ -16,7 +16,7 @@ import (
 )
 
 // drawDebug 为 true 时（环境变量 GHROMEX_DEBUG 非空），绘制调用失败会打印 SDL 错误。
-var drawDebug = os.Getenv("GHROMEX_DEBUG") != ""
+var drawDebug = envBool("GHROMEX_DEBUG")
 
 func checkDraw(what string, ret uintptr) {
 	if drawDebug && ret != 0 {

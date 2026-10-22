@@ -84,7 +84,11 @@ func NewWindow(w, h int, title string) (*Window, error) {
 	// 两类环境直接用软件：GHROMEX_SOFTWARE=1 逃生口（部分虚拟显示驱动能创建
 	// accelerated 渲染器却"窗口能开、像素不出"，自动回退不会触发）；
 	// dummy 无头自检要保持确定性回读行为，不尝试 GPU。
-	softwareOnly := os.Getenv("GHROMEX_SOFTWARE") != "" ||
+	//
+	// GHROMEX_SOFTWARE 按布尔解析（1/true/yes/on 才算开）：只判"非空"的
+	// 时候，GHROMEX_SOFTWARE=0 也会强制软件渲染——用户明明要求走 GPU，却拿到
+	// 软件路径，且输出里看不出是谁强制的。
+	softwareOnly := envBool("GHROMEX_SOFTWARE") ||
 		os.Getenv("SDL_VIDEO_DRIVER") == "dummy"
 	gpu := false
 	var gpuErr string
@@ -113,10 +117,17 @@ func NewWindow(w, h int, title string) (*Window, error) {
 		// 纹理上传/draw call/swap 间隔——两者的排查方向完全不同，先确认
 		// 走的是哪条路再量（GHROMEX_DEBUG 非空时打印）。
 		driver := RendererDriver(renderer)
-		if gpu {
+		switch {
+		case gpu:
 			fmt.Fprintf(os.Stderr, "ghromex: renderer=accelerated(GPU, driver=%s)\n", driver)
-		} else {
-			fmt.Fprintf(os.Stderr, "ghromex: renderer=software (driver=%s)\n", driver)
+		case softwareOnly:
+			// 强制软件与"GPU 不可用已回退"是两回事，排查方向不同：前者是
+			// 配置（把开关去掉即可），后者是环境（换驱动/显卡）。
+			fmt.Fprintf(os.Stderr,
+				"ghromex: renderer=software (driver=%s; 强制软件：GHROMEX_SOFTWARE/dummy)\n", driver)
+		default:
+			fmt.Fprintf(os.Stderr,
+				"ghromex: renderer=software (driver=%s; GPU 不可用，已回退)\n", driver)
 		}
 	}
 	// 渲染器的绘制混合模式的**全局不变量是 BLEND**：贴图拷贝（精灵、文字的
