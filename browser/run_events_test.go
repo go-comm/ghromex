@@ -182,6 +182,12 @@ func TestRunConsumesInjectedPaste(t *testing.T) {
 
 	skipIfClipboardUnavailable(t)
 	clipboard.SetText("pasted text")
+	// 剪贴板是全局独占资源：本进程里别的用例窗口还开着时，写入可能失败
+	// （写不进去就用例读到的还是上一次的内容）。写完读回来核对，读不到就
+	// 跳过——否则会把「剪贴板写不进去」误报成「粘贴链路断了」。
+	if clipboard.Text() != "pasted text" {
+		t.Skip("系统剪贴板写入失败（被其它窗口占用），跳过粘贴用例")
+	}
 
 	const src = `<!doctype html><html><head><style>` +
 		`body{margin:0}` +
