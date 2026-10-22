@@ -84,7 +84,8 @@ func resolveStylesTreeIn(doc HTMLDocument, e HTMLElement, base *htmlElement,
 		}
 	}
 	applyCands(filterByImportant(uaCands, false))
-	applyInputTypeDefaults(comp, base) // input 按 type 的 UA 校正（作者 CSS 可覆盖）
+	applyInputTypeDefaults(comp, base)        // input 按 type 的 UA 校正（作者 CSS 可覆盖）
+	applyInteractionDefaults(comp, base, doc) // 悬停/按下的 UA 默认反馈（作者 CSS 可覆盖）
 	applyCands(filterByImportant(authorCands, false))
 	applyCands(filterByImportant(inlineCands, false))
 	applyCands(filterByImportant(uaCands, true))

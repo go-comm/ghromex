@@ -65,6 +65,12 @@
     （同页 h2 墨量比 1.01）；灰度 AA 无 ClearType 子像素，剩余差异是字形光栅化本身
   - radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate 态
   - 空块自折叠未实现（父-子穿越 margin 折叠已实现）
+
+  有意分歧（非缺失）：
+  - UA 默认的悬停/按下反馈：Chrome 的 UA 样式表没有 hover 规则（浏览器里按钮
+    悬停不变色），引擎作为桌面 UI 框架给了默认反馈——按钮型控件底色与边框一起
+    加深（悬停 #EFEFEF→#E3E3E3，按下→#D4D4D4），文本类控件只加深边框；
+    作者 CSS 仍可覆盖
 -->
 <html>
 <head>
@@ -156,6 +162,17 @@
 			<input type="submit" value="提交">
 			<input type="reset" value="重置">
 			<button type="button">普通按钮</button>
+		</p>
+
+		<h3>交互反馈（UA 默认）</h3>
+		<p>下列控件<b>零作者 CSS</b>：悬停/按下时的底色与边框变化全部来自引擎内置的
+		UA 默认样式表。Chrome 的 UA 样式表<b>没有</b> hover 规则（浏览器里按钮悬停
+		不变色），这是 Ghromex 的桌面 UI 取向——见 README「UA 默认样式表」。</p>
+		<p>
+			<button type="button">普通按钮</button>
+			<input type="submit" value="提交">
+			<input type="reset" value="重置">
+			<input type="text" value="文本框">
 		</p>
 	</form>
 

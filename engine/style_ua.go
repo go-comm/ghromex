@@ -151,3 +151,63 @@ func applyInputTypeDefaults(comp CSSStyleDeclaration, base *htmlElement) {
 		comp.SetPadding(NewRect(px(6), px(6), px(1), px(1)))
 	}
 }
+
+// UA 默认的交互反馈配色：悬停/按下时的底色与边框色。
+var (
+	uaHoverFace    = NewColor(0xE3, 0xE3, 0xE3, 255) // 悬停底色（比 buttonface 深一档）
+	uaActiveFace   = NewColor(0xD4, 0xD4, 0xD4, 255) // 按下底色
+	uaHoverBorder  = NewColor(0x6A, 0x6A, 0x6A, 255) // 悬停边框（比 #767676 深）
+	uaActiveBorder = NewColor(0x4F, 0x4F, 0x4F, 255) // 按下边框
+)
+
+// applyInteractionDefaults 给交互控件补上 UA 默认的悬停/按下反馈。
+//
+// Chrome 的 UA 样式表**没有** hover 规则（按钮悬停不变色），但 Ghromex
+// 定位是桌面 UI 框架：按钮与输入框悬停毫无反馈会显得「死了」。这里给一套
+// 克制的默认反馈——按钮型控件（<button> 与 <input type=submit/reset/button>
+// 同款）底色与边框一起加深，文本类控件只加深边框。
+//
+// 为什么放代码里而不是 UA 样式表：
+//   - 按钮型外观按 type 分支，而属性选择器对 type 的取值是大小写敏感的
+//     （<input type="SUBMIT"> 匹配不到 [type=submit]），代码分支按小写
+//     比较更稳；
+//   - 「哪些控件底色随悬停变、哪些只变边框」这类类型差异在代码里一处说
+//     完，不必在样式表里堆叠选择器。
+//
+// 调用时机在 UA 规则之后、作者规则之前：作者 CSS 仍可覆盖（作者来源优先
+// 于 UA 来源，与 CSS 的级联顺序一致）。
+func applyInteractionDefaults(comp CSSStyleDeclaration, base *htmlElement, doc HTMLDocument) {
+	if comp == nil || base == nil {
+		return
+	}
+	hovered := matchHoverState(doc, base)
+	active := matchActiveState(doc, base)
+	if !hovered && !active {
+		return
+	}
+	face, border := uaHoverFace, uaHoverBorder
+	if active {
+		face, border = uaActiveFace, uaActiveBorder
+	}
+	// buttonFace：底色随交互态变（按钮型控件）；其余控件只变边框。
+	buttonFace := false
+	switch strings.ToLower(base.tagName) {
+	case "button":
+		buttonFace = true
+	case "input":
+		switch strings.ToLower(base.GetAttribute("type")) {
+		case "submit", "reset", "button":
+			buttonFace = true
+		case "radio", "checkbox":
+			return // 勾选控件不参与悬停反馈（Chrome 也不变）
+		}
+	case "select", "textarea":
+		// 只变边框
+	default:
+		return
+	}
+	if buttonFace {
+		comp.SetBackgroundColor(face)
+	}
+	comp.SetBorderColor(border)
+}

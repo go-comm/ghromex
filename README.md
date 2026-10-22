@@ -253,6 +253,13 @@ dt **不加粗**（Chrome UA 实测计算权重 400；HTML4 的 UA 才加粗 dt�
 dd 缩进 40px、ul/ol 缩进 40px、blockquote/pre/figure 外边距、
 hr 边框、form/input/select/textarea/button 的尺寸与外观（多行控件的基线按
 CSS 2.1 §10.8.1 取底外边距边——Chrome 的 textarea 计算 overflow 非 visible）；
+**交互反馈（悬停/按下）**：按钮型控件（`<button>` 与 `<input type=submit/reset/button>`
+同款）底色与边框一起加深（悬停 `#EFEFEF`→`#E3E3E3`、按下→`#D4D4D4`，边框
+`#767676`→`#6A6A6A`/`#4F4F4F`），文本类控件（text/password/select/textarea）
+只加深边框，勾选控件（radio/checkbox）不参与——**这是与 Chrome UA 样式表的
+有意分歧**：Chrome 没有 hover 规则（浏览器里按钮悬停不变色），但作为桌面 UI
+框架，按钮悬停毫无反馈会显得「死了」。作者 CSS 仍可覆盖（作者来源优先于 UA
+来源，与 CSS 级联一致）；
 表格/列表标记等仍是近似模型，见「已知限制」；
 字体默认语义对齐 Chrome（Windows）并做 UI 取向调整：初始字号 16px；
 standard（未指定 family）默认 sans-serif → Arial（区别于 Chrome 的 Times，更贴桌面 UI）；
