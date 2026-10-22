@@ -26,6 +26,8 @@ const (
 	EventWindowExposed
 	// EventMouseMotion 是鼠标移动（X/Y 为当前位置）。
 	EventMouseMotion
+	// EventMouseLeave 是鼠标离开窗口：上层据此清掉悬停态（:hover）。
+	EventMouseLeave
 	// EventMouseButtonDown 是鼠标按下（Button 为按键号，X/Y 为位置）。
 	EventMouseButtonDown
 	// EventMouseButtonUp 是鼠标抬起。

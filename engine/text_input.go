@@ -68,6 +68,27 @@ func displayValue(b *htmlElement) string {
 	return strings.Repeat("●", len([]rune(v)))
 }
 
+// focusableElement 判断元素是否可聚焦：可编辑输入（input/textarea）、
+// button、select、带 href 的链接，以及带 tabindex 的元素。
+//
+// 聚焦与「可编辑」是两件事：按钮/链接有焦点（:focus 样式要生效），
+// 但没有光标与选区——光标那套状态仍只挂在可编辑输入上。
+func focusableElement(e HTMLElement) bool {
+	if e == nil {
+		return false
+	}
+	if editableInput(e) {
+		return true
+	}
+	switch strings.ToLower(e.TagName()) {
+	case "button", "select":
+		return true
+	case "a":
+		return e.GetAttribute("href") != ""
+	}
+	return e.GetAttribute("tabindex") != ""
+}
+
 // FocusedElement 返回文档当前聚焦元素，无则 nil。
 func FocusedElement(doc HTMLDocument) HTMLElement {
 	if d, ok := doc.(*htmlDocument); ok {
@@ -76,11 +97,11 @@ func FocusedElement(doc HTMLDocument) HTMLElement {
 	return nil
 }
 
-// SetFocusedElement 设置聚焦元素；非可编辑输入等效清除（nil）。
+// SetFocusedElement 设置聚焦元素；不可聚焦的元素等效清除（nil）。
 // 首次聚焦某控件时光标移到值末尾（与浏览器点选落位一致；精确落点由
 // 点击坐标修正）；再次聚焦保留该控件原有的光标与选区。
 // 焦点变化触发文档变更通知——聚焦框/光标重绘与文本变化走同一条
-// changed→重排重绘链路。
+// changed→重排重绘链路；:focus 样式也因此更新。
 //
 // 失焦不丢弃编辑状态：选区与光标原样留在控件上，只是停止绘制（渲染
 // 路径按 focused 决定是否画选区）。页内菜单（记事本的「复制/剪切/
@@ -91,12 +112,13 @@ func SetFocusedElement(doc HTMLDocument, el HTMLElement) {
 	if !ok {
 		return
 	}
-	if el != nil && !editableInput(el) {
+	if el != nil && !focusableElement(el) {
 		el = nil
 	}
-	if d.focus != el {
+	if !sameElement(d.focus, el) {
 		d.focus = el
-		if el != nil {
+		// 光标与选区只挂在可编辑输入上（按钮/链接只有「有焦点」这一态）。
+		if el != nil && editableInput(el) {
 			if b := inner(el); b != nil {
 				if !b.caretInit {
 					// 首次聚焦：光标落到值末尾（精确落点由点击坐标修正）。
@@ -172,7 +194,9 @@ func OnDocumentTextInput(doc HTMLDocument, s string) bool {
 		return false
 	}
 	b := inner(f)
-	if b == nil {
+	if b == nil || !editableInput(f) {
+		// 焦点在按钮/链接等非编辑元素上：没有光标可插，文本不消费
+		//（浏览器同语义：按钮聚焦时打字不会改按钮的 value）。
 		return false
 	}
 	s = stripControlChars(s)
@@ -202,7 +226,8 @@ func OnDocumentPaste(doc HTMLDocument, text string) bool {
 		return false
 	}
 	b := inner(f)
-	if b == nil {
+	if b == nil || !editableInput(f) {
+		// 焦点不在可编辑元素上：无处可粘（按钮的 value 不该被粘贴改写）。
 		return false
 	}
 	if !strings.EqualFold(b.tagName, "textarea") {
@@ -369,10 +394,16 @@ func OnDocumentKeyDownMods(doc HTMLDocument, key int, mods uint16) bool {
 	if mods&ModCtrl != 0 {
 		switch key {
 		case 'a', 'A':
+			if !editableInput(f) {
+				return false
+			}
 			n := len([]rune(b.GetAttribute("value")))
 			setSelection(doc, b, 0, n)
 			return true
 		case 'c', 'C':
+			if !editableInput(f) {
+				return false
+			}
 			_, _, ok := selectionRange(b)
 			return ok
 		}
@@ -382,6 +413,11 @@ func OnDocumentKeyDownMods(doc HTMLDocument, key int, mods uint16) bool {
 	// 实现，按词会被降级成按字符；此处让 Ctrl+组合沿用无修饰键的折叠
 	// 行为，至少不产生「按词」的错觉。
 	if mods&ModShift != 0 && mods&ModCtrl == 0 {
+		if !editableInput(f) {
+			// 焦点不在可编辑元素上：没有选区可扩（按钮聚焦时按 Shift+方向键
+			// 不该改出选区，更不该触发变更通知）。
+			return false
+		}
 		if onShiftSelectKey(doc, b, key) {
 			return true
 		}
@@ -430,12 +466,32 @@ func onShiftSelectKey(doc HTMLDocument, b *htmlElement, key int) bool {
 }
 
 func onDocumentKeyDown(doc HTMLDocument, key int) bool {
+	// Tab 循环与「焦点是否可编辑」无关：按钮/链接持有焦点时按 Tab，
+	// 同样要在可编辑输入之间移动。
+	if key == KeyTab {
+		f := FocusedElement(doc)
+		list := focusTargets(doc)
+		if len(list) == 0 {
+			return false
+		}
+		next := list[0]
+		for i, el := range list {
+			if sameElement(el, f) && i+1 < len(list) {
+				next = list[i+1]
+				break
+			}
+		}
+		SetFocusedElement(doc, next)
+		return true
+	}
 	f := FocusedElement(doc)
 	if f == nil {
 		return false
 	}
 	b := inner(f)
-	if b == nil {
+	if b == nil || !editableInput(f) {
+		// 焦点在按钮/链接等非编辑元素上：没有光标与选区，编辑类按键
+		// 不消费（浏览器同语义——按钮聚焦时按方向键不会改按钮的 value）。
 		return false
 	}
 	r := []rune(b.GetAttribute("value"))
@@ -520,20 +576,6 @@ func onDocumentKeyDown(doc HTMLDocument, key int) bool {
 			setCaret(doc, b, caret)
 		}
 		return moveCaretVertical(doc, b, 1)
-	case KeyTab:
-		list := focusTargets(doc)
-		if len(list) == 0 {
-			return false
-		}
-		next := list[0]
-		for i, el := range list {
-			if el == f && i+1 < len(list) {
-				next = list[i+1]
-				break
-			}
-		}
-		SetFocusedElement(doc, next)
-		return true
 	}
 	return false
 }
@@ -659,19 +701,20 @@ func setControlCaretFromPoint(doc HTMLDocument, el HTMLElement, x, y int) {
 	setCaret(doc, b, controlCaretFromPoint(doc, b, x, y))
 }
 
-// updateClickFocus 在点击派发后更新焦点：命中可编辑输入（或其子盒）
-// 则聚焦并按点击坐标落光标，点击别处清除焦点——与浏览器
-// 「点空白失焦」一致。
+// updateClickFocus 在点击派发后更新焦点：命中可聚焦元素（或其子盒）
+// 则聚焦，点击别处清除焦点——与浏览器「点空白失焦」一致。
+//
+// 命中的是可编辑输入时，按点击坐标落光标；按钮/链接只取焦点，没有光标。
 func updateClickFocus(doc HTMLDocument, target HTMLElement, x, y int) {
 	var next HTMLElement
 	for e := target; e != nil; e = e.ParentElement() {
-		if editableInput(e) {
+		if focusableElement(e) {
 			next = e
 			break
 		}
 	}
 	SetFocusedElement(doc, next)
-	if next != nil {
+	if next != nil && editableInput(next) {
 		setControlCaretFromPoint(doc, next, x, y)
 	}
 }

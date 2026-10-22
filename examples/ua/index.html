@@ -33,6 +33,9 @@
     一半加在之下，行盒高度严格等于声明值；倍数与百分比按**元素自身**字号
     解析（父级 1.5 + 子级 24px → 43px）；vertical-align 的 baseline/middle/
     super/sub/top/bottom/text-top/text-bottom 与长度、百分比偏移
+  - 伪类：:hover（沿父链继承）、:focus、:active、:checked、:disabled/:enabled、
+    :first-child/:last-child/:only-child、:root、:empty；状态变化走
+    「变更通知 → 重排重绘 → 级联重算」
   - radio/checkbox 点击切换选中（强调色 + 白色对勾/圆环实心核，按 Chrome 逐像素对齐）
   - 中英混排的整行宽度与换行点一致（分段 fallback 与浏览器同源）
   - 表格 `border-collapse: collapse`：列宽/行高/外盒逐项对齐（见下方「表格」条）
@@ -111,6 +114,16 @@
 		}
 		.va-top { vertical-align: top; }
 		.va-bottom { vertical-align: bottom; }
+
+		/* 伪类：悬停/按下/焦点/选中态的样式变化 */
+		.ps-box {
+			display: inline-block; width: 140px; height: 44px; line-height: 44px;
+			text-align: center; background: #F1F5F9; border: 1px solid #CBD5E1;
+		}
+		.ps-box:hover { background: #FEF9C3; border-color: #EAB308; }
+		.ps-box:active { background: #FECACA; border-color: #DC2626; }
+		.ps-box:focus { outline: none; border-color: #2563EB; background: #DBEAFE; }
+		#cb:checked { border-color: #16A34A; }
 	</style>
 </head>
 <body>
@@ -184,6 +197,16 @@
 		<span class="va-box va-top">top</span>
 		<span class="va-box va-bottom">bottom</span>
 	</div>
+
+	<h3>伪类</h3>
+	<p>把鼠标移上去 / 按下 / 点一下（获得焦点），看背景与边框变色：</p>
+	<div>
+		<span class="ps-box" tabindex="0">hover / active / focus</span>
+		<span class="ps-box" tabindex="0">第二个</span>
+	</div>
+	<p>
+		<label><input id="cb" type="checkbox"> :checked（勾选后样式变化）</label>
+	</p>
 
 	<h3>行内语义</h3>
 	<p>

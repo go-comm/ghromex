@@ -61,7 +61,12 @@ type htmlDocument struct {
 	sheet    *Stylesheet
 	head     HTMLHeadElement
 	body     HTMLBodyElement
-	focus    HTMLElement // 当前聚焦的可编辑输入（v1 仅 input/textarea），nil 无焦点
+	focus    HTMLElement // 当前聚焦的元素（可编辑输入、按钮、链接等），nil 无焦点
+	// hover 是鼠标当前悬停的元素（:hover 规则的依据），active 是鼠标
+	// 按下中的元素（:active 规则）。两者变化都会改样式，故与 focus 一样
+	// 走 markChanged → 重排重绘 → 级联重算。
+	hover   HTMLElement
+	active  HTMLElement
 	// dragInput 是鼠标按下时命中的可编辑控件。拖选期间活动端可移出控件
 	// 甚至窗口，仍应把坐标反推为同一控件的光标位置（浏览器同语义）；
 	// 因此不能在每次 MouseMotion 时重新命中测试。鼠标抬起即清空。

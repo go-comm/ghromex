@@ -30,6 +30,14 @@ func resolveStylesTree(e HTMLElement, parentBase *htmlElement, author *Styleshee
 	if base == nil {
 		return
 	}
+	// 文档沿树传下去：伪类匹配要查动态状态（hover/focus/active）。
+	resolveStylesTreeIn(docOf(e), e, base, parentBase, author)
+}
+
+// resolveStylesTreeIn 是 resolveStylesTree 的递归实现；doc 沿树传下去，
+// 供选择器匹配查询伪类状态（hover/focus/active 在文档上）。
+func resolveStylesTreeIn(doc HTMLDocument, e HTMLElement, base *htmlElement,
+	parentBase *htmlElement, author *Stylesheet) {
 	comp := newStyle()
 
 	// 继承性默认值
@@ -63,8 +71,8 @@ func resolveStylesTree(e HTMLElement, parentBase *htmlElement, author *Styleshee
 	//   重要声明：UA → 作者 → 内联（重要声明整体压过普通声明）
 	// 分段应用而非统一排序：UA type 校正（如 input[type=radio] 的 13×13 外形）
 	// 必须夹在 UA 通用规则与作者规则之间——作者 CSS 才能覆盖它。
-	uaCands := collectMatchingDecls(userAgentStylesheet(), e, originUA)
-	authorCands := collectMatchingDecls(author, e, originAuthor)
+	uaCands := collectMatchingDecls(doc, userAgentStylesheet(), e, originUA)
+	authorCands := collectMatchingDecls(doc, author, e, originAuthor)
 	inlineCands := make([]declCandidate, 0, len(base.inline))
 	for i, d := range base.inline {
 		inlineCands = append(inlineCands, declCandidate{decl: d, important: d.important,
@@ -121,7 +129,11 @@ func resolveStylesTree(e HTMLElement, parentBase *htmlElement, author *Styleshee
 	base.computed = comp
 
 	for _, child := range base.children {
-		resolveStylesTree(child, base, author)
+		cb := inner(child)
+		if cb == nil {
+			continue
+		}
+		resolveStylesTreeIn(doc, child, cb, base, author)
 	}
 }
 
@@ -147,8 +159,8 @@ func filterByImportant(cands []declCandidate, important bool) []declCandidate {
 }
 
 // collectMatchingDecls 收集样式表中命中该元素的规则声明，按特异度与源码
-// 顺序排好（同来源内）。
-func collectMatchingDecls(sheet *Stylesheet, e HTMLElement, origin int) []declCandidate {
+// 顺序排好（同来源内）。doc 供伪类匹配查询动态状态。
+func collectMatchingDecls(doc HTMLDocument, sheet *Stylesheet, e HTMLElement, origin int) []declCandidate {
 	if sheet == nil {
 		return nil
 	}
@@ -159,7 +171,7 @@ func collectMatchingDecls(sheet *Stylesheet, e HTMLElement, origin int) []declCa
 	var matched []matchedRule
 	for _, r := range sheet.rules {
 		for _, sel := range r.sels {
-			if matchSelectorChain(sel, e) {
+			if matchSelectorChain(doc, sel, e) {
 				matched = append(matched, matchedRule{r: r, spec: sel.Specificity()})
 				break
 			}

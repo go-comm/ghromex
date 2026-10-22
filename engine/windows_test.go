@@ -94,7 +94,16 @@ func TestClickDispatch(t *testing.T) {
 		t.Fatalf("status = %q", status.InnerText())
 	}
 
-	// 空白处不触发
+	// 空白处不触发：点击空白会清掉焦点（焦点是文档状态，变化要走变更
+	// 通知——:focus 样式随之更新），但不改内容；焦点已为空时再点一次，
+	// 不应产生任何变更通知。
+	engine.OnDocumentClick(doc, 390, 290)
+	if engine.FocusedElement(doc) != nil {
+		t.Fatal("点击空白应清掉焦点")
+	}
+	if status.InnerText() != "clicked" {
+		t.Fatalf("空白点击改了内容: %q", status.InnerText())
+	}
 	before := doc.ChangeCount()
 	engine.OnDocumentClick(doc, 390, 290)
 	if doc.ChangeCount() != before {

@@ -53,7 +53,8 @@ func SelectedText(doc HTMLDocument) (string, bool) {
 		return "", false
 	}
 	b := inner(f)
-	if b == nil {
+	if b == nil || !editableInput(f) {
+		// 焦点不在可编辑元素上：没有选区可言。
 		return "", false
 	}
 	lo, hi, ok := selectionRange(b)
@@ -88,6 +89,9 @@ func OnDocumentMouseDown(doc HTMLDocument, x, y int) bool {
 		return false
 	}
 	target := ElementAt(doc, x, y)
+	// 按下态（:active）：命中什么就按在什么上（命中空白则无按下态）。
+	// 状态变化要改样式，故走 SetActiveElement 的变更通知。
+	SetActiveElement(doc, target)
 	var next HTMLElement
 	for e := target; e != nil; e = e.ParentElement() {
 		if editableInput(e) {
@@ -125,10 +129,13 @@ func OnDocumentMouseDrag(doc HTMLDocument, x, y int) bool {
 
 // OnDocumentMouseUp 结束拖选。选区本身保留（浏览器同语义：松开鼠标后
 // 高亮仍在，直到再次点击或按键）。
+//
+// 同时清掉按下态（:active）——鼠标已抬起。
 func OnDocumentMouseUp(doc HTMLDocument) {
 	if d, ok := doc.(*htmlDocument); ok {
 		d.dragInput = nil
 	}
+	SetActiveElement(doc, nil)
 }
 
 // textPrefixWidth 返回 runes 前 n 个字符的像素宽（n 已由调用方夹紧）。

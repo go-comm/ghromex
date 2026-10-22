@@ -210,6 +210,9 @@ func (win *Window) toPublicEvent(ev event) Event {
 			return Event{Kind: EventWindowResized, Width: win.w, Height: win.h}
 		case windowEventExposed:
 			return Event{Kind: EventWindowExposed}
+		case windowEventLeave:
+			// 鼠标离开窗口：上层清掉悬停态（:hover 随之失效）。
+			return Event{Kind: EventMouseLeave}
 		}
 	case eventMouseMotion:
 		return Event{Kind: EventMouseMotion, X: int(ev.x), Y: int(ev.y)}
@@ -261,6 +264,9 @@ func (win *Window) InjectEvent(ev Event) {
 	case EventWindowExposed:
 		put32(0, eventWindow)
 		put32(12, uint32(windowEventExposed))
+	case EventMouseLeave:
+		put32(0, eventWindow)
+		put32(12, uint32(windowEventLeave))
 	case EventMouseMotion:
 		put32(0, eventMouseMotion)
 		put32(20, uint32(int32(ev.X)))

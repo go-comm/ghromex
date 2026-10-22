@@ -5,6 +5,7 @@
 //
 //	解析   html_parser.go / css_parser.go / selector.go
 //	级联   style_cascade.go（选择器匹配 + 特异度 + 继承）+ style_ua.go（UA 默认样式）
+//	       pseudo.go（伪类状态：hover/focus/active 与结构伪类）
 //	布局   measure.go（盒模型/行盒/换行/定位）+ line_box.go（line-height 的
 //	       Leading 分配与 vertical-align 的基线位移）+ margin_collapse.go +
 //	       table_layout.go
@@ -50,6 +51,17 @@
 // 可编辑输入（input text/password、textarea）共享一套编辑状态：光标 +
 // 选区锚点，单位是 value 的 rune 下标。失焦只停画、**不丢状态**（重新
 // 聚焦会恢复光标与选区），页内菜单（复制/剪切/粘贴）据此作用于编辑区。
+//
+// # 伪类状态
+//
+// :hover / :focus / :active 是**动态状态**，存在文档上（pseudo.go）：
+// 状态一变，样式就得重算，故走「变更通知 → 重排重绘 → 级联重算」这条
+// 与 DOM 变更同一条链路（markChanged）。悬停/按下/焦点都只在**变化时**
+// 通知——鼠标移动是最频繁的事件。
+//
+// 应用层若自建主循环（非 browser 门面），需自己把鼠标事件喂进来：
+// OnDocumentMouseMove（更新悬停）、OnDocumentMouseDown/Up（按下态）、
+// SetFocusedElement（焦点）。browser 门面已自动接好。
 //
 // # 后端可选扩展
 //

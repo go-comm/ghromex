@@ -589,11 +589,13 @@ func (element *htmlElement) QuerySelectorAll(query string) []HTMLElement {
 
 func (element *htmlElement) querySelectorAll(query string) []HTMLElement {
 	sel := ParseSelector(query)
+	// 伪类匹配要查动态状态（hover/focus/active），故带上所属文档。
+	doc := docOf(element.self)
 	var out []HTMLElement
 	var walk func(e HTMLElement)
 	walk = func(e HTMLElement) {
 		for _, child := range e.Children() {
-			if !sel.isEmpty() && matchSelectorChain(sel, child) {
+			if !sel.isEmpty() && matchSelectorChain(doc, sel, child) {
 				out = append(out, child)
 			}
 			walk(child)

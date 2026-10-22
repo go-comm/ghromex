@@ -161,7 +161,12 @@ func (win *Window) Run() error {
 			case sdl2.EventWindowClose:
 				running = false
 			case sdl2.EventUnknown:
-				// 不关心的事件（窗口移动、鼠标进入/离开等）：忽略。
+				// 不关心的事件（窗口移动、鼠标进入等）：忽略。
+			case sdl2.EventMouseLeave:
+				// 鼠标离开窗口：清掉悬停态（否则最后悬停的按钮一直高亮）。
+				if win.doc != nil {
+					engine.SetHoveredElement(win.doc, nil)
+				}
 			case sdl2.EventWindowResized:
 				if ev.Width > 0 && ev.Height > 0 {
 					// 后端在解码尺寸变化时已更新自己的视口尺寸，这里只需
@@ -282,9 +287,15 @@ func (win *Window) onMouseDown(ev sdl2.Event) {
 	}
 }
 
-// onMouseMove 拖动超过阈值才当作拖选（否则是普通移动）。
+// onMouseMove 更新悬停态；拖动超过阈值才当作拖选（否则是普通移动）。
 func (win *Window) onMouseMove(ev sdl2.Event) {
-	if !win.mouseDown || !win.selecting || win.doc == nil {
+	if win.doc == nil {
+		return
+	}
+	// 悬停态：无论是否在拖选都更新（:hover 样式要跟手）。悬停目标没变
+	// 时引擎不触发重排，移动事件因此不带来额外开销。
+	engine.OnDocumentMouseMove(win.doc, ev.X, ev.Y)
+	if !win.mouseDown || !win.selecting {
 		return
 	}
 	dx, dy := ev.X-win.downX, ev.Y-win.downY

@@ -193,6 +193,10 @@ const (
 	windowEventClose       = 0x0E
 	windowEventResized     = 0x05
 	windowEventSizeChanged = 0x06
+	// windowEventLeave：鼠标离开窗口（LEAVE=0x0B，见上方的 SDL 取值注释）。
+	// 上层据此清掉悬停态——否则鼠标移出窗口后，最后悬停的按钮会一直
+	// 保持高亮（Chrome 离开即取消 :hover）。
+	windowEventLeave = 0x0B
 
 	mouseButtonLeft = 1
 
