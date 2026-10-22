@@ -223,7 +223,12 @@ type Graphics struct {
 	texPixels int
 	// sprites 是位图精灵的纹理缓存（键是引擎侧缓存的精灵指针）。精灵
 	// 像素只随「半径+颜色」变，引擎侧已缓存，这里按指针复用纹理即可。
-	sprites map[*core.Sprite]uintptr
+	//
+	// 精灵纹理同样要有上限：键里含颜色，页面逐帧改色（动画）会不断产生
+	// 新精灵，不淘汰就是显存泄漏。按「条数 + 像素」双上限淘汰最近最少使用
+	// 的纹理（与文本纹理缓存同策略）。
+	sprites      map[*core.Sprite]*spriteTex
+	spritePixels int // 当前精灵纹理占用的像素总数
 	// spriteUploads 统计纹理上传次数（测试用）：精灵像素不变，纹理只该
 	// 上传一次——每次绘制都上传会把帧预算吃光（实测 300 次/帧 ≈ 2ms）。
 	spriteUploads int
@@ -364,7 +369,7 @@ func NewGraphics(renderer uintptr, fontPath string) *Graphics {
 		cjkFont:      CJKFontPath(),
 		faces:        make(map[faceKey]*fontFace),
 		textures:     make(map[texKey]texInfo),
-		sprites:      make(map[*core.Sprite]uintptr),
+		sprites:      make(map[*core.Sprite]*spriteTex),
 		measures:     make(map[measureKey]measureVal),
 		familyPaths:  make(map[string]string),
 		reuseFaces:   hasTTFSetFontSize,
@@ -1011,9 +1016,9 @@ func (g *Graphics) DrawSprite(x, y int, s *core.Sprite) {
 	if s == nil || s.W <= 0 || s.H <= 0 || g.renderer == 0 || len(s.Pix) < s.W*s.H*4 {
 		return
 	}
-	tex, ok := g.sprites[s]
+	entry, ok := g.sprites[s]
 	if !ok {
-		tex = sdlCreateTexture(g.renderer, uintptr(pixelFormatRGBA32),
+		tex := sdlCreateTexture(g.renderer, uintptr(pixelFormatRGBA32),
 			uintptr(textureAccessStreaming), uintptr(s.W), uintptr(s.H))
 		if tex == 0 {
 			checkDraw("SDL_CreateTexture", 0)
@@ -1031,11 +1036,16 @@ func (g *Graphics) DrawSprite(x, y int, s *core.Sprite) {
 			checkDraw("SDL_UpdateTexture", 0)
 			return
 		}
-		g.sprites[s] = tex
+		entry = &spriteTex{tex: tex, w: s.W, h: s.H, lastUsed: g.nextTexClock()}
+		g.sprites[s] = entry
+		g.spritePixels += s.W * s.H
 		g.spriteUploads++
+		g.evictSpritesIfNeeded()
+	} else {
+		entry.lastUsed = g.nextTexClock()
 	}
 	dst := sdlRect{int32(x), int32(y), int32(s.W), int32(s.H)}
-	checkDraw("SDL_RenderCopy", sdlRenderCopy(g.renderer, tex, 0, uintptr(unsafe.Pointer(&dst))))
+	checkDraw("SDL_RenderCopy", sdlRenderCopy(g.renderer, entry.tex, 0, uintptr(unsafe.Pointer(&dst))))
 }
 
 // Clear 清屏。同时把裁剪栈清空并关闭 SDL 裁剪（SDL_RenderClear 本身无视
@@ -1123,11 +1133,12 @@ func (g *Graphics) CloseFonts() {
 	g.textures = make(map[texKey]texInfo)
 	g.texPixels = 0
 	for _, t := range g.sprites {
-		if t != 0 {
-			sdlDestroyTexture(t)
+		if t.tex != 0 {
+			sdlDestroyTexture(t.tex)
 		}
 	}
-	g.sprites = make(map[*core.Sprite]uintptr)
+	g.sprites = make(map[*core.Sprite]*spriteTex)
+	g.spritePixels = 0
 }
 
 // maxCachedTextures 是文本纹理缓存的条数上限，maxCachedTexPixels 是像素
@@ -1142,6 +1153,58 @@ const (
 	maxCachedTextures  = 4096
 	maxCachedTexPixels = 8 << 20 // 8M 像素 ≈ 32MB
 )
+
+// spriteTex 是精灵纹理的缓存项：纹理 + 尺寸 + 最近使用时刻。
+type spriteTex struct {
+	tex      uintptr
+	w, h     int
+	lastUsed uint64
+}
+
+// 精灵纹理缓存的上限：条数与像素数（像素数按 4 字节/像素估显存）。
+//
+// 精灵纹理比文本纹理小得多（一个圆角 r×r），但键里含颜色——页面逐帧改色
+// 会不断产生新精灵，不设上限就是显存泄漏。
+const (
+	maxCachedSprites      = 2048    // 条目上限
+	maxCachedSpritePixels = 2 << 20 // 像素上限（2M 像素 ≈ 8MB）
+)
+
+// evictSpritesIfNeeded 精灵纹理超出上限时按最近最少使用淘汰。
+//
+// 一次淘汰一批（降到 90%），摊平扫描成本：满页逐帧换色时每次新建纹理都
+// 扫全表，帧时间会被吃掉。
+func (g *Graphics) evictSpritesIfNeeded() {
+	if len(g.sprites) <= maxCachedSprites && g.spritePixels <= maxCachedSpritePixels {
+		return
+	}
+	targetItems := maxCachedSprites * 9 / 10
+	targetPixels := maxCachedSpritePixels * 9 / 10
+	for len(g.sprites) > targetItems || g.spritePixels > targetPixels {
+		oldKey, old, ok := g.lruSprite()
+		if !ok {
+			return
+		}
+		if old.tex != 0 {
+			sdlDestroyTexture(old.tex)
+		}
+		g.spritePixels -= old.w * old.h
+		delete(g.sprites, oldKey)
+	}
+}
+
+// lruSprite 找出最近最少使用的精灵纹理。
+func (g *Graphics) lruSprite() (*core.Sprite, *spriteTex, bool) {
+	var oldKey *core.Sprite
+	var old *spriteTex
+	found := false
+	for k, e := range g.sprites {
+		if !found || e.lastUsed < old.lastUsed {
+			oldKey, old, found = k, e, true
+		}
+	}
+	return oldKey, old, found
+}
 
 // evictTexturesIfNeeded 超出缓存上限（条数或像素）时淘汰最近最少使用的纹理。
 func (g *Graphics) evictTexturesIfNeeded() {

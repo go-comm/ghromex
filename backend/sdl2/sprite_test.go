@@ -105,3 +105,35 @@ func TestSpriteTextureUploadedOnce(t *testing.T) {
 		t.Errorf("精灵纹理缓存条目 = %d, want 1", len(g.sprites))
 	}
 }
+
+// 精灵纹理缓存必须有上限。
+//
+// 精灵的键里含颜色：页面若逐帧改圆角盒的颜色（动画），会不断产生新精灵，
+// 纹理缓存不淘汰就是显存泄漏。
+func TestSpriteTextureCacheIsBounded(t *testing.T) {
+	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
+	defer os.Unsetenv("SDL_VIDEO_DRIVER")
+
+	win, err := NewWindow(64, 64, "sprite-cache-limit")
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	defer win.Close()
+	g := win.g
+	g.Clear(255, 255, 255, 255)
+
+	pix := make([]byte, 4*4*4)
+	for i := range pix {
+		pix[i] = uint8(i)
+	}
+	// 每次都是新精灵（模拟逐帧换色）：缓存必须自己淘汰。
+	for i := 0; i < maxCachedSprites+100; i++ {
+		g.DrawSprite(0, 0, &core.Sprite{W: 4, H: 4, Pix: pix})
+	}
+	if len(g.sprites) > maxCachedSprites {
+		t.Errorf("精灵纹理缓存条目 = %d, want <= %d", len(g.sprites), maxCachedSprites)
+	}
+	if g.spritePixels > maxCachedSpritePixels {
+		t.Errorf("精灵纹理像素 = %d, want <= %d", g.spritePixels, maxCachedSpritePixels)
+	}
+}

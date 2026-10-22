@@ -809,32 +809,106 @@ func cornerCov(r, u, v int) float64 {
 // 圆角角标精灵
 // ---------------------------------------------------------------------------
 
-// spriteKey 是角标精灵的缓存键：半径 + 颜色 + 镜像方向（mask 标记的是
-// "圆角之外"的补盖精灵，与普通角标图案不同）。
+// spriteKey 是角标精灵的缓存键。
+//
+// 精灵只与（半径、颜色、镜像方向）有关，与盒的大小无关——同一页面上大量
+// 同样式的圆角卡片共用同一份像素。
+//
+// 边框环的精灵多几个维度：内圆角半径 ir、四侧边框宽 (li,rt,tp,bt)、内盒
+// 尺寸 (iw,ih)、角序号 corner。环的内盒相对外盒是偏移的，四侧边框宽不同
+// → 四角并不互为镜像，故按角分别缓存（ring 为真时这些字段才有效）。
 type spriteKey struct {
 	r              int
-	cr, cg, cb, ca uint8
-	fx, fy         bool
-	mask           bool
-}
-
-// spriteCache 缓存角标精灵。精灵只与（半径,颜色,镜像）有关，与盒的大小
-// 无关——同一页面上大量圆角卡片共用同一份像素。
-var spriteCache = map[spriteKey]*Sprite{}
-
-// ringSpriteKey 是圆角边框环角标精灵的缓存键。环的图案由外圆角、内圆角
-// 与四侧边框宽决定（内盒相对外盒偏移，四侧宽不同 → 环的左右上下并不
-// 互为镜像，故按角分别缓存）。
-type ringSpriteKey struct {
-	r, ir          int
+	ir             int
 	li, rt, tp, bt int
 	iw, ih         int
 	cr, cg, cb, ca uint8
-	corner         int // 0=左上 1=右上 2=左下 3=右下
+	fx, fy         bool
+	mask           bool // 补盖精灵（圆角之外的部分），与普通角标图案不同
+	ring           bool // 边框环角标
+	corner         int  // 0=左上 1=右上 2=左下 3=右下（ring 时有效）
 }
 
-// ringSpriteCache 缓存圆角边框环的角标精灵。
-var ringSpriteCache = map[ringSpriteKey]*Sprite{}
+// spriteEntry 是缓存里的一条记录：精灵 + 像素字节数 + 最近使用时刻。
+type spriteEntry struct {
+	sprite   *Sprite
+	bytes    int
+	lastUsed uint64
+}
+
+// 精灵缓存的上限：条目数与像素字节数。
+//
+// 键里含颜色——页面若逐帧改圆角盒的颜色（动画），会不断产生新键；无上限
+// 的缓存就是内存泄漏（旧精灵的像素一直没人回收）。上限与后端文本纹理
+// 缓存同思路：超出按最近最少使用淘汰。
+const (
+	maxSpriteItems = 4096    // 条目上限
+	maxSpriteBytes = 4 << 20 // 像素字节上限（4MB）
+)
+
+// spriteCache 缓存圆角角标精灵（普通角标、补盖角标、边框环角标共用一张表，
+// 用键里的 mask/ring 区分）。
+var (
+	spriteCache      = map[spriteKey]*spriteEntry{}
+	spriteCacheClock uint64 // 单调时钟：记录最近使用时刻
+	spriteCacheBytes int    // 当前缓存的像素字节总数
+)
+
+// lookupSprite 取键对应的精灵；命中则刷新最近使用时刻。
+func lookupSprite(key spriteKey) (*Sprite, bool) {
+	e, ok := spriteCache[key]
+	if !ok {
+		return nil, false
+	}
+	spriteCacheClock++
+	e.lastUsed = spriteCacheClock
+	return e.sprite, true
+}
+
+// storeSprite 把精灵存入缓存并按需淘汰。
+func storeSprite(key spriteKey, s *Sprite) {
+	spriteCacheClock++
+	spriteCache[key] = &spriteEntry{sprite: s, bytes: len(s.Pix), lastUsed: spriteCacheClock}
+	spriteCacheBytes += len(s.Pix)
+	evictSprites()
+}
+
+// evictSprites 超出上限时按最近最少使用淘汰。
+//
+// 淘汰必须是 LRU 而非 FIFO：FIFO 按插入顺序淘汰，会把页面上复用最多的精灵
+// 先淘汰掉——工作集略大于上限时每帧都要重建精灵（重建 + 重新上传纹理），
+// 缓存颠簸。
+//
+// 一次淘汰一批（降到 90%），摊平扫描成本：满页逐帧换色时每次 miss 都扫
+// 全表，帧时间会被吃掉。
+func evictSprites() {
+	if len(spriteCache) <= maxSpriteItems && spriteCacheBytes <= maxSpriteBytes {
+		return
+	}
+	targetItems := maxSpriteItems * 9 / 10
+	targetBytes := maxSpriteBytes * 9 / 10
+	for len(spriteCache) > targetItems || spriteCacheBytes > targetBytes {
+		oldKey, old, ok := lruSprite()
+		if !ok {
+			return
+		}
+		delete(spriteCache, oldKey)
+		spriteCacheBytes -= old.bytes
+	}
+}
+
+// lruSprite 找出最近最少使用的精灵条目。
+func lruSprite() (spriteKey, *spriteEntry, bool) {
+	var oldKey spriteKey
+	var old *spriteEntry
+	found := false
+	for k, e := range spriteCache {
+		if !found || e.lastUsed < old.lastUsed {
+			oldKey, old, found = k, e, true
+		}
+	}
+	return oldKey, old, found
+}
 
 // cornerMaskSprite 返回"圆角形状之外"的角标精灵（覆盖率取反），颜色是底色。
 //
@@ -844,7 +918,7 @@ var ringSpriteCache = map[ringSpriteKey]*Sprite{}
 func cornerMaskSprite(r int, c Color, fx, fy bool) *Sprite {
 	cr, cg, cb, ca := c.RGBA()
 	key := spriteKey{r: r, cr: cr, cg: cg, cb: cb, ca: ca, fx: fx, fy: fy, mask: true}
-	if s, ok := spriteCache[key]; ok {
+	if s, ok := lookupSprite(key); ok {
 		return s
 	}
 	pix := make([]byte, r*r*4)
@@ -873,7 +947,7 @@ func cornerMaskSprite(r int, c Color, fx, fy bool) *Sprite {
 		}
 	}
 	s := &Sprite{W: r, H: r, Pix: pix}
-	spriteCache[key] = s
+	storeSprite(key, s)
 	return s
 }
 
@@ -883,9 +957,9 @@ func cornerMaskSprite(r int, c Color, fx, fy bool) *Sprite {
 // 同口径），RGB 是颜色本身——blit 后的混合结果与逐像素画完全一致。
 func ringCornerSprite(r, ir, li, rt, tp, bt, iw, ih int, c Color, corner int) *Sprite {
 	cr, cg, cb, ca := c.RGBA()
-	key := ringSpriteKey{r: r, ir: ir, li: li, rt: rt, tp: tp, bt: bt,
-		iw: iw, ih: ih, cr: cr, cg: cg, cb: cb, ca: ca, corner: corner}
-	if s, ok := ringSpriteCache[key]; ok {
+	key := spriteKey{r: r, ir: ir, li: li, rt: rt, tp: tp, bt: bt,
+		iw: iw, ih: ih, cr: cr, cg: cg, cb: cb, ca: ca, ring: true, corner: corner}
+	if s, ok := lookupSprite(key); ok {
 		return s
 	}
 	pix := make([]byte, r*r*4)
@@ -907,7 +981,7 @@ func ringCornerSprite(r, ir, li, rt, tp, bt, iw, ih int, c Color, corner int) *S
 		}
 	}
 	s := &Sprite{W: r, H: r, Pix: pix}
-	ringSpriteCache[key] = s
+	storeSprite(key, s)
 	return s
 }
 
@@ -984,7 +1058,7 @@ func ringInnerLocal(r, li, rt, tp, bt, corner, u, v int) (int, int) {
 func cornerSprite(r int, c Color, fx, fy bool) *Sprite {
 	cr, cg, cb, ca := c.RGBA()
 	key := spriteKey{r: r, cr: cr, cg: cg, cb: cb, ca: ca, fx: fx, fy: fy}
-	if s, ok := spriteCache[key]; ok {
+	if s, ok := lookupSprite(key); ok {
 		return s
 	}
 	pix := make([]byte, r*r*4)
@@ -1010,7 +1084,7 @@ func cornerSprite(r int, c Color, fx, fy bool) *Sprite {
 		}
 	}
 	s := &Sprite{W: r, H: r, Pix: pix}
-	spriteCache[key] = s
+	storeSprite(key, s)
 	return s
 }
 
