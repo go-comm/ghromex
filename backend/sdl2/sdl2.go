@@ -60,6 +60,7 @@ var (
 	sdlSetRenderDrawColor     nativeCall
 	sdlRenderClear            nativeCall
 	sdlRenderPresent          nativeCall
+	sdlRenderSetVSync         nativeCall
 	sdlRenderFillRect         nativeCall
 	// SDL_RenderSetClipRect（SDL_render.h 2.0.0 起）：rect 传 NULL 关闭
 	// 裁剪，返回 0 成功/负值失败；每层裁剪由 Graphics 维护交集栈后下推。
@@ -251,6 +252,10 @@ func doLoad() error {
 	sdlSetRenderDrawColor = bindSdl("SDL_SetRenderDrawColor")
 	sdlRenderClear = bindSdl("SDL_RenderClear")
 	sdlRenderPresent = bindSdl("SDL_RenderPresent")
+	// SDL_RenderSetVSync 是**可选**符号：只有基准工具（拆开「等 vsync」
+	// 与「拷贝」）用它，SDL 版本偏老没有它时按「无 vsync」处理即可，
+	// 不该因此让整个库加载失败。
+	sdlRenderSetVSync = bindProcOpt(dllSDL, "SDL_RenderSetVSync")
 	sdlRenderFillRect = bindSdl("SDL_RenderFillRect")
 	sdlRenderSetClipRect = bindSdl("SDL_RenderSetClipRect")
 	sdlRenderCopy = bindSdl("SDL_RenderCopy")

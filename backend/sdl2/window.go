@@ -36,6 +36,12 @@ type Window struct {
 	// closed 记录窗口是否已关闭：Close 幂等（重复 SDL_Destroy* 是
 	// use-after-free），关闭后绘制一律拒绝。
 	closed bool
+
+	// rendererDesc 记录渲染路径的描述（供诊断/基准工具归因）：
+	// "accelerated(GPU, driver=direct3d11)" /
+	// "software (driver=software; 强制软件：GHROMEX_SOFTWARE/dummy)" 等。
+	// 建窗时算一次存下来，别处要显示时直接取（driver 名要现查，开销不小）。
+	rendererDesc string
 }
 
 // NewWindow 创建带渲染器的窗口。坐标体系 1:1（1 CSS px = 1 物理像素）。
@@ -112,23 +118,27 @@ func NewWindow(w, h int, title string) (*Window, error) {
 		runtime.UnlockOSThread()
 		return nil, fmt.Errorf("SDL_CreateRenderer: %s", lastError())
 	}
+	// 渲染路径的描述**总是**算出来存下（基准工具/诊断要拿它归因，不该
+	// 依赖 GHROMEX_DEBUG）；打印才受 drawDebug 控制。
+	driver := RendererDriver(renderer)
+	rendererDesc := ""
+	switch {
+	case gpu:
+		rendererDesc = fmt.Sprintf("accelerated(GPU, driver=%s)", driver)
+	case softwareOnly:
+		// 强制软件与"GPU 不可用已回退"是两回事，排查方向不同：前者是
+		// 配置（把开关去掉即可），后者是环境（换驱动/显卡）。
+		rendererDesc = fmt.Sprintf(
+			"software (driver=%s; 强制软件：GHROMEX_SOFTWARE/dummy)", driver)
+	default:
+		rendererDesc = fmt.Sprintf(
+			"software (driver=%s; GPU 不可用，已回退)", driver)
+	}
 	if drawDebug {
 		// 驱动名要能查：软件路径的瓶颈是填充率，GPU 路径的瓶颈通常在
 		// 纹理上传/draw call/swap 间隔——两者的排查方向完全不同，先确认
 		// 走的是哪条路再量（GHROMEX_DEBUG 非空时打印）。
-		driver := RendererDriver(renderer)
-		switch {
-		case gpu:
-			fmt.Fprintf(os.Stderr, "ghromex: renderer=accelerated(GPU, driver=%s)\n", driver)
-		case softwareOnly:
-			// 强制软件与"GPU 不可用已回退"是两回事，排查方向不同：前者是
-			// 配置（把开关去掉即可），后者是环境（换驱动/显卡）。
-			fmt.Fprintf(os.Stderr,
-				"ghromex: renderer=software (driver=%s; 强制软件：GHROMEX_SOFTWARE/dummy)\n", driver)
-		default:
-			fmt.Fprintf(os.Stderr,
-				"ghromex: renderer=software (driver=%s; GPU 不可用，已回退)\n", driver)
-		}
+		fmt.Fprintf(os.Stderr, "ghromex: renderer=%s\n", rendererDesc)
 	}
 	// 渲染器的绘制混合模式的**全局不变量是 BLEND**：贴图拷贝（精灵、文字的
 	// 抗锯齿边缘）要靠混合，且 SDL 各后端对「拷贝用纹理的还是渲染器的混合
@@ -144,7 +154,8 @@ func NewWindow(w, h int, title string) (*Window, error) {
 	return &Window{
 		w: w, h: h, title: title,
 		win: hwnd, renderer: renderer,
-		g: NewGraphics(renderer, ""),
+		g:            NewGraphics(renderer, ""),
+		rendererDesc: rendererDesc,
 	}, nil
 }
 
@@ -175,6 +186,33 @@ func (win *Window) Present() {
 
 // Delay 等待若干毫秒（主循环空闲时用来省 CPU，不空转）。
 func (win *Window) Delay(ms int) { sdlDelay(uintptr(ms)) }
+
+// RendererInfo 返回渲染路径的描述（"accelerated(GPU, driver=direct3d11)" /
+// "software (driver=software; …)"）。诊断与基准工具据此归因——数字必须
+// 能说明「是哪条路径、哪个驱动量出来的」，否则无法解读。
+func (win *Window) RendererInfo() string {
+	if win == nil {
+		return ""
+	}
+	return win.rendererDesc
+}
+
+// SetVSync 开/关垂直同步（诊断用）。
+//
+// 加速路径的 Present **含等 vsync 的阻塞**（不阻塞就抢不到交换链），
+// 所以「Present 的耗时」既含拷贝也含等待，两个数混在一起没法归因。
+// 关掉 vsync 后再量一次 Present，得到的就是纯拷贝耗时，二者相减即
+// vsync 等待。软件路径没有 vsync，此调用无副作用。
+func (win *Window) SetVSync(on bool) {
+	if win == nil || win.renderer == 0 {
+		return
+	}
+	n := 0
+	if on {
+		n = 1
+	}
+	sdlRenderSetVSync(win.renderer, uintptr(n))
+}
 
 // PollEvent 取下一个平台事件；队列为空时返回 false。
 //

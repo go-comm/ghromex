@@ -149,7 +149,16 @@ func (win *Window) Run() error {
 	}
 
 	running := true
+	// GHROMEX_BENCH：分段计时（布局/清屏/重绘/呈现/空闲）。只做本地诊断，
+	// 不进 CI——计时不可复现，断言它只会得到 flaky 测试。口径说明见 bench.go。
+	var bench *bench
+	var counter *countingGraphics
+	if benchEnabled() {
+		bench = newBench(win)
+		counter = &countingGraphics{inner: win.sdl.Graphics()}
+	}
 	for running {
+		frameStart := time.Now()
 		for {
 			ev, ok := win.sdl.PollEvent()
 			if !ok {
@@ -199,9 +208,12 @@ func (win *Window) Run() error {
 		}
 
 		pending := false
+		var dLayout, dClear, dRender, dPresent, dIdle time.Duration
 		if doc := win.doc; doc != nil {
 			if c := doc.ChangeCount(); c != win.lastChange {
+				t0 := time.Now()
 				engine.LayoutDocument(doc)
+				dLayout = time.Since(t0)
 				win.lastChange = c
 				win.dirty = true
 			}
@@ -210,10 +222,23 @@ func (win *Window) Run() error {
 			if engine.TickScroll(doc) {
 				win.dirty = true
 			}
-			if win.dirty {
+			if win.dirty || bench != nil {
+				// 基准模式强制每帧重绘：静态页面平时不重绘（省 CPU），
+				// 那样量到的只是空闲休眠，渲染管线的成本根本测不到。
+				t0 := time.Now()
 				win.clearCanvas()
-				engine.RenderNode(win.sdl.Graphics(), doc)
+				dClear = time.Since(t0)
+				g := win.sdl.Graphics()
+				if counter != nil {
+					counter.reset()
+					g = counter
+				}
+				t0 = time.Now()
+				engine.RenderNode(g, doc)
+				dRender = time.Since(t0)
+				t0 = time.Now()
 				win.sdl.Present()
+				dPresent = time.Since(t0)
 				win.dirty = false
 			}
 			// 布局期可能又标记了变更（滚动动画的下一帧）：此时不能睡 10ms，
@@ -223,12 +248,33 @@ func (win *Window) Run() error {
 		}
 
 		if !pending {
+			t0 := time.Now()
 			win.sdl.Delay(10)
+			dIdle = time.Since(t0)
+		}
+
+		if bench != nil {
+			calls := 0
+			if counter != nil {
+				calls = counter.calls
+			}
+			bench.add(time.Since(frameStart), dLayout, dClear, dRender, dPresent, dIdle, calls)
+			if len(bench.period) >= benchFrames() {
+				// 首次出报告前先做一次 vsync 校准：把「呈现」里的等待与
+				// 拷贝拆开（加速路径的 16.6ms 里有多少是真实工作，全靠它）。
+				if !bench.hasCalib {
+					bench.calibVsync()
+				}
+				bench.report()
+			}
 		}
 
 		if win.hasAutoExit && int32(win.sdl.Ticks()-exitAt) >= 0 {
 			running = false
 		}
+	}
+	if bench != nil {
+		bench.report() // 退出前把不足一批的样本也报出来
 	}
 	return nil
 }
