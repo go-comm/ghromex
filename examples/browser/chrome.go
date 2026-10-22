@@ -32,16 +32,19 @@ const chromeCSS = `
 	background-color: #1E293B;
 	border: 1px solid #334155;
 	border-radius: 8px;
-	color: #E2E8F0;
-	font-size: 15px;
+	/* 图标（← → ↻ ⌂ 是字形，不是图片——引擎还不支持 <img>）用纯白：
+	   深色工具条上浅灰蓝的字形发灰、不醒目，一眼看不出是按钮。 */
+	color: #FFFFFF;
+	font-size: 16px;
 	text-align: center;
 	box-sizing: border-box;
 	z-index: 1001;
 }
 .gh-btn-off {
+	/* 禁用态要"暗"（一眼看出点不了），但不能暗到看不见字形。 */
 	background-color: #16213A;
 	border-color: #233047;
-	color: #4B5C77;
+	color: #64748B;
 }
 .gh-addr {
 	position: absolute;
