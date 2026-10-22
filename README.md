@@ -537,3 +537,7 @@ go test ./...
   `GHROMEX_REAL=1` 走真机 GPU）——同源直出面与落屏截图逐像素比对，供回归「灰度管线忠实」结论
 - 文字锐度/字体对比条：`GHROMEX_CMP=1 go test ./backend/sdl2 -run 'TestFontCompareStrip|TestHintingValueScan'`
   输出 `.temp/fontcmp.png`（NORMAL/LIGHT/NONE/SS2x/LCD 五行并排，肉眼与量化均可比对）
+
+## 更新日志
+
+当前版本 **v0.2.0**，逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。
