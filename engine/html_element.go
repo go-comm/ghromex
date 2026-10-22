@@ -8,9 +8,10 @@ import (
 
 // 事件类型常量
 const (
-	EventClick  = "click"
-	EventChange = "change"
-	EventWheel  = "wheel"
+	EventClick   = "click"
+	EventChange  = "change"
+	EventWheel   = "wheel"
+	EventKeyDown = "keydown"
 )
 
 // MouseEvent 描述一次鼠标事件，坐标为文档视口坐标。
@@ -23,6 +24,20 @@ type MouseEvent struct {
 	DeltaX  int
 	DeltaY  int
 	Element HTMLElement
+}
+
+// KeyEvent 描述一次按键事件。Key 为键码：ASCII 区对齐 SDL2 的
+// SDL_keysym.sym（方向键/Home/End 等扫描码区见 text_input.go 的常量表），
+// Mods 为修饰键位掩码（ModCtrl/ModShift，见 text_input.go）。
+//
+// keydown 派发给聚焦元素；处理器返回 true 表示"已消费"，引擎的默认动作
+// （退格/删除/回车换行/方向键移动光标等）不再执行——等价于网页的
+// preventDefault。应用层靠它把"回车 = 打开"这类行为接进来（浏览器地址栏、
+// 记事本查找框都用得上），不必去改引擎的默认动作。
+type KeyEvent struct {
+	Type string
+	Key  int
+	Mods uint16
 }
 
 // HTMLElement 是 DOM 元素节点的基础接口。
@@ -79,6 +94,9 @@ type HTMLElement interface {
 	OnChange(f func(ev *MouseEvent))
 	// OnWheel 注册滚轮事件处理器（先于滚动发生派发），f 为 nil 时移除。
 	OnWheel(f func(ev *MouseEvent))
+	// OnKeyDown 注册按键事件处理器，f 为 nil 时移除。处理器返回 true 表示
+	// 已消费：引擎的默认动作不再执行（等价于网页的 preventDefault）。
+	OnKeyDown(f func(ev *KeyEvent) bool)
 
 	getPaint() Paint
 	setPaint(p Paint)
@@ -98,21 +116,24 @@ func newElement(tag string) HTMLElement {
 }
 
 type htmlElement struct {
-	self          HTMLElement // 包装器场景下指向外层对象，保证父链/克隆正确
-	tagName       string
-	id            string
-	text          string
-	width         int
-	height        int
-	x             int
-	y             int
-	layoutH       int // 布局流占位高度（含 margin），由布局引擎写入
-	attrs         map[string]string
-	style         CSSStyleDeclaration
-	inline        []simpleDecl
-	computed      CSSStyleDeclaration
-	runs          []textRun
-	handlers      map[string]func(*MouseEvent)
+	self     HTMLElement // 包装器场景下指向外层对象，保证父链/克隆正确
+	tagName  string
+	id       string
+	text     string
+	width    int
+	height   int
+	x        int
+	y        int
+	layoutH  int // 布局流占位高度（含 margin），由布局引擎写入
+	attrs    map[string]string
+	style    CSSStyleDeclaration
+	inline   []simpleDecl
+	computed CSSStyleDeclaration
+	runs     []textRun
+	handlers map[string]func(*MouseEvent)
+	// keyHandler 是元素级 keydown 处理器。与 handlers 分开存：键事件的
+	// 参数不同（要带键码与修饰键），且要能"消费"按键。
+	keyHandler    func(ev *KeyEvent) bool
 	parentElement HTMLElement
 	children      []HTMLElement
 	transformX    Size
@@ -409,6 +430,11 @@ func (element *htmlElement) OnWheel(f func(ev *MouseEvent)) {
 		element.handlers = make(map[string]func(*MouseEvent))
 	}
 	element.handlers[EventWheel] = f
+}
+
+// OnKeyDown 注册/移除按键处理器。
+func (element *htmlElement) OnKeyDown(f func(ev *KeyEvent) bool) {
+	element.keyHandler = f
 }
 
 func (element *htmlElement) dispatch(typ string, ev *MouseEvent) bool {

@@ -344,7 +344,7 @@ func BaselineAdjust() int { return baselineAdjust }
 // 这是无修饰键入口（保持既有调用方兼容）；带 Shift/Ctrl 的按键走
 // OnDocumentKeyDownMods。
 func OnDocumentKeyDown(doc HTMLDocument, key int) bool {
-	return onDocumentKeyDown(doc, key)
+	return OnDocumentKeyDownMods(doc, key, 0)
 }
 
 // OnDocumentKeyDownMods 处理带修饰键的按键：Ctrl+A 全选、Ctrl+C 表示
@@ -358,6 +358,13 @@ func OnDocumentKeyDownMods(doc HTMLDocument, key int, mods uint16) bool {
 	b := inner(f)
 	if b == nil {
 		return false
+	}
+	// 元素级 keydown 先派发：应用层要能看到所有按键（含修饰键），
+	// 返回 true 表示已消费，引擎的默认动作不再执行。
+	if b.keyHandler != nil {
+		if b.keyHandler(&KeyEvent{Type: EventKeyDown, Key: key, Mods: mods}) {
+			return true
+		}
 	}
 	if mods&ModCtrl != 0 {
 		switch key {

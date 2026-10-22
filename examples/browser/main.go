@@ -370,6 +370,14 @@ func (b *browserApp) installChrome(doc engine.HTMLDocument) {
 	open.OnClick(func(*engine.MouseEvent) {
 		b.gotoAddress(addr.GetAttribute("value"))
 	})
+	// 地址栏：回车直接打开（与点「打开」按钮同一条路径）。
+	addr.OnKeyDown(func(ev *engine.KeyEvent) bool {
+		if ev.Key != engine.KeyEnter || ev.Mods&engine.ModCtrl != 0 {
+			return false
+		}
+		b.gotoAddress(addr.GetAttribute("value"))
+		return true
+	})
 
 	bar.AppendChild(back, forward, refresh, home, addr, open)
 	body.AppendChild(bar)

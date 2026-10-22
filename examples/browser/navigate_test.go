@@ -223,3 +223,36 @@ func TestChromeFollowsViewportResize(t *testing.T) {
 			addrBefore.Right().Pixel()-addrBefore.Left().Pixel())
 	}
 }
+
+// 地址栏里按回车直接打开（与点「打开」按钮同一条路径）。
+//
+// 回车由引擎派发给聚焦元素的 keydown 处理器（元素级 OnKeyDown）：浏览器
+// 应用不用改引擎的默认动作，也不用在窗口层单独截按键。
+func TestAddressBarEnterNavigates(t *testing.T) {
+	h := &headlessOpener{vp: engine.NewHeadlessViewport(1024, 720), width: 1024}
+	app := &browserApp{win: h, homeDir: ".", index: -1}
+	app.showHome()
+	h.doc.Refresh()
+
+	addr := h.doc.QuerySelector("#ghromex-addr")
+	if addr == nil {
+		t.Fatal("缺少地址栏")
+	}
+	dir := t.TempDir()
+	page := filepath.Join(dir, "p.html")
+	const want = "回车打开的页"
+	if err := os.WriteFile(page, []byte("<!doctype html><html><head><title>"+want+
+		"</title></head><body>hi</body></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	addr.SetAttribute("value", page)
+	engine.SetFocusedElement(h.doc, addr)
+
+	if !engine.OnDocumentKeyDown(h.doc, engine.KeyEnter) {
+		t.Fatal("回车没有被消费（地址栏的 keydown 处理器没跑）")
+	}
+	h.doc.Refresh()
+	if got := h.doc.Title(); got != want {
+		t.Fatalf("回车后标题 = %q, want %q", got, want)
+	}
+}
