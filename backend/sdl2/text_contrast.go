@@ -42,9 +42,9 @@ func contrastAlpha(a byte, k float64) byte {
 	return byte(v + 0.5)
 }
 
-// surfPtr 把 C 侧地址（uintptr）变成可解引用的指针（手法见 cPointer）。
+// surfPtr 把 C 侧地址（uintptr）变成可解引用的指针（手法见 cMemPointer）。
 func surfPtr(u uintptr) unsafe.Pointer {
-	return cPointer(u)
+	return cMemPointer(u)
 }
 
 // applyTextContrast 对 blended 字形 surface 施加 tone 曲线（原地修改）。

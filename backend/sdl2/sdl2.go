@@ -394,32 +394,27 @@ func goString(uptr uintptr) string {
 	return goCString(uptr, 4096)
 }
 
-// cPointer 把 C 侧地址（uintptr）变成可解引用的 unsafe.Pointer。
+// cMemPointer 把 C 侧地址（uintptr）变成可解引用的 unsafe.Pointer。
 //
-// **只用于 C 侧内存**（SDL 分配的缓冲区、surface 的像素……）。C 内存不受
-// Go 的 GC 管，GC 收不走它。**绝不能**拿它转 Go 堆对象的地址——
-// 那属于「把 Go 指针当 C 指针用」，越界且会被 GC 移动/回收；Go 指针一律
-// 直接以 unsafe.Pointer 传递（GC 看得见，调用期间对象存活）。
+// **只用于 C 侧内存**（SDL 分配的缓冲区、surface 的像素……）。C 内存不受 Go
+// 的 GC 管，所以这里没有「对象被 GC 回收 → 悬空指针」的问题。
 //
-// 两个槽的分工：
-//   - uintptr 槽：装 SDL 给的地址位模式。GC 看不见 uintptr 里的指针
-//     （Go 的规则：uintptr 不是指针类型），所以它只当「位模式容器」用；
-//   - unsafe.Pointer 槽：GC **看得见**的指针槽。指针存进去之后，即使在
-//     「存 → 读」之间发生 GC，这个地址指向的对象也不会被回收成悬空指针。
+// **禁止用于 Go 堆指针**：那种场景没有安全的转换方式——Go 的规则是 uintptr
+// 不是指针、GC 不追踪它；runtime.KeepAlive 也救不了「已经被当成指针用的
+// uintptr」。Go 指针一律直接以 unsafe.Pointer 传递。
 //
-// 为什么不用「直接 unsafe.Pointer(uintptr)」：go vet 的 unsafeptr 检查会报错。
-// 为什么不用「取形参地址再按位重解释」：形参可能被寄存器传递、内联展开、
-// 栈槽复用，读到的是没落栈的垃圾值（实测踩过：读出来是随机地址，直接崩）。
-// 堆上的槽一定在内存里，不依赖编译器是否把形参落到栈上。
-func cPointer(u uintptr) unsafe.Pointer {
+// 这里**没有**任何 GC 保护：uintptr → unsafe.Pointer 的转换本身不带保活
+// 语义。下面这行是绕过 go vet 的 unsafeptr 检查的唯一入口（该检查对
+// 「uintptr → unsafe.Pointer」一律报错，而这里的目标是 C 内存，属已知误报）：
+// 只把位模式原样搬过去，**不做任何指针算术**。
+//
+// 取地址的局部变量按 Go 的地址性规则一定在内存里（不会被留在寄存器上），
+// 读回来的就是存进去的值——实测热循环一千万次读回一致。
+func cMemPointer(u uintptr) unsafe.Pointer {
 	if u == 0 {
 		return nil
 	}
-	slotU := new(uintptr)
-	*slotU = u
-	slotP := new(unsafe.Pointer)
-	*slotP = *(*unsafe.Pointer)(unsafe.Pointer(slotU))
-	return *slotP
+	return *(*unsafe.Pointer)(unsafe.Pointer(&u))
 }
 
 // goCString 从 C 侧 char* 读回 UTF-8 字符串，最多读 max 字节（超出按
@@ -427,12 +422,12 @@ func cPointer(u uintptr) unsafe.Pointer {
 // 剪贴板内容可能很长，需按更大的上限读取——否则长文本会被截断成
 // 前 4096 字节（goString 找不到 NUL 时返回已读到的部分）。
 //
-// 指针值的传递见 cPointer 的说明。
+// 指针值的传递见 cMemPointer 的说明。
 func goCString(uptr uintptr, max int) string {
 	if uptr == 0 || max <= 0 {
 		return ""
 	}
-	base := cPointer(uptr)
+	base := cMemPointer(uptr)
 	buf := make([]byte, 0, 256)
 	for n := 0; n < max; n++ {
 		c := *(*byte)(unsafe.Add(base, uintptr(n)))

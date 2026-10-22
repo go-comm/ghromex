@@ -215,7 +215,7 @@ func TestSetFontSizePreservesHinting(t *testing.T) {
 // 只读到每行前 1/4 像素；统一用 fontcmp_test.go 的 cmpBlendedCoverage 取真
 // 覆盖通道（含跨度自校准与 stride 行读取）。布局读取手法见 ptrAt。
 
-// ptrAt 把 C 侧地址（uintptr）变成可解引用的指针（手法见 cPointer）。
+// ptrAt 把 C 侧地址（uintptr）变成可解引用的指针（手法见 cMemPointer）。
 func ptrAt(u uintptr) unsafe.Pointer {
-	return cPointer(u)
+	return cMemPointer(u)
 }

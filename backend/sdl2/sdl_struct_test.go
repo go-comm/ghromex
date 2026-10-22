@@ -162,6 +162,29 @@ func TestStructFieldOffsets(t *testing.T) {
 	}
 }
 
+// TestCMemPointerRoundTrip 钉住 cMemPointer 的语义：位模式原样搬运，读回
+// 同一个地址；0 → nil。
+//
+// 它**不提供**任何 GC 保活：C 侧内存不受 Go GC 管，所以无所谓；Go 堆指针
+// 走这条路是错的（uintptr 不是指针，GC 不追踪它），已在 cMemPointer 的注释
+// 里写死边界。
+func TestCMemPointerRoundTrip(t *testing.T) {
+	if got := cMemPointer(0); got != nil {
+		t.Errorf("cMemPointer(0) = %v, want nil", got)
+	}
+	var v int
+	p := unsafe.Pointer(&v)
+	if got := cMemPointer(uintptr(p)); got != p {
+		t.Errorf("cMemPointer 往返 = %p, want %p", got, p)
+	}
+	// 热循环：取地址的局部变量一定在内存里，读回来必须一直是同一个值。
+	for i := 0; i < 100000; i++ {
+		if cMemPointer(uintptr(p)) != p {
+			t.Fatalf("第 %d 次往返不一致", i)
+		}
+	}
+}
+
 // TestSDLVersionRecord 记录运行库的版本号——结构体布局跟版本相关（不同
 // 小版本的 SDL_SysWMinfo.version 从 SDL_version 改成了 Uint32 等），排查
 // 布局问题时先对版本。
