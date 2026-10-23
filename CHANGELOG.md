@@ -5,6 +5,9 @@
 
 ## 未发布
 
+- **ui**：工具栏 `Action` 构造器 `Button` 更名 `Tool`（对应 `Spec.Tools` 与
+  `.system-ui-tool`），与内容区控件 `NewButton` 不再一字之差；`Item` / `Sep`
+  不变。
 - **ui**：`Shell` 更名为 `Workbench`（工作台），`App.Shell()` 相应改为
   `App.Workbench()`；「工作台」指装在文档四周的菜单栏/工具栏/状态栏加
   主题样式，`Install` 的返回值与全部方法不变，升级时替换类型名与方法名
@@ -36,7 +39,7 @@
 - **ui**：新增页面控件 `NewLabel` / `NewTextView` / `NewButton` /
   `NewCheckbox` / `NewSelect` / `NewTextInput` / `NewTextArea` / `NewField`，
   统一处理类名、取值/设值、禁用态与事件适配；`NewButton` 与工具栏的
-  `ui.Button` 区分，后者仍构造 `Action`。
+  `ui.Tool` 区分，后者仍构造 `Action`。
 - **ui**：新增控件条 `NewBar`（配 `Append` / `SetInline` / `SetVisible`）与
   主题令牌 `Theme.BarHeight`：条内控件排成一行并按条高垂直居中（内边距由
   条高减控件高推导）；定位声明与显隐分开管，`SetVisible` 只在应用那份声明

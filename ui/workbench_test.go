@@ -58,7 +58,7 @@ func TestInstallBuildsChrome(t *testing.T) {
 	doc := newTestDoc(t, 640, 480, `<div id="page">内容</div>`)
 	sh := Install(doc, Spec{
 		Menus:  []Menu{{Title: "文件", Items: []Action{Item("保存", "Ctrl+S", nil)}}},
-		Tools:  []Action{Button("保存", nil)},
+		Tools:  []Action{Tool("保存", nil)},
 		Status: "就绪",
 	})
 	doc.Refresh()
@@ -219,7 +219,7 @@ func TestMenuPopupOverToolbarIsClickable(t *testing.T) {
 		Menus: []Menu{{Title: "文件", Items: []Action{
 			Item("保存", "", func() error { ran = "save"; return nil }),
 		}}},
-		Tools: []Action{Button("工具", func() error { ran = "tool"; return nil })},
+		Tools: []Action{Tool("工具", func() error { ran = "tool"; return nil })},
 	})
 	doc.Refresh()
 
@@ -405,9 +405,9 @@ func TestToolbarButtonAndRefresh(t *testing.T) {
 	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
 	sh := Install(doc, Spec{
 		Tools: []Action{
-			Button("保存", func() error { ran++; return nil }).When(func() bool { return on }),
+			Tool("保存", func() error { ran++; return nil }).When(func() bool { return on }),
 			Sep(),
-			Button("复制", func() error { ran += 10; return nil }),
+			Tool("复制", func() error { ran += 10; return nil }),
 		},
 	})
 	doc.Refresh()
@@ -443,9 +443,9 @@ func TestToolbarIcons(t *testing.T) {
 	th := Light()
 	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
 	Install(doc, Spec{Tools: []Action{
-		Button("保存", nil).WithIcon("save"),
-		Button("复制", nil),
-		Button("关于", nil).WithIcon("no-such-icon"),
+		Tool("保存", nil).WithIcon("save"),
+		Tool("复制", nil),
+		Tool("关于", nil).WithIcon("no-such-icon"),
 	}})
 	doc.Refresh()
 
@@ -493,7 +493,7 @@ func TestToolbarTitleTips(t *testing.T) {
 	Install(doc, Spec{Tools: []Action{
 		Item("保存", "Ctrl+S", nil).WithIcon("save"),
 		Item("重命名", "F2", nil),      // 纯快捷键也有提示
-		Button("无快捷键", nil),         // 只有标签
+		Tool("无快捷键", nil),           // 只有标签
 		{Label: "", Shortcut: "F1"}, // 只有快捷键
 	}})
 
@@ -587,7 +587,7 @@ func TestCommandRestoresFocus(t *testing.T) {
 	}
 
 	Install(doc, Spec{
-		Tools: []Action{Button("保存", func() error { return nil })},
+		Tools: []Action{Tool("保存", func() error { return nil })},
 		Focus: func() engine.HTMLElement { return editor },
 	})
 	doc.Refresh()
@@ -609,7 +609,7 @@ func TestCommandRestoresFocus(t *testing.T) {
 func TestCommandErrorGoesToStatus(t *testing.T) {
 	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
 	sh := Install(doc, Spec{
-		Tools:  []Action{Button("打开", func() error { return os.ErrNotExist })},
+		Tools:  []Action{Tool("打开", func() error { return os.ErrNotExist })},
 		Status: "就绪",
 	})
 	doc.Refresh()

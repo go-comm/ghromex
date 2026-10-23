@@ -183,9 +183,9 @@ spec := ui.Spec{
 		ui.Item("退出", "Alt+Q", ui.Quit),
 	}}},
 	Tools: []ui.Action{
-		ui.Button("保存", save).WithIcon("save").When(editor.Dirty),
+		ui.Tool("保存", save).WithIcon("save").When(editor.Dirty),
 		ui.Sep(),
-		ui.Button("关于", about).WithIcon("info"),
+		ui.Tool("关于", about).WithIcon("info"),
 	},
 }
 
@@ -266,7 +266,7 @@ page.AppendChild(preview.Element())
 ```
 
 `ui.NewButton` 是内容区按钮（底层 `<button type="button">`），与工具栏的
-`ui.Button`（构造 `Action`）区分。`TextInput`/`TextArea` 目前没有实时的
+`ui.Tool`（构造 `Action`）区分。`TextInput`/`TextArea` 目前没有实时的
 `input`/`change` 事件，实时联动请用 `OnKeyDown`，或在命令执行时读取
 `Value`。`TextView` 是只读多行视图，`TextAreaView` 才是可编辑输入。
 

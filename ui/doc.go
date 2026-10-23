@@ -25,9 +25,9 @@
 //			ui.Item("退出", "Alt+Q", ui.Quit),
 //		}}},
 //		Tools: []ui.Action{
-//			ui.Button("保存", save).WithIcon("save").When(editor.Dirty),
+//			ui.Tool("保存", save).WithIcon("save").When(editor.Dirty),
 //			ui.Sep(),
-//			ui.Button("复制", copy).WithIcon("copy"),
+//			ui.Tool("复制", copy).WithIcon("copy"),
 //		},
 //	}
 //	app, err := ui.New(spec)
@@ -69,7 +69,7 @@
 //
 // 页面可以只写类名，也可以用 Go 侧包装构造原生控件；NewXxx 返回的 View 都
 // 实现 Element()，可直接 AppendChild。注意 NewButton 是内容区按钮，工具栏
-// 的 ui.Button 仍构造 Action：
+// 的 ui.Tool 仍构造 Action：
 //
 //	name := ui.NewTextInput(doc, "未命名.txt")
 //	field := ui.NewField(doc, "文件名称", name)
@@ -111,7 +111,7 @@
 //
 // 命令可以用 WithIcon 挂图标：
 //
-//	ui.Button("保存", save).WithIcon("save")
+//	ui.Tool("保存", save).WithIcon("save")
 //	ui.Item("新建", "Ctrl+N", newFile).WithIcon("new")
 //
 // 内置图标名见 iconGlyphs，按用途分组：

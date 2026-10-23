@@ -37,8 +37,9 @@ func Item(label, shortcut string, run func() error) Action {
 	return Action{Label: label, Shortcut: shortcut, Run: run}
 }
 
-// Button 构造一个工具栏按钮（无快捷键）。
-func Button(label string, run func() error) Action {
+// Tool 构造一个工具栏按钮（无快捷键），进 Spec.Tools、渲染成
+// .system-ui-tool；与内容区控件的 NewButton 不是一回事。
+func Tool(label string, run func() error) Action {
 	return Action{Label: label, Run: run}
 }
 
@@ -55,7 +56,7 @@ func (a Action) When(f func() bool) Action {
 
 // WithIcon 给命令挂图标，返回新值便于链式书写：
 //
-//	ui.Button("保存", save).WithIcon("save")
+//	ui.Tool("保存", save).WithIcon("save")
 //
 // 图标名见包内 iconGlyphs（文件/编辑、方向/导航、对齐/排版、播放/媒体、
 // 视图/窗口和通用命令），常用如 up/down/left/right、align-left/align-center/

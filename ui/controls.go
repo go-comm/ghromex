@@ -89,7 +89,7 @@ func (v *TextView) SetText(text string) {
 
 // ButtonView 是内容区按钮，底层是 <button type="button">。
 //
-// 工具栏的 ui.Button 仍是 Action 构造器；这里用 NewButton 区分。
+// 工具栏的 ui.Tool 是 Action 构造器；这里用 NewButton 区分。
 type ButtonView struct {
 	el      engine.HTMLElement
 	onClick func()
