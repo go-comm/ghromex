@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-23 23:02
+> 生成时间: 2026-10-24 01:48
 
 ---
 
@@ -2298,7 +2298,8 @@ Package ui 是应用工作台与页面组件库。
 作用域下生效；根作用域把组件规则 的特异度抬高一档，第三方 `.panel div` 之类的后代选择器压不过。
 
 body 的复位同样归工作台：装了工作台的文档，body 无外边距、颜色字体跟随 主题，页面不必自写 margin:0 / padding:0 / color
-/ font-family 这些样板； 自定义排版请挂在内容容器上（根作用域下 body 规则特异度更高，页面的 裸 body 规则盖不过它）。
+/ font-family 这些样板； 自定义排版请挂在内容容器上（根作用域下 body 规则特异度更高，页面的 裸 body 规则盖不过它）。确实要保留
+body 原样的页面（演示 UA 样式、靠 body padding 给固定栏让位）用 Spec.NoBodyReset 跳过复位。
 
 # 状态栏
 
@@ -2335,6 +2336,12 @@ SetInline， 收起用 SetVisible（它只在应用那份声明上补 display:no
     bar := ui.NewBar(doc, keyword, find).SetInline("position:absolute;left:0;top:72px")
     bar.SetVisible(false)
     page.AppendChild(bar.Element())
+
+工具栏里也要放输入框/下拉时，用 Slot 把现成控件嵌进去（槽位不是命令， 没有快捷键与可用态；控件句柄仍归应用）：
+
+    addr := ui.NewTextInput(doc, "")
+    ...
+    Tools: []ui.Action{ui.Tool("刷新", refresh), ui.Slot(addr)},
 
 输入框目前没有实时 input/change 事件，实时联动用 OnKeyDown 或在命令执行 时读取 Value；只读多行文本用
 TextView，可编辑多行用 TextAreaView——要它 贴着铺满整块内容区（纸面而不是表单字段）就切平铺变体：
@@ -2475,6 +2482,8 @@ type Action struct {
 	// Enable 返回命令当前是否可用；nil 表示恒可用。菜单打开时、按钮
 	// 刷新时求值——不做每帧轮询。
 	Enable func() bool
+
+	// Has unexported fields.
 }
     Action 是一条应用命令，菜单项与工具栏按钮共用。
 
@@ -2485,6 +2494,19 @@ func Item(label, shortcut string, run func() error) Action
 
 func Sep() Action
     Sep 构造一条分隔线（菜单里是横线，工具栏里是竖线）。
+
+func Slot(c Control) Action
+    Slot 把一个现成控件（输入框、下拉等）嵌进工具栏，与命令按钮同排：
+
+        addr := ui.NewTextInput(doc, "")
+        ...
+        Tools: []ui.Action{
+        	ui.Tool("刷新", refresh).WithIcon("refresh"),
+        	ui.Slot(addr),
+        }
+
+    控件句柄仍归应用：取值、设值、禁用直接调控件自己的方法，不必按 id 回查 元素。槽位不是命令：没有快捷键与可用态，禁用请用控件自己的
+    SetEnabled。
 
 func Tool(label string, run func() error) Action
     Tool 构造一个工具栏按钮（无快捷键），进 Spec.Tools、渲染成 .system-ui-tool；与内容区控件的 NewButton
@@ -2718,6 +2740,17 @@ type Spec struct {
 
 	// Theme 为空时用 Light()。
 	Theme *Theme
+
+	// NoBodyReset 跳过对 body 的样式复位（margin/padding/color/font）；
+	// 画布底色（html background-color）不受影响，始终注入。
+	//
+	// 默认 Install 会复位 body：UA 的 8px 外边距与默认字体不该让每个页面
+	// 重复写一遍。两类页面需要关掉它：
+	//   - 演示 UA 样式的页面——body 的 margin:8px 本身就是演示内容；
+	//   - 靠 body padding 给固定栏让位的页面——复位会把排版顶歪。
+	//
+	// 关掉之后 body 的外观由页面自己负责。
+	NoBodyReset bool
 
 	Menus []Menu
 	Tools []Action
