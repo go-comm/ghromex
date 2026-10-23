@@ -16,8 +16,9 @@ import (
 //     天然在最顶、豁免裁剪。
 //   - 延时需要按真实时间逐帧推进——引擎已有 TickScroll 先例（后端每帧调
 //     一次），气泡挂同一个帧循环，不新增定时器。
-//   - 系统气泡不跟随页面主题（Windows 提示是系统配色），配色由引擎固定：
-//     深底浅字，浅色/深色页面都读得清。
+//   - 气泡是绘制层不是 DOM 元素，拿不到级联样式；配色由引擎给一套
+//     默认值（深底浅字，浅色/深色页面都读得清），应用可用
+//     SetTooltipColors 按自己的主题下发（ui.Shell 会随主题自动配）。
 //
 // 交互语义（对齐浏览器）：悬停目标或文案变化重新计时；弹出后气泡停在原地
 // 不再跟鼠标；按下/点击/实际滚动把气泡收起，直到鼠标换目标才重新计时。
@@ -45,12 +46,41 @@ const (
 	tooltipGapY     = 18
 )
 
-// 气泡配色：深底、浅字、中间色描边。固定值不接主题（系统提示不跟随页面）。
+// TooltipColors 是提示气泡的配色（浮在文档之上的绘制层，不是 DOM 元素，
+// 所以拿不到级联样式，只能由应用显式下发）。空字段按引擎默认。
+type TooltipColors struct {
+	Background Color // 底色（默认深板岩蓝）
+	Border     Color // 1px 描边（默认中间色）
+	Text       Color // 文字（默认浅色）
+}
+
+// 默认配色：深底、浅字、中间色描边——浅色/深色页面上都能读清。
+// 接入主题的应用（ui.Shell）会用主题令牌覆盖它。
 var (
 	tooltipBackground = NewColor(0x0F, 0x17, 0x2A, 255)
 	tooltipBorder     = NewColor(0x47, 0x55, 0x69, 255)
 	tooltipTextColor  = NewColor(0xF1, 0xF5, 0xF9, 255)
 )
+
+// SetTooltipColors 设置文档的提示气泡配色，让气泡跟随应用主题而不是引擎
+// 默认值。空字段保持默认。
+//
+// 纯绘制层状态、不触发变更通知：调用方自己保证会有一次重绘（换主题通常
+// 伴随样式表追加，重排重绘自然发生）。
+func SetTooltipColors(doc HTMLDocument, c TooltipColors) {
+	if d, ok := doc.(*htmlDocument); ok {
+		d.tooltipColors = c
+	}
+}
+
+// TooltipColorsOf 返回文档当前的气泡配色（未设置的字段为 nil，表示用引擎
+// 默认配色）。
+func TooltipColorsOf(doc HTMLDocument) TooltipColors {
+	if d, ok := doc.(*htmlDocument); ok {
+		return d.tooltipColors
+	}
+	return TooltipColors{}
+}
 
 // TooltipText 返回当前弹出中的气泡文案（未弹出时为空串）。
 func TooltipText(doc HTMLDocument) string {
@@ -151,8 +181,18 @@ func dismissTooltip(doc HTMLDocument) {
 
 // renderTooltip 绘制气泡：圆角底 + 1px 描边 + 文字。在 RenderNode 尾部
 // （select 浮层之后）调用：最顶层、豁免裁剪；贴住窗口边缘时向内夹取，
-// 下方放不下就翻到鼠标上方。
+// 下方放不下就翻到鼠标上方。配色取文档级设置，空字段落回引擎默认。
 func renderTooltip(g Graphics, d *htmlDocument, vpW, vpH int) {
+	bg, bc, tc := d.tooltipColors.Background, d.tooltipColors.Border, d.tooltipColors.Text
+	if bg == nil {
+		bg = tooltipBackground
+	}
+	if bc == nil {
+		bc = tooltipBorder
+	}
+	if tc == nil {
+		tc = tooltipTextColor
+	}
 	text := d.tooltipText
 	tw, th := g.MeasureText(text, tooltipFontSize, false, "")
 	bw, bh := tw+2*tooltipPadX, th+2*tooltipPadY
@@ -169,13 +209,13 @@ func renderTooltip(g Graphics, d *htmlDocument, vpW, vpH int) {
 	if y < 0 {
 		y = 0
 	}
-	fillRoundedRect(g, x, y, bw, bh, tooltipRadius, tooltipBackground)
-	strokeRoundedRect(g, x, y, bw, bh, tooltipRadius, edges{1, 1, 1, 1}, tooltipBorder)
+	fillRoundedRect(g, x, y, bw, bh, tooltipRadius, bg)
+	strokeRoundedRect(g, x, y, bw, bh, tooltipRadius, edges{1, 1, 1, 1}, bc)
 	p := NewPaint()
 	p.SetSize(NewSize(SIZE_PIXEL, tooltipFontSize, 0))
-	p.SetColor(tooltipTextColor)
+	p.SetColor(tc)
 	// 垫气泡底色给字体合成用：LCD 子像素渲染必须知道落点底色才能合成出
 	// 正确的过渡色（与 select 浮层高亮行的 seed Paint 同理）。
-	p.SetBackground(tooltipBackground)
+	p.SetBackground(bg)
 	g.DrawText(x+tooltipPadX, y+tooltipPadY, tw, th, p, text)
 }

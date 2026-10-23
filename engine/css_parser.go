@@ -346,6 +346,13 @@ var namedColors = map[string]Color{
 	"transparent": NewColor(0, 0, 0, 0),
 }
 
+// ParseColor 解析一个 CSS 颜色值：#rgb / #rgba / #rrggbb / #rrggbbaa /
+// rgb() / rgba() / 常见颜色名；无法解析时返回 nil。
+//
+// 给应用把「主题里的颜色字符串」变成引擎 Color 用——绘制层 API（如
+// SetTooltipColors）收的是 Color 而不是 CSS 文本。
+func ParseColor(v string) Color { return parseColor(v) }
+
 // parseColor 支持 #rgb / #rrggbb / #rrggbbaa / rgb() / rgba() / 常见颜色名。
 func parseColor(v string) Color {
 	v = strings.TrimSpace(strings.ToLower(v))

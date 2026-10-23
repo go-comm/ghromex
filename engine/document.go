@@ -123,6 +123,9 @@ type htmlDocument struct {
 	tooltipMouseY    int
 	tooltipShown     bool
 	tooltipDismissed bool
+	// tooltipColors 是应用下发的气泡配色（空字段用引擎默认）：气泡是绘制
+	// 层、拿不到级联样式，跟随主题只能靠显式下发（见 SetTooltipColors）。
+	tooltipColors TooltipColors
 	// dragInput 是鼠标按下时命中的可编辑控件。拖选期间活动端可移出控件
 	// 甚至窗口，仍应把坐标反推为同一控件的光标位置（浏览器同语义）；
 	// 因此不能在每次 MouseMotion 时重新命中测试。鼠标抬起即清空。

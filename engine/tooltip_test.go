@@ -212,6 +212,33 @@ func TestTooltipDismissedByWheel(t *testing.T) {
 	}
 }
 
+// 应用下发配色后气泡用应用的颜色；没给的字段落回引擎默认。
+func TestTooltipCustomColors(t *testing.T) {
+	buf, doc, d := openTooltipDoc(t, tooltipPage)
+	SetTooltipColors(doc, TooltipColors{Background: NewColor(0xEE, 0xF2, 0xF7, 255)})
+	if got := TooltipColorsOf(doc).Background; got == nil {
+		t.Fatal("配色未落到文档")
+	}
+	if got := hoverShow(t, doc, d, 10, 10); got == "" {
+		t.Fatal("前置：气泡没弹出")
+	}
+	RenderNode(buf, doc)
+	_, th := buf.MeasureText("保存  Ctrl+S", tooltipFontSize, false, "")
+	bx, by := 10+tooltipGapX, 10+tooltipGapY
+	bh := th + 2*tooltipPadY
+	if r, g, b, a, ok := buf.ColorAt(bx+4, by+bh/2); !ok || r != 0xEE || g != 0xF2 || b != 0xF7 || a != 255 {
+		t.Fatalf("自定义底色未生效：(%d,%d) = %02X%02X%02X%02X (ok=%v)", bx+4, by+bh/2, r, g, b, a, ok)
+	}
+	// Text 没给：文字仍是默认浅色（首字形色块内取点）。
+	tw, _ := buf.MeasureText("保存  Ctrl+S", tooltipFontSize, false, "")
+	cell := (tw / len([]rune("保存  Ctrl+S")))
+	ix := cell/5 + cell/10
+	tx, ty := bx+tooltipPadX+ix, by+tooltipPadY+tooltipPadY
+	if r, g, b, a, ok := buf.ColorAt(tx, ty); !ok || r != 0xF1 || g != 0xF5 || b != 0xF9 || a != 255 {
+		t.Fatalf("文字默认色被改掉：(%d,%d) = %02X%02X%02X%02X (ok=%v)", tx, ty, r, g, b, a, ok)
+	}
+}
+
 // 贴窗口边缘的气泡夹回视口内、下方放不下翻到鼠标上方——不能被截掉。
 func TestTooltipClampedIntoViewport(t *testing.T) {
 	// 整页悬在 body 的提示上，任意坐标都有气泡，方便贴边取样。
