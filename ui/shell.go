@@ -57,8 +57,10 @@ func (a Action) When(f func() bool) Action {
 //
 //	ui.Button("保存", save).WithIcon("save")
 //
-// 图标名见包内 iconGlyphs（new/open/save/copy/undo/redo/search/info…），
-// 也可以直接写字符。同一份 Action 放进菜单与工具栏时，两处都用这个图标。
+// 图标名见包内 iconGlyphs（文件/编辑、方向/导航、对齐/排版、播放/媒体、
+// 视图/窗口和通用命令），常用如 up/down/left/right、align-left/align-center/
+// align-right、play/pause/stop、zoom-in/zoom-out；也可以直接写字符。同一份
+// Action 放进菜单与工具栏时，两处都用这个图标。
 func (a Action) WithIcon(name string) Action {
 	a.Icon = name
 	return a

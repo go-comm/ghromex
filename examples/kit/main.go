@@ -4,7 +4,9 @@
 // 只写命令表与接线——应用侧「少量代码」的样子就是这里。
 //
 //	go run ./examples/kit
+//	go run ./examples/kit -dark                # 深色主题
 //	go run ./examples/kit -dump-png kit.png    # 无头出图（文字是占位方块）
+//	go run ./examples/kit -dark -shot kit.png  # 深色主题 + 真实字体截图
 //	go run ./examples/kit -shot kit.png        # 真实字体截图（需要 SDL）
 //	go run ./examples/kit -shot kit.png -shot-menu 编辑
 //	go run ./examples/kit -dump-svg kit.svg
@@ -36,6 +38,7 @@ func main() {
 	dumpSVG := flag.String("dump-svg", "", "无头导出布局 SVG 后退出")
 	shot := flag.String("shot", "", "用真实字体渲染一帧并存成 PNG 后退出（需要 SDL）")
 	shotMenu := flag.String("shot-menu", "", "与 -shot 配合：先展开指定标题的菜单（如 文件）")
+	dark := flag.Bool("dark", false, "使用深色主题")
 	exitAfter := flag.Duration("exit-after", 0, "运行指定时长后自动退出（调试/CI）")
 	flag.Parse()
 
@@ -48,6 +51,10 @@ func main() {
 		}
 	}
 	spec := buildSpec(status)
+	if *dark {
+		theme := ui.Dark()
+		spec.Theme = &theme
+	}
 
 	if *dumpPNG != "" || *dumpSVG != "" {
 		if err := dump(spec, *dumpPNG, *dumpSVG); err != nil {

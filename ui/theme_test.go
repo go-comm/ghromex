@@ -1,0 +1,370 @@
+package ui
+
+import (
+	"math"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/go-comm/ghromex/engine"
+)
+
+// 深色主题必须是一套完整令牌：漏填的颜色会被 withDefaults 补成浅色，
+// 在深底上表现为某块组件突然发白。这里逐个颜色字段检查非空，并验证
+// 关键语义：深底、浅字、亮强调色配深色文字。
+func TestDarkThemeIsComplete(t *testing.T) {
+	d := Dark()
+	colors := map[string]string{
+		"Bg":           d.Bg,
+		"Surface":      d.Surface,
+		"SurfaceAlt":   d.SurfaceAlt,
+		"Hover":        d.Hover,
+		"Press":        d.Press,
+		"Border":       d.Border,
+		"BorderStrong": d.BorderStrong,
+		"Text":         d.Text,
+		"Muted":        d.Muted,
+		"Accent":       d.Accent,
+		"AccentHover":  d.AccentHover,
+		"OnAccent":     d.OnAccent,
+		"AccentSoft":   d.AccentSoft,
+		"AccentBorder": d.AccentBorder,
+		"AccentText":   d.AccentText,
+
+		"Success":       d.Success,
+		"SuccessHover":  d.SuccessHover,
+		"OnSuccess":     d.OnSuccess,
+		"SuccessSoft":   d.SuccessSoft,
+		"SuccessBorder": d.SuccessBorder,
+		"SuccessText":   d.SuccessText,
+
+		"Warning":       d.Warning,
+		"WarningHover":  d.WarningHover,
+		"OnWarning":     d.OnWarning,
+		"WarningSoft":   d.WarningSoft,
+		"WarningBorder": d.WarningBorder,
+		"WarningText":   d.WarningText,
+
+		"Danger":       d.Danger,
+		"DangerHover":  d.DangerHover,
+		"OnDanger":     d.OnDanger,
+		"DangerSoft":   d.DangerSoft,
+		"DangerBorder": d.DangerBorder,
+		"DangerText":   d.DangerText,
+
+		"Info":       d.Info,
+		"InfoHover":  d.InfoHover,
+		"OnInfo":     d.OnInfo,
+		"InfoSoft":   d.InfoSoft,
+		"InfoBorder": d.InfoBorder,
+		"InfoText":   d.InfoText,
+	}
+	for name, c := range colors {
+		if c == "" {
+			t.Fatalf("%s 为空：深色主题必须是完整的一套", name)
+		}
+	}
+
+	l := Light()
+	if d.Bg == l.Bg || d.Surface == l.Surface || d.Text == l.Text {
+		t.Fatal("深色主题仍在用浅色的底/面/文字色")
+	}
+	if d.OnAccent == l.OnAccent {
+		t.Fatal("深色主题的强调色更亮，OnAccent 不能沿用白色")
+	}
+	if d.OnSuccess == l.OnSuccess || d.OnDanger == l.OnDanger || d.OnInfo == l.OnInfo {
+		t.Fatal("深色主题的语义实底更亮，OnSuccess/OnDanger/OnInfo 不能沿用浅色")
+	}
+	if d.Font != l.Font || d.Radius != l.Radius ||
+		d.MenuHeight != l.MenuHeight || d.ToolHeight != l.ToolHeight ||
+		d.StatusHeight != l.StatusHeight || d.ButtonHeight != l.ButtonHeight {
+		t.Fatal("两套主题的字体/尺寸应保持一致，只换颜色")
+	}
+}
+
+// 生成 CSS 时主按钮必须用 OnAccent，不能在样式表里写死白色：否则深色
+// 主题的亮蓝底上压白字会看不清。
+func TestDarkThemeCSS(t *testing.T) {
+	d := Dark()
+	css := d.css(32, 72, 24)
+	if strings.Contains(css, "$") {
+		t.Fatalf("CSS 里残留未替换的占位符:\n%s", css)
+	}
+	for _, want := range []string{d.Bg, d.Surface, d.Text, d.Accent, d.OnAccent} {
+		if !strings.Contains(css, want) {
+			t.Fatalf("CSS 缺少颜色 %s", want)
+		}
+	}
+	if strings.Contains(css, "#FFFFFF") {
+		t.Fatal("CSS 里仍有写死的白色（主按钮应使用 OnAccent）")
+	}
+	if !strings.Contains(css,
+		"background-color: "+d.Accent+"; border-color: "+d.Accent+"; color: "+d.OnAccent) {
+		t.Fatal("主按钮没有同时使用 Accent 与 OnAccent")
+	}
+	// 页面根节点要带文字色，否则深色背景上的裸文字仍是默认黑色。
+	if !strings.Contains(css, "background-color: "+d.Bg+"; color: "+d.Text) {
+		t.Fatal(".ui-page 没有设置主题文字色")
+	}
+}
+
+// 语义色必须真的进入样式表：实底按钮用 On*，徽标/提示条用淡底 + 描边 +
+// 淡底文字；Default 复用中性令牌。否则 Theme 字段只是摆设。
+func TestSemanticColorsCSS(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		th   Theme
+	}{
+		{"light", Light()},
+		{"dark", Dark()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			th := tc.th
+			css := th.css(32, 72, 24)
+			if strings.Contains(css, "$") {
+				t.Fatalf("CSS 里残留未替换的占位符:\n%s", css)
+			}
+			checks := []struct {
+				name  string
+				class string
+				decl  string
+			}{
+				{"默认按钮", ".ui-btn.is-default",
+					"background-color: " + th.Surface + "; border-color: " + th.Border + "; color: " + th.Text},
+				{"主按钮", ".ui-btn.is-primary",
+					"background-color: " + th.Accent + "; border-color: " + th.Accent + "; color: " + th.OnAccent},
+				{"成功按钮", ".ui-btn.is-success",
+					"background-color: " + th.Success + "; border-color: " + th.Success + "; color: " + th.OnSuccess},
+				{"警告按钮", ".ui-btn.is-warning",
+					"background-color: " + th.Warning + "; border-color: " + th.Warning + "; color: " + th.OnWarning},
+				{"危险按钮", ".ui-btn.is-danger",
+					"background-color: " + th.Danger + "; border-color: " + th.Danger + "; color: " + th.OnDanger},
+				{"信息按钮", ".ui-btn.is-info",
+					"background-color: " + th.Info + "; border-color: " + th.Info + "; color: " + th.OnInfo},
+
+				{"主徽标", ".ui-badge.is-primary",
+					"background-color: " + th.AccentSoft + "; border-color: " + th.AccentBorder + "; color: " + th.AccentText},
+				{"默认徽标", ".ui-badge.is-default",
+					"background-color: " + th.SurfaceAlt + "; border-color: " + th.Border + "; color: " + th.Text},
+				{"成功徽标", ".ui-badge.is-success",
+					"background-color: " + th.SuccessSoft + "; border-color: " + th.SuccessBorder + "; color: " + th.SuccessText},
+				{"警告徽标", ".ui-badge.is-warning",
+					"background-color: " + th.WarningSoft + "; border-color: " + th.WarningBorder + "; color: " + th.WarningText},
+				{"危险徽标", ".ui-badge.is-danger",
+					"background-color: " + th.DangerSoft + "; border-color: " + th.DangerBorder + "; color: " + th.DangerText},
+				{"信息徽标", ".ui-badge.is-info",
+					"background-color: " + th.InfoSoft + "; border-color: " + th.InfoBorder + "; color: " + th.InfoText},
+
+				{"主提示", ".ui-alert.is-primary",
+					"background-color: " + th.AccentSoft + "; border-color: " + th.AccentBorder + "; color: " + th.AccentText},
+				{"默认提示", ".ui-alert.is-default",
+					"background-color: " + th.SurfaceAlt + "; border-color: " + th.Border + "; color: " + th.Text},
+				{"成功提示", ".ui-alert.is-success",
+					"background-color: " + th.SuccessSoft + "; border-color: " + th.SuccessBorder + "; color: " + th.SuccessText},
+				{"警告提示", ".ui-alert.is-warning",
+					"background-color: " + th.WarningSoft + "; border-color: " + th.WarningBorder + "; color: " + th.WarningText},
+				{"危险提示", ".ui-alert.is-danger",
+					"background-color: " + th.DangerSoft + "; border-color: " + th.DangerBorder + "; color: " + th.DangerText},
+				{"信息提示", ".ui-alert.is-info",
+					"background-color: " + th.InfoSoft + "; border-color: " + th.InfoBorder + "; color: " + th.InfoText},
+			}
+			for _, c := range checks {
+				if !strings.Contains(css, c.class) {
+					t.Errorf("%s：CSS 缺少类 %s", c.name, c.class)
+				}
+				if !strings.Contains(css, c.decl) {
+					t.Errorf("%s：CSS 缺少声明 %q", c.name, c.decl)
+				}
+			}
+			for _, class := range []string{
+				".ui-text-primary", ".ui-text-default", ".ui-text-success",
+				".ui-text-warning", ".ui-text-danger", ".ui-text-info",
+			} {
+				if !strings.Contains(css, class) {
+					t.Errorf("CSS 缺少语义文字类 %s", class)
+				}
+			}
+		})
+	}
+}
+
+// 字符串级测试看不出级联顺序：内容区的 .ui-actions .ui-btn 会覆盖基础
+// 按钮底色。这里真渲染一颗语义按钮，从边框盒中心取色确认最终颜色。
+func TestSemanticButtonPaint(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		th   Theme
+	}{
+		{"light", Light()},
+		{"dark", Dark()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			variants := []struct {
+				name  string
+				class string
+				want  string
+			}{
+				{"primary", "is-primary", tc.th.Accent},
+				{"default", "is-default", tc.th.Surface},
+				{"success", "is-success", tc.th.Success},
+				{"warning", "is-warning", tc.th.Warning},
+				{"danger", "is-danger", tc.th.Danger},
+				{"info", "is-info", tc.th.Info},
+			}
+			for _, v := range variants {
+				t.Run(v.name, func(t *testing.T) {
+					th := tc.th
+					vp, buf := engine.NewBufferedViewport(200, 120)
+					doc, err := engine.OpenDocument(vp,
+						`<div class="ui-actions"><div class="ui-btn `+v.class+`" style="width:80px;height:24px"></div></div>`)
+					if err != nil {
+						t.Fatalf("打开文档失败: %v", err)
+					}
+					Install(doc, Spec{Theme: &th})
+					doc.Refresh()
+					engine.RenderNode(buf, doc)
+
+					el := doc.QuerySelector(".ui-btn")
+					if el == nil {
+						t.Fatal("找不到按钮")
+					}
+					box := el.GetBoundingClientRect()
+					x := (box.Left().Pixel() + box.Right().Pixel()) / 2
+					y := (box.Top().Pixel() + box.Bottom().Pixel()) / 2
+					r, g, b, a, ok := buf.ColorAt(x, y)
+					if !ok {
+						t.Fatalf("取色失败: (%d,%d)", x, y)
+					}
+					wr, wg, wb := mustRGB(t, v.want)
+					if r != wr || g != wg || b != wb || a != 255 {
+						t.Fatalf("按钮底色 = #%02X%02X%02X（alpha %d），期望 %s",
+							r, g, b, a, v.want)
+					}
+				})
+			}
+		})
+	}
+}
+
+func mustRGB(t *testing.T, s string) (uint8, uint8, uint8) {
+	t.Helper()
+	s = strings.TrimPrefix(s, "#")
+	if len(s) != 6 {
+		t.Fatalf("颜色格式错误: %q", s)
+	}
+	v, err := strconv.ParseUint(s, 16, 32)
+	if err != nil {
+		t.Fatalf("颜色格式错误: %q: %v", s, err)
+	}
+	return uint8(v >> 16), uint8(v >> 8), uint8(v)
+}
+
+// 语义色的对比度由主题负责：实底上的 On*、淡底上的 *Text 都要达到
+// WCAG AA 的 4.5:1（组件字号多为 12–14px，不能按大字号放宽）。
+func TestSemanticContrast(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		th   Theme
+	}{
+		{"light", Light()},
+		{"dark", Dark()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			th := tc.th
+			pairs := []struct {
+				name string
+				fg   string
+				bg   string
+			}{
+				{"主按钮", th.OnAccent, th.Accent},
+				{"成功按钮", th.OnSuccess, th.Success},
+				{"警告按钮", th.OnWarning, th.Warning},
+				{"危险按钮", th.OnDanger, th.Danger},
+				{"信息按钮", th.OnInfo, th.Info},
+				{"主按钮悬停", th.OnAccent, th.AccentHover},
+				{"成功按钮悬停", th.OnSuccess, th.SuccessHover},
+				{"警告按钮悬停", th.OnWarning, th.WarningHover},
+				{"危险按钮悬停", th.OnDanger, th.DangerHover},
+				{"信息按钮悬停", th.OnInfo, th.InfoHover},
+				{"默认按钮悬停", th.Text, th.SurfaceAlt},
+				{"默认按钮按下", th.Text, th.Press},
+				{"主徽标", th.AccentText, th.AccentSoft},
+				{"成功徽标", th.SuccessText, th.SuccessSoft},
+				{"警告徽标", th.WarningText, th.WarningSoft},
+				{"危险徽标", th.DangerText, th.DangerSoft},
+				{"信息徽标", th.InfoText, th.InfoSoft},
+			}
+			for _, p := range pairs {
+				if ratio := contrastRatio(t, p.fg, p.bg); ratio < 4.5 {
+					t.Errorf("%s：%s 在 %s 上对比度 %.2f，低于 4.5", p.name, p.fg, p.bg, ratio)
+				}
+			}
+		})
+	}
+}
+
+func contrastRatio(t *testing.T, fg, bg string) float64 {
+	t.Helper()
+	a, b := hexLuminance(t, fg), hexLuminance(t, bg)
+	if a < b {
+		a, b = b, a
+	}
+	return (a + 0.05) / (b + 0.05)
+}
+
+func hexLuminance(t *testing.T, s string) float64 {
+	t.Helper()
+	s = strings.TrimPrefix(s, "#")
+	if len(s) != 6 {
+		t.Fatalf("颜色格式错误: %q", s)
+	}
+	v, err := strconv.ParseUint(s, 16, 32)
+	if err != nil {
+		t.Fatalf("颜色格式错误: %q: %v", s, err)
+	}
+	channel := func(shift uint) float64 {
+		c := float64(v>>shift&0xFF) / 255
+		if c <= 0.04045 {
+			return c / 12.92
+		}
+		return math.Pow((c+0.055)/1.055, 2.4)
+	}
+	return 0.2126*channel(16) + 0.7152*channel(8) + 0.0722*channel(0)
+}
+
+// 主题要真的经 Install 进到文档里，而不只是 css() 能拼出字符串。
+// 取 body 外边距里的像素（页面内容之外）：那是 html 的底色，正好验证
+// 样式表被注入并参与级联。
+func TestInstallAppliesThemeBackground(t *testing.T) {
+	cases := []struct {
+		name  string
+		theme Theme
+		want  [3]uint8
+	}{
+		{"light", Light(), [3]uint8{0xF1, 0xF5, 0xF9}},
+		{"dark", Dark(), [3]uint8{0x0F, 0x17, 0x2A}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			vp, buf := engine.NewBufferedViewport(160, 120)
+			doc, err := engine.OpenDocument(vp,
+				`<div style="width:40px;height:40px">x</div>`)
+			if err != nil {
+				t.Fatalf("打开文档失败: %v", err)
+			}
+			theme := tc.theme
+			Install(doc, Spec{Theme: &theme})
+			doc.Refresh()
+			engine.RenderNode(buf, doc)
+
+			r, g, b, a, ok := buf.ColorAt(4, 4)
+			if !ok {
+				t.Fatal("取色失败")
+			}
+			if r != tc.want[0] || g != tc.want[1] || b != tc.want[2] || a != 255 {
+				t.Fatalf("画布底色 = #%02X%02X%02X（alpha %d），期望 #%02X%02X%02X",
+					r, g, b, a, tc.want[0], tc.want[1], tc.want[2])
+			}
+		})
+	}
+}

@@ -199,6 +199,13 @@ if _, err := app.LoadHTML(page); err != nil {
 return app.Run()
 ```
 
+内置浅色与深色两套主题，`Spec.Theme` 留空时用浅色；换深色只需：
+
+```go
+dark := ui.Dark()
+spec.Theme = &dark
+```
+
 页面内容只写类名，样式全部来自注入的主题样式表：
 
 ```html
@@ -219,11 +226,38 @@ return app.Run()
 </div>
 ```
 
-可用组件类：`ui-page`/`ui-title`/`ui-subtitle`/`ui-badge`/`ui-card`/`ui-h2`/
-`ui-text`/`ui-label`/`ui-input`/`ui-btn`（配合 `is-primary`）/`ui-actions`/
-`ui-list`/`ui-muted`。
+可用组件类：`ui-page`/`ui-title`/`ui-subtitle`/`ui-badge`/`ui-alert`/`ui-card`/
+`ui-h2`/`ui-text`/`ui-label`/`ui-input`/`ui-btn`/`ui-actions`/`ui-list`/`ui-muted`。
 
-![组件库示例](examples/kit/screenshot.png)
+主题内置六组语义色，按钮、徽标、提示条用 `is-*` 后缀，文字色用 `ui-text-*`：
+
+| 语义 | 后缀 | 浅色实底 / On | 深色实底 / On | 用途 |
+| --- | --- | --- | --- | --- |
+| 强调 Primary | `is-primary` | `#2563EB` / `#FFFFFF` | `#60A5FA` / `#0B1220` | 主按钮、选中、焦点 |
+| 默认 Default | `is-default` | `#FFFFFF` / `#0F172A` | `#1E293B` / `#E2E8F0` | 次按钮、取消 |
+| 成功 Success | `is-success` | `#15803D` / `#FFFFFF` | `#4ADE80` / `#052E16` | 完成、通过 |
+| 警告 Warning | `is-warning` | `#F59E0B` / `#451A03` | `#FBBF24` / `#451A03` | 待处理、风险 |
+| 危险 Danger | `is-danger` | `#DC2626` / `#FFFFFF` | `#F87171` / `#2A0505` | 删除、错误 |
+| 信息 Info | `is-info` | `#0E7490` / `#FFFFFF` | `#22D3EE` / `#083344` | 说明、辅助 |
+
+```html
+<div class="ui-actions">
+	<div class="ui-btn is-success">通过</div>
+	<div class="ui-btn is-danger">删除</div>
+</div>
+<span class="ui-badge is-warning">待处理</span>
+<div class="ui-alert is-info">共 12 项，已全部同步。</div>
+<span class="ui-text-danger">保存失败</span>
+```
+
+按钮用实底/`On*`；徽标与提示条用 `*Soft` 淡底、`*Border` 描边和 `*Text`
+文字。`Default` 不单独存令牌，复用 `Surface`/`Border`/`Text`/`SurfaceAlt`/
+`Press` 这组中性色。对比度由主题负责（Warning 的实底用深色字，其余实底在
+浅色主题用白字、深色主题用同色系深字）。
+
+![组件库示例（浅色）](examples/kit/screenshot.png)
+
+![组件库示例（深色）](examples/kit/screenshot-dark.png)
 
 ![下拉菜单](examples/kit/menu.png)
 
@@ -238,27 +272,46 @@ return app.Run()
 - **换文档自动重装**：外壳是文档的一部分（`position:fixed` + body 首尾占位块），
   `App` 通过 `SetOnDocument` 在每次 `OpenDocument` 后重装；只想要文档层
   （无头导出、嵌进已有窗口）时直接用 `ui.Install(doc, spec)`。
-- **主题是令牌**：`ui.Light()` 生成一整张样式表，改 `ui.Theme` 的字段即可换色/
-  换圆角（`spec.Theme = &theme`）。只使用引擎支持的 CSS 子集，没有阴影和过渡，
-  横向排列靠 `inline-block`，分隔线是 1px 的实体元素。
-- **图标是字体字形**：`WithIcon("save")` 从内置表取 Segoe MDL2 Assets 的码位
-  （`new`/`open`/`save`/`copy`/`cut`/`paste`/`undo`/`redo`/`search`/`replace`/
-  `settings`/`info`/`delete`/`refresh`/`print`/`sort`/`download`/`upload`/
-  `home`/`back`/`forward`/`help`/`play`/`pause`/`document`），也可以直接传字符。
-  工具栏有图标时只画图标（30×30 方形按钮），没图标时退回文字；菜单里只要有一项
-  带图标，整张菜单就预留图标列。图标字体是 Windows 10/11 自带的 `segmdl2.ttf`
-  （颜色跟随 `color`，悬停/禁用自动变色）；其他平台在 `Theme.IconFont` 里换一个
-  同编码的字体，或者不调 `WithIcon` 只用文字。
+- **主题是令牌**：内置 `ui.Light()` 与 `ui.Dark()`，各生成一整张样式表；改
+  `ui.Theme` 的字段即可换色/换圆角（`spec.Theme = &theme`）。深色主题的强调色
+  更亮，主按钮文字由 `OnAccent` 保证对比度。语义色每组都有实底、悬停、`On*`、
+  淡底、描边和淡底文字；`Default` 复用中性令牌，避免同一颜色存两份。主题测试
+  用 WCAG AA 的 4.5:1 校验实底与淡底文字。零值字段统一按浅色补齐，所以微调
+  深色要先取 `ui.Dark()` 再改字段，不能只写一两个颜色指望自动变深。只使用引擎
+  支持的 CSS 子集；主题保持扁平（不用阴影），没有过渡，横向排列靠 `inline-block`，
+  分隔线是 1px 的实体元素。
+- **图标是字体字形**：`WithIcon("save")` 从内置表取 Segoe MDL2 Assets 的码位，
+  覆盖文件/编辑、方向/导航、对齐/排版、播放/媒体、视图/窗口和通用命令（完整表
+  见 `ui/icon.go` 的 `iconGlyphs`），也可以直接传字符。工具栏有图标时只画图标
+  （30×30 方形按钮），没图标时退回文字；菜单里只要有一项带图标，整张菜单就
+  预留图标列。图标字体是 Windows 10/11 自带的 `segmdl2.ttf`（颜色跟随 `color`，
+  悬停/禁用自动变色）；其他平台在 `Theme.IconFont` 里换一个同编码的字体，或者
+  不调 `WithIcon` 只用文字。
+
+常用图标名：
+
+| 分类 | 图标名 |
+| --- | --- |
+| 方向/导航 | `up` `down` `left` `right` `chevron-up` `chevron-down` `chevron-left` `chevron-right` `page-left` `page-right` `back` `forward` `home` `go-to-start` |
+| 对齐/排版 | `align-left` `align-center` `align-right` `bulleted-list` `list` `check-list` `bold` `italic` `underline` `font-size` `font-color` `highlight` |
+| 播放/媒体 | `play` `pause` `stop` `record` `previous` `next` `rewind` `fast-forward` `shuffle` `repeat` `repeat-one` `volume` `mute` `fullscreen` `back-to-window` |
+| 文件/编辑 | `new` `open` `save` `save-as` `copy` `cut` `paste` `undo` `redo` `search` `replace` `print` `delete` `refresh` |
+| 视图/窗口 | `zoom-in` `zoom-out` `fit-page` `view` `view-all` `preview` `dock-left` `dock-right` `dock-bottom` `close-pane` `open-pane` `minimize` `maximize` `restore` `window-close` |
+| 通用 | `check` `close` `add` `remove` `more` `filter` `settings` `info` `help` `warning` `error` `completed` `favorite` `share` `link` `attach` `send` `folder` `calendar` `sort` `download` `upload` |
+
+别名：`arrow-up`/`arrow-down`/`arrow-left`/`arrow-right`、`open-file`、`trash`、
+`reload`、`printer`、`plus`、`minus`。
 
 限制：`ui` 不接管原生窗口菜单；菜单只支持鼠标操作（`Esc` 收起，没有方向键/
 回车导航）；页面里 `z-index` 高于外壳（1100）的元素会盖住菜单栏；窗口很窄时
-靠右的菜单浮层可能超出右边缘（浮层左对齐菜单标签，不做翻转）；主题只带浅色，
-深色留给应用自己定义。
+靠右的菜单浮层可能超出右边缘（浮层左对齐菜单标签，不做翻转）；内置主题只有
+浅色/深色两套，更多配色改 `Theme` 字段。
 
 跑一下示例（`-shot` 用真实字体截图，`-shot-menu` 连菜单一起拍）：
 
 ```
 go run ./examples/kit
+go run ./examples/kit -dark
 go run ./examples/kit -shot kit.png -shot-menu 文件
 ```
 
@@ -331,8 +384,10 @@ Spec）与外壳的三条约定（换文档重装、快捷键先行、只用手�
 `display(none/inline/inline-block/block)`、`width/height`、
 `box-sizing(content-box/border-box，表单控件 UA 默认 border-box 对齐 Chrome)`、
 `margin*`（相邻块级兄弟折叠：取较大者；父-子穿越/空块折叠未实现）、`padding*`、
-`border` 简写与 `border-width/color/style`、`border-radius`(四角统一，仅水平半径)、
+`border`/`border-top/right/bottom/left` 简写、`border-width/color/style`（1~4 值展开）
+与 12 个单边长写（四边可独立宽度/颜色/样式）、`border-radius`(四角统一，仅水平半径)、
 `border-collapse(collapse/separate，仅表格布局读取，见「已知限制」的表格模型)`、
+`box-shadow`（外阴影；逗号分隔多条、px/pt/dp 偏移/模糊/扩散、颜色，`inset` 仅解析不绘制）、
 `background-color`/`background`、`color`、`font-size`、`font-weight(bold)`、`font-family`、
 `text-align(left/center/right)`、`text-decoration(underline/line-through/none，随父链继承)`、
 `white-space(pre)`（保留空白与制表符、按换行强制断行、不软换行；UA 的 `pre`/`code` 用它，
@@ -486,11 +541,18 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
 - `DrawImage` 尚未实现（接口已预留）
 - 圆角裁剪（`overflow:hidden` + `border-radius`）的角区用「盒后底色」补盖实现：背后不是纯色（渐变/图片）时是近似；后端不支持 `engine.SpriteDrawer` 时不补盖（退化为矩形裁剪）
 - 裁剪仅由实现 `engine.Clipper`（`PushClip`/`PopClip`）的后端生效（当前 `BufferGraphics`、SDL2 均已实现；自定义后端未实现时静默跳过裁剪、仅不裁剪不报错）
-- 边框样式只按**单色实心**绘制：`inset/outset/groove/ridge/dashed/dotted/double`
-  都退化为 solid，且不支持四边不同颜色——Chrome 的 `input`（2px inset）、
-  `button`（2px outset #000）、`hr`（1px inset，上暗 #808080 下浅）因此只做到
-  外盒尺寸一致，明暗双色边框与线型差异保留（对照页 examples/ua 的 hr 引擎画成
-  两行同色）
+- 边框只画**实线**：`inset/outset/groove/ridge/dashed/dotted/double` 都退化为
+  solid。四边的宽度/颜色/样式已独立支持；直角边框的角按外角到内角的斜线分色
+  （miter，两邻边宽度不同时斜线也按宽度比例走），圆角处两邻边的颜色按 45°
+  硬分界近似（Chrome 是渐变过渡），因此 Chrome 的 `input`（2px inset）、`button`
+  （2px outset #000）、`hr`（1px inset，上暗 #808080 下浅）仍只做到外盒尺寸与
+  单边颜色一致，线型明暗差异保留（对照页 examples/ua 的 hr 引擎画成两行同色）
+- `box-shadow` 只绘制**外阴影**：`inset` 会解析并保存，但本轮不绘制（内阴影需要
+  在边框盒内单独做遮罩）。偏移/模糊/扩散只接受 px/pt/dp（偏移百分比不支持），
+  模糊用三次盒式模糊近似高斯；大盒子（精灵超过约 70 万像素）或后端不实现
+  `engine.SpriteDrawer` 时退化为圆角矩形填充（有模糊时用多层近似；后端实现
+  `engine.Clipper` 时按四条裁剪带把边框盒挖掉；两者都不支持时盒内可能透出阴影）。
+  外阴影按 CSS 规则裁在元素边框盒之外，元素背景透明时盒内也不会透出阴影
 - 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；
   无 webfont 加载、无斜体渲染（font-style 仅解析不渲染）；
   `monospace`/`cursive` 映射到 simsun.ttc 的 face 0（SimSun），Chrome 用的是
