@@ -63,6 +63,17 @@ func TestMouseHandlerConsumesBeforeEngine(t *testing.T) {
 	clicks := 0
 	el.OnClick(func(*engine.MouseEvent) { clicks++ })
 
+	// 先空跑一段把平台自身的首帧事件排空，再装钩子：dummy 驱动在窗口显示
+	// （首帧 Present）时会把鼠标位置“瞬移”到窗口中心，那条 SDL_MOUSEMOTION
+	// 会在注入的事件之后到达，钩子于是多收一个事件，下面的“恰好 3 个”断言
+	// 随机失败（机器负载高时尤其明显，例如 go test ./... 并发跑包）。
+	// 装钩子放在空跑之后，是为了不让这条平台事件混进 got——真实平台同样会
+	// 在显示/聚焦时发这类事件，按真实时序消费掉即可，不需要在断言里容忍它。
+	win.SetAutoExit(120 * time.Millisecond)
+	if err := win.Run(); err != nil {
+		t.Fatal(err)
+	}
+
 	var got []MouseEvent
 	win.SetMouseHandler(func(ev MouseEvent) bool {
 		got = append(got, ev)
