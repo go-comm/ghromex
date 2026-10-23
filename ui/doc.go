@@ -66,8 +66,20 @@
 //	auto.OnChange(func(on bool) { /* ... */ })
 //	page.AppendChild(auto.Element())
 //
+// 横着一排控件（查找替换栏、地址栏这类）用 NewBar 拼：条内控件排成一行、
+// 按 Theme.BarHeight 垂直居中，条自己不管摆哪儿——定位声明交给 SetInline，
+// 收起用 SetVisible（它只在应用那份声明上补 display:none，不会冲掉 top）：
+//
+//	bar := ui.NewBar(doc, keyword, find).SetInline("position:absolute;left:0;top:72px")
+//	bar.SetVisible(false)
+//	page.AppendChild(bar.Element())
+//
 // 输入框目前没有实时 input/change 事件，实时联动用 OnKeyDown 或在命令执行
-// 时读取 Value；只读多行文本用 TextView，可编辑多行用 TextAreaView。
+// 时读取 Value；只读多行文本用 TextView，可编辑多行用 TextAreaView——要它
+// 贴着铺满整块内容区（纸面而不是表单字段）就切平铺变体：
+//
+//	editor := ui.NewTextArea(doc, "")
+//	editor.SetVariant("plain") // 去掉描边与圆角
 //
 // # 图标
 //

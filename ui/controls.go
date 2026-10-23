@@ -390,6 +390,7 @@ func (v *TextInputView) OnKeyDown(f func(*engine.KeyEvent) bool) {
 type TextAreaView struct {
 	el      engine.HTMLElement
 	enabled bool
+	variant string
 }
 
 // NewTextArea 创建可编辑多行输入框。
@@ -403,6 +404,29 @@ func NewTextArea(doc engine.HTMLDocument, value string) *TextAreaView {
 }
 
 func (v *TextAreaView) Element() engine.HTMLElement { return v.el }
+
+// SetVariant 设置外观变体，如 "plain"（贴边铺满：无描边、无圆角）；
+// 也可以直接传 "is-plain"。传空串回到默认描边。
+func (v *TextAreaView) SetVariant(name string) *TextAreaView {
+	if v == nil {
+		return v
+	}
+	name = strings.TrimSpace(name)
+	if name != "" && !strings.HasPrefix(name, "is-") {
+		name = "is-" + name
+	}
+	v.variant = name
+	v.syncClass()
+	return v
+}
+
+func (v *TextAreaView) syncClass() {
+	class := "system-ui-textarea"
+	if v.variant != "" {
+		class += " " + v.variant
+	}
+	setClass(v.el, class)
+}
 
 // Value 返回当前值。
 func (v *TextAreaView) Value() string {
@@ -496,4 +520,93 @@ func (v *FieldView) SetError(text string) {
 	}
 	v.err.RemoveAttribute("style")
 	addClass(v.el, "is-error")
+}
+
+// BarView 是页面里的横向控件条：一组控件排成一行（查找替换栏、地址栏这类）。
+//
+// 它和外壳的工具栏不是一回事：工具栏是 fixed 在视口上的应用外壳，控件条属于
+// 页面内容，摆在哪里由应用决定，所以 NewBar 不写定位。条内控件按 inline-block
+// 排开（引擎没有 flex，ui 的主题排工具栏也是这个办法），窗口太窄放不下时会
+// 从行尾掉到下一行——要 nowrap 的话在主题里加 white-space。
+//
+// 定位声明与可见性分开管：应用用 SetInline 写自己那份内联声明（例如
+// "position:absolute;left:0;top:72px"），SetVisible 只在其上补 display，
+// 两者不会互相冲掉。
+type BarView struct {
+	el      engine.HTMLElement
+	inline  string
+	visible bool
+}
+
+// NewBar 创建控件条，controls 依次从左到右排入（nil 跳过）。
+func NewBar(doc engine.HTMLDocument, controls ...Control) *BarView {
+	v := &BarView{el: newEl(doc, "div", "system-ui-bar", ""), visible: true}
+	v.Append(controls...)
+	return v
+}
+
+func (v *BarView) Element() engine.HTMLElement { return v.el }
+
+// Append 追加控件，顺序即从左到右。
+func (v *BarView) Append(controls ...Control) *BarView {
+	if v == nil {
+		return v
+	}
+	var first engine.HTMLElement
+	var rest []engine.HTMLElement
+	for _, c := range controls {
+		if c == nil || c.Element() == nil {
+			continue
+		}
+		if first == nil {
+			first = c.Element()
+			continue
+		}
+		rest = append(rest, c.Element())
+	}
+	if first != nil {
+		v.el.AppendChild(first, rest...)
+	}
+	return v
+}
+
+// SetInline 设置应用自己那份内联声明（定位、宽度等）；传空串清掉。
+// 显隐请用 SetVisible，直接往元素写 style 会被 SetVisible 覆盖。
+func (v *BarView) SetInline(decls string) *BarView {
+	if v == nil {
+		return v
+	}
+	v.inline = strings.Trim(strings.TrimSpace(decls), ";")
+	v.syncStyle()
+	return v
+}
+
+// SetVisible 显示/隐藏控件条。隐藏写的是 display:none：引擎会连布局盒一起
+// 清掉，条里的控件既看不见也点不到（与渲染层同口径）。
+func (v *BarView) SetVisible(on bool) *BarView {
+	if v == nil || v.visible == on {
+		return v
+	}
+	v.visible = on
+	v.syncStyle()
+	return v
+}
+
+// Visible 报告控件条当前是否可见。
+func (v *BarView) Visible() bool { return v != nil && v.visible }
+
+func (v *BarView) syncStyle() {
+	style := v.inline
+	if !v.visible {
+		if style != "" {
+			style += ";"
+		}
+		style += "display:none"
+	}
+	switch {
+	case style == "":
+		v.el.RemoveAttribute("style")
+	case v.el.GetAttribute("style") != style:
+		v.el.SetAttribute("style", style)
+	}
 }

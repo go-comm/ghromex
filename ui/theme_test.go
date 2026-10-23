@@ -472,3 +472,81 @@ func TestSetThemeSwitchesBackground(t *testing.T) {
 	sh.SetTheme(Light())
 	check("切回浅色", [3]uint8{0xF1, 0xF5, 0xF9})
 }
+
+// 控件条（NewBar）的样式必须跟着令牌走：条高取 Theme.BarHeight，条内控件
+// 靠推导出的上下内边距垂直居中（写死数字的话换主题就散了），并且带上主题
+// 底色与分隔线；textarea 的平铺变体（贴边铺满的编辑区）不带描边与圆角。
+func TestBarThemeCSS(t *testing.T) {
+	th := Light()
+	css := th.css(32, 72, 24)
+	i := strings.Index(css, " .system-ui-bar {")
+	if i < 0 {
+		t.Fatal("CSS 里没有 .system-ui-bar 规则")
+	}
+	end := i + 320
+	if end > len(css) {
+		end = len(css)
+	}
+	rule := css[i:end]
+	down := (th.BarHeight - th.ButtonHeight) / 2
+	for _, want := range []string{
+		"height: " + strconv.Itoa(th.BarHeight) + "px",
+		"padding: " + strconv.Itoa(down) + "px",
+		"line-height: " + strconv.Itoa(th.ButtonHeight) + "px",
+		"white-space: nowrap",
+	} {
+		if !strings.Contains(rule, want) {
+			t.Errorf("控件条规则缺少 %s，规则体：\n%s", want, rule)
+		}
+	}
+	if !strings.Contains(css, " .system-ui-textarea.is-plain {") {
+		t.Error("CSS 里没有 textarea 的平铺变体 .system-ui-textarea.is-plain")
+	}
+
+	// 换一套条高，内边距要跟着变（否则控件不在条里居中）。
+	custom := th
+	custom.BarHeight = 64
+	if got := custom.css(32, 72, 24); !strings.Contains(got, "height: 64px; padding: 17px") {
+		t.Error("BarHeight 改 64 后条内边距没跟着推导")
+	}
+	// 零值走 withDefaults 补齐（漏填不该生成 height: 0px 的条）。
+	filled := Theme{}.withDefaults()
+	if filled.BarHeight != th.BarHeight {
+		t.Fatalf("BarHeight 默认值 = %d, want %d", filled.BarHeight, th.BarHeight)
+	}
+	if got := filled.css(32, 72, 24); !strings.Contains(got, "height: "+strconv.Itoa(th.BarHeight)+"px") {
+		t.Error("补齐默认值后控件条高度不对")
+	}
+}
+
+// 装饰元素不该吃掉点击：body 首尾的占位块（DOM 序在页面内容之后）与栏内
+// 1px 分隔线都要 pointer-events:none——否则浮在内容上的控件条看得见点不到。
+// 反过来，栏与控件条本身必须保持可命中。
+func TestDecorativeCSSPointerEvents(t *testing.T) {
+	css := Light().css(32, 72, 24)
+	// ruleBody 返回选择器后第一条规则的正文（到第一个 } 为止）。
+	ruleBody := func(sel string) string {
+		t.Helper()
+		i := strings.Index(css, sel)
+		if i < 0 {
+			t.Fatalf("CSS 里没有 %s", sel)
+		}
+		j := strings.Index(css[i:], "}")
+		if j < 0 {
+			t.Fatalf("%s 的规则没有结尾", sel)
+		}
+		return css[i : i+j]
+	}
+	for _, sel := range []string{
+		".system-ui-spacer-top {", ".system-ui-spacer-bottom {", ".system-ui-hairline {",
+	} {
+		if !strings.Contains(ruleBody(sel), "pointer-events: none") {
+			t.Errorf("%s 缺 pointer-events: none（会吃掉下面内容的点击）", sel)
+		}
+	}
+	for _, sel := range []string{" .system-ui-toolbar {", " .system-ui-menu {", " .system-ui-bar {"} {
+		if strings.Contains(ruleBody(sel), "pointer-events: none") {
+			t.Errorf("%s 不该整条不可点", sel)
+		}
+	}
+}

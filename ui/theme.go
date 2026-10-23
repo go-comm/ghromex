@@ -79,6 +79,9 @@ type Theme struct {
 	StatusHeight     int // 状态栏高度
 	StatusRightWidth int // 状态栏右侧消息预留宽度
 	ButtonHeight     int // 按钮高度
+	// BarHeight 是控件条（NewBar）的高度。控件条是页面内容里的一行工具，
+	// 应用要按它给自己的内容让位，所以尺寸得能从主题读到，不能只写在 CSS 里。
+	BarHeight int
 }
 
 // Light 返回默认浅色主题。
@@ -139,6 +142,7 @@ func Light() Theme {
 		StatusHeight:     24,
 		StatusRightWidth: 280,
 		ButtonHeight:     30,
+		BarHeight:        44,
 	}
 }
 
@@ -262,6 +266,7 @@ func (t Theme) withDefaults() Theme {
 		{&t.Radius, d.Radius}, {&t.MenuHeight, d.MenuHeight},
 		{&t.ToolHeight, d.ToolHeight}, {&t.StatusHeight, d.StatusHeight},
 		{&t.StatusRightWidth, d.StatusRightWidth}, {&t.ButtonHeight, d.ButtonHeight},
+		{&t.BarHeight, d.BarHeight},
 	}
 	for _, s := range sizes {
 		if *s.dst <= 0 {
@@ -279,6 +284,12 @@ func (t Theme) withDefaults() Theme {
 //   - 主题保持扁平、不用阴影：分隔线用 1px 的实体 div（.system-ui-hairline）；
 //   - 没有 transition：悬停/按下靠 :hover/:active 直接切底色。
 func (t Theme) css(menuTop, chromeTop, status int) string {
+	// 控件条的上下内边距由条高减控件高推出来：条内控件靠这条 padding 垂直
+	// 居中，写死数字的话换主题（改了 BarHeight）就对不上。
+	barDown := (t.BarHeight - t.ButtonHeight) / 2
+	if barDown < 0 {
+		barDown = 0
+	}
 	r := strings.NewReplacer(
 		"$font$", t.Font,
 		"$iconFont$", t.IconFont,
@@ -327,6 +338,8 @@ func (t Theme) css(menuTop, chromeTop, status int) string {
 		"$statusH$", strconv.Itoa(t.StatusHeight),
 		"$statusRightW$", strconv.Itoa(t.StatusRightWidth),
 		"$btnH$", strconv.Itoa(t.ButtonHeight),
+		"$barH$", strconv.Itoa(t.BarHeight),
+		"$barPad$", strconv.Itoa(barDown),
 		"$toolTop$", strconv.Itoa(menuTop),
 		"$chromeH$", strconv.Itoa(chromeTop),
 		"$statusSpace$", strconv.Itoa(status),
@@ -467,7 +480,7 @@ html { background-color: $bg$; }
 
 /* ===== 外壳：菜单栏 / 工具栏 / 状态栏 ===== */
 
-.system-ui-hairline { height: 1px; background-color: $border$; }
+.system-ui-hairline { height: 1px; background-color: $border$; pointer-events: none; }
 
 .system-ui-menubar {
 	position: fixed; left: 0; top: 0; width: 100%; height: $menuH$px;
@@ -637,9 +650,11 @@ html { background-color: $bg$; }
 
 /* 占位块：fixed 的栏不占文档流，页面内容要靠这两块让出空间。
    放在 body 首尾而不是给 body 加 padding，是为了不覆盖应用自己的
-   body 内边距（应用的页面通常自己也排了间距）。 */
-.system-ui-spacer-top { height: $chromeH$px; }
-.system-ui-spacer-bottom { height: $statusSpace$px; }
+   body 内边距（应用的页面通常自己也排了间距）。
+   pointer-events:none：它们是纯排版的盒子，DOM 序又排在页面内容之后，
+   留着可命中就会吃掉压在下面的绝对定位内容（浮层、控件条）的点击。 */
+.system-ui-spacer-top { height: $chromeH$px; pointer-events: none; }
+.system-ui-spacer-bottom { height: $statusSpace$px; pointer-events: none; }
 
 /* ===== 页面组件 ===== */
 
@@ -799,6 +814,28 @@ html { background-color: $bg$; }
 .system-ui-label {
 	display: block; margin: 0 0 5px 0; font-size: 12px; color: $muted$;
 }
+
+/* 控件条：页面内容里的一行工具（查找替换栏、地址栏这类）。
+   与外壳的工具栏区别在于它属于页面：定位与可见性由应用决定，所以这里
+   不写 position/top，也不 fixed 在视口上；底色、描边、控件间距由主题给。
+   横向排布仍是 inline-block（引擎没有 flex），line-height 用控件高度把
+   它们顶到同一基线上。 */
+.system-ui-bar {
+	position: relative; box-sizing: border-box; width: 100%;
+	height: $barH$px; padding: $barPad$px 8px;
+	background-color: $surfaceAlt$; border-bottom: 1px solid $border$;
+	font-family: $font$; font-size: 13px; line-height: $btnH$px;
+	white-space: nowrap;
+}
+.system-ui-bar .system-ui-input,
+.system-ui-bar .system-ui-select,
+.system-ui-bar .system-ui-btn,
+.system-ui-bar .system-ui-check { margin-right: 8px; vertical-align: middle; }
+/* 条内的输入框默认收窄：280px 是表单页的宽度，一行塞不下几件控件。 */
+.system-ui-bar .system-ui-input,
+.system-ui-bar .system-ui-select { width: 170px; }
+.system-ui-bar .system-ui-check { line-height: $btnH$px; }
+
 .system-ui-input {
 	width: 280px; height: 30px; padding: 0 10px; box-sizing: border-box;
 	border: 1px solid $borderStrong$; border-radius: 7px;
@@ -828,6 +865,10 @@ html { background-color: $bg$; }
 	line-height: 20px; font-family: $font$; overflow: auto;
 }
 .system-ui-textarea:focus { border-color: $accent$; }
+/* 平铺变体：贴边铺满的编辑区（文档纸面、全屏输入）不要描边和圆角——
+   它占的是整块内容区，边框会把纸面切成「一个控件」而不是「一张纸」。
+   几何（top/width/height）仍由应用按视口尺寸写内联样式：引擎没有 calc。 */
+.system-ui-textarea.is-plain { border: none; border-radius: 0; }
 .system-ui-textview {
 	height: 140px; padding: 12px; box-sizing: border-box;
 	border: 1px solid $border$; border-radius: $radius$px;

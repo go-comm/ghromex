@@ -341,3 +341,113 @@ func textsOf(els []engine.HTMLElement) []string {
 	}
 	return out
 }
+
+// 控件条：横向排成一行、定位与显隐分开管，条里的控件照样能点。
+func TestBarControl(t *testing.T) {
+	doc, page := controlPage(t)
+
+	clicked := 0
+	find := NewTextInput(doc, "")
+	btn := NewButton(doc, "查找", func() { clicked++ })
+	bar := NewBar(doc, find, btn).SetInline("position:absolute;left:0;top:40px")
+	page.AppendChild(bar.Element())
+	doc.Refresh()
+
+	if got := bar.Element().GetAttribute("class"); !strings.Contains(got, "system-ui-bar") {
+		t.Fatalf("控件条 class = %q，期望含 system-ui-bar", got)
+	}
+	if got := len(bar.Element().Children()); got != 2 {
+		t.Fatalf("控件条子元素数 = %d, want 2", got)
+	}
+
+	// 可见时按钮点得到，并记下它的中心点，收起后在同一处再点一次。
+	r := bar.Element().GetBoundingClientRect()
+	ra := find.Element().GetBoundingClientRect()
+	rb := btn.Element().GetBoundingClientRect()
+	cx := (rb.Left().Pixel() + rb.Right().Pixel()) / 2
+	cy := (rb.Top().Pixel() + rb.Bottom().Pixel()) / 2
+	clickAt(t, doc, cx, cy)
+	if clicked != 1 {
+		t.Fatalf("点击次数 = %d, want 1（条里的按钮该能点着）", clicked)
+	}
+
+	bar.SetVisible(false)
+	doc.Refresh()
+	// 收起：只补 display:none，应用那份定位声明得留着；隐藏后不能还能点。
+	style := bar.Element().GetAttribute("style")
+	if !strings.Contains(style, "display:none") || !strings.Contains(style, "top:40px") {
+		t.Fatalf("收起时样式 = %q，期望同时有 display:none 与 top:40px", style)
+	}
+	// 收起后再点同一处：既要命中不到，也不能触发动作。这里不走 clickAt
+	// （它对「没命中任何元素」直接 fatal），而是直接用命中查询与派发入口。
+	if hit := engine.ElementAt(doc, cx, cy); hit == btn.Element() {
+		t.Fatal("隐藏的控件条里的按钮仍被命中，display:none 没挡住命中测试")
+	}
+	engine.OnDocumentClick(doc, cx, cy)
+	doc.Refresh()
+	if clicked != 1 {
+		t.Fatalf("隐藏的控件条里的按钮仍可被点击（又点了 %d 次）", clicked-1)
+	}
+
+	bar.SetVisible(true)
+	doc.Refresh()
+	style = bar.Element().GetAttribute("style")
+	if strings.Contains(style, "display:none") || !strings.Contains(style, "top:40px") {
+		t.Fatalf("展开时样式 = %q，期望去掉 display:none 并保留 top", style)
+	}
+	clickAt(t, doc, cx, cy)
+	if clicked != 2 {
+		t.Fatalf("点击次数 = %d, want 2（重新展开后该又能点）", clicked)
+	}
+
+	// 两个控件排在同一行（inline-block），水平不重叠；垂直靠条的内边距
+	// 居中（内边距 = (BarHeight - ButtonHeight) / 2，控件不写坐标）。
+	if rb.Left().Pixel() <= ra.Left().Pixel() {
+		t.Fatalf("控件没有横向排开：输入框左 %d，按钮左 %d",
+			ra.Left().Pixel(), rb.Left().Pixel())
+	}
+	th := Light()
+	down := (th.BarHeight - th.ButtonHeight) / 2
+	for _, c := range []struct {
+		name   string
+		top    int
+		bottom int
+	}{{"输入框", ra.Top().Pixel(), ra.Bottom().Pixel()}, {"按钮", rb.Top().Pixel(), rb.Bottom().Pixel()}} {
+		if c.top < r.Top().Pixel() || c.bottom > r.Bottom().Pixel() {
+			t.Fatalf("%s 竖直方向超出控件条：盒 %d~%d，条 %d~%d",
+				c.name, c.top, c.bottom, r.Top().Pixel(), r.Bottom().Pixel())
+		}
+		if got := c.top - r.Top().Pixel(); got != down {
+			t.Fatalf("%s 距条上沿 %d px, want %d px（条内垂直居中）", c.name, got, down)
+		}
+	}
+	// 空条不占位：不传控件、或传 nil 接口，都不该往条里塞元素。
+	if got := len(NewBar(doc).Element().Children()); got != 0 {
+		t.Fatalf("空控件条子元素数 = %d, want 0", got)
+	}
+	var none Control
+	if got := len(NewBar(doc, none).Element().Children()); got != 0 {
+		t.Fatalf("传 nil 控件后子元素数 = %d, want 0", got)
+	}
+}
+
+// 平铺变体：贴边铺满的编辑区不带描边与圆角（class 由 SetVariant 维护）。
+func TestTextAreaPlainVariant(t *testing.T) {
+	doc, page := controlPage(t)
+
+	ta := NewTextArea(doc, "x")
+	page.AppendChild(ta.Element())
+	ta.SetVariant("plain")
+	doc.Refresh()
+	if got := ta.Element().GetAttribute("class"); got != "system-ui-textarea is-plain" {
+		t.Fatalf("class = %q, want %q", got, "system-ui-textarea is-plain")
+	}
+	ta.SetVariant("is-plain") // 传全名也认，且不重复追加
+	if got := ta.Element().GetAttribute("class"); got != "system-ui-textarea is-plain" {
+		t.Fatalf("重复设置变体后 class = %q", got)
+	}
+	ta.SetVariant("")
+	if got := ta.Element().GetAttribute("class"); got != "system-ui-textarea" {
+		t.Fatalf("清空变体后 class = %q, want system-ui-textarea", got)
+	}
+}
