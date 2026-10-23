@@ -120,7 +120,7 @@ func main() {
 
 // findHomeDir 返回起始页相对链接的基准目录。
 //
-// 起始页里的链接写成 ../login/index.html，是按 examples/browser/index.html
+// 起始页里的链接写成 ../ua/index.html，是按 examples/browser/index.html
 // 的磁盘位置写的；但页面本身是内嵌的，运行目录可能任意。这里按常见启动
 // 方式依次探测：仓库根（go run ./examples/browser）→ examples 目录内
 // （cd examples; go run ./browser）→ 示例目录内（go run .）。都找不到时
@@ -345,18 +345,18 @@ func (b *browserApp) installChrome(doc engine.HTMLDocument) {
 	doc.AddStylesheetText(chromeCSS)
 
 	bar := doc.CreateElement("div")
-	bar.SetAttribute("id", "ghromex-chrome")
+	bar.SetAttribute("id", "system-ui-chrome")
 	bar.SetAttribute("class", "gh-bar")
 
 	// 控件绝对定位：引擎的 inline-block 按基线对齐，按钮和输入框混排时
 	// 会互相顶偏；固定坐标更可控，也便于地址栏占满剩余宽度。
 	// 没有可后退/前进的页面时按钮置灰（样式类不同，但仍然可点，点了无事发生）。
-	back := b.chromeButton(doc, "ghromex-back", "←", chromeLeft, b.index <= 0, b.goBack)
-	forward := b.chromeButton(doc, "ghromex-forward", "→", chromeLeft+chromeButtonWidth+chromeButtonGap,
+	back := b.chromeButton(doc, "system-ui-back", "←", chromeLeft, b.index <= 0, b.goBack)
+	forward := b.chromeButton(doc, "system-ui-forward", "→", chromeLeft+chromeButtonWidth+chromeButtonGap,
 		b.index+1 >= len(b.history), b.goForward)
-	refresh := b.chromeButton(doc, "ghromex-refresh", "↻", chromeLeft+2*(chromeButtonWidth+chromeButtonGap),
+	refresh := b.chromeButton(doc, "system-ui-refresh", "↻", chromeLeft+2*(chromeButtonWidth+chromeButtonGap),
 		false, b.refresh)
-	home := b.chromeButton(doc, "ghromex-home", "⌂", chromeLeft+3*(chromeButtonWidth+chromeButtonGap),
+	home := b.chromeButton(doc, "system-ui-home", "⌂", chromeLeft+3*(chromeButtonWidth+chromeButtonGap),
 		false, b.showHome)
 
 	inputLeft := chromeLeft + 4*(chromeButtonWidth+chromeButtonGap)
@@ -365,13 +365,13 @@ func (b *browserApp) installChrome(doc engine.HTMLDocument) {
 		width = 240
 	}
 	addr := doc.CreateElement("input")
-	addr.SetAttribute("id", "ghromex-addr")
+	addr.SetAttribute("id", "system-ui-addr")
 	addr.SetAttribute("class", "gh-addr")
 	addr.SetAttribute("value", b.current)
 	addr.SetAttribute("style", fmt.Sprintf("left:%dpx;width:%dpx", inputLeft, width))
 
 	open := doc.CreateElement("button")
-	open.SetAttribute("id", "ghromex-go")
+	open.SetAttribute("id", "system-ui-go")
 	open.SetAttribute("class", "gh-go")
 	open.SetAttribute("style", fmt.Sprintf("left:%dpx;width:%dpx", inputLeft+width+chromeButtonGap, chromeGoWidth))
 	open.SetText("打开")
@@ -394,7 +394,7 @@ func (b *browserApp) installChrome(doc engine.HTMLDocument) {
 
 	// 底部状态栏：左侧是页面标题，右侧是说明。fixed 定位，不占文档流。
 	status := doc.CreateElement("div")
-	status.SetAttribute("id", "ghromex-status")
+	status.SetAttribute("id", "system-ui-status")
 	status.SetAttribute("class", "gh-status")
 	title := doc.CreateElement("span")
 	title.SetAttribute("class", "gh-status-title")
@@ -407,7 +407,7 @@ func (b *browserApp) installChrome(doc engine.HTMLDocument) {
 
 	// 状态栏是 fixed，会盖住页面底部：末尾补一个占位块把内容托起来。
 	pad := doc.CreateElement("div")
-	pad.SetAttribute("id", "ghromex-spacer-bottom")
+	pad.SetAttribute("id", "system-ui-spacer-bottom")
 	pad.SetAttribute("class", "gh-spacer-bottom")
 	body.AppendChild(pad)
 
@@ -416,7 +416,7 @@ func (b *browserApp) installChrome(doc engine.HTMLDocument) {
 	// 改动它，所以先复制一份）。
 	children := append([]engine.HTMLElement(nil), body.Children()...)
 	top := doc.CreateElement("div")
-	top.SetAttribute("id", "ghromex-spacer-top")
+	top.SetAttribute("id", "system-ui-spacer-top")
 	top.SetAttribute("class", "gh-spacer-top")
 	for _, c := range children {
 		body.RemoveChild(c)

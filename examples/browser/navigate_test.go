@@ -64,7 +64,7 @@ func TestLinkNavigation(t *testing.T) {
 	}
 	assertChrome := func() {
 		t.Helper()
-		for _, id := range []string{"ghromex-chrome", "ghromex-back", "ghromex-forward", "ghromex-refresh", "ghromex-home", "ghromex-addr", "ghromex-go"} {
+		for _, id := range []string{"system-ui-chrome", "system-ui-back", "system-ui-forward", "system-ui-refresh", "system-ui-home", "system-ui-addr", "system-ui-go"} {
 			if h.doc.QuerySelector("#"+id) == nil {
 				t.Fatalf("当前页面缺少工具条元素 #%s", id)
 			}
@@ -74,14 +74,14 @@ func TestLinkNavigation(t *testing.T) {
 	app.showHome()
 	assertTitle("Ghromex 浏览器 · 起始页")
 	assertChrome()
-	if got := h.doc.QuerySelector("#ghromex-addr").GetAttribute("value"); got != homeURL {
+	if got := h.doc.QuerySelector("#system-ui-addr").GetAttribute("value"); got != homeURL {
 		t.Fatalf("起始页地址栏 = %q, want %q", got, homeURL)
 	}
 
 	// 地址栏是固定工具条里的 input：鼠标拖选必须命中并产生选区，
 	// 再点右侧可折叠选区继续输入（用户报告过 input 无法选中文字）。
 	h.doc.Refresh()
-	addrBox := h.doc.QuerySelector("#ghromex-addr")
+	addrBox := h.doc.QuerySelector("#system-ui-addr")
 	r := addrBox.GetBoundingClientRect()
 	midY := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
 	if !engine.OnDocumentMouseDown(h.doc, r.Left().Pixel()+2, midY) ||
@@ -104,49 +104,49 @@ func TestLinkNavigation(t *testing.T) {
 	}
 
 	// 地址栏「打开」
-	h.doc.QuerySelector("#ghromex-addr").SetAttribute("value", "../form/index.html")
-	clickID("ghromex-go")
-	assertTitle("员工登记表 · 布局示例")
+	h.doc.QuerySelector("#system-ui-addr").SetAttribute("value", "../ua/index.html")
+	clickID("system-ui-go")
+	assertTitle("UA 与排版对照 · 浏览器对照")
 	assertChrome()
-	wantForm := filepath.Join("..", "form", "index.html")
-	if app.current != wantForm {
-		t.Fatalf("地址栏导航后 current = %q, want %q", app.current, wantForm)
+	wantUA := filepath.Join("..", "ua", "index.html")
+	if app.current != wantUA {
+		t.Fatalf("地址栏导航后 current = %q, want %q", app.current, wantUA)
 	}
-	if got := h.doc.QuerySelector("#ghromex-addr").GetAttribute("value"); got != wantForm {
-		t.Fatalf("新页面地址栏 = %q, want %q", got, wantForm)
+	if got := h.doc.QuerySelector("#system-ui-addr").GetAttribute("value"); got != wantUA {
+		t.Fatalf("新页面地址栏 = %q, want %q", got, wantUA)
 	}
 
 	// 后退 / 前进
-	clickID("ghromex-back")
+	clickID("system-ui-back")
 	assertTitle("Ghromex 浏览器 · 起始页")
 	assertChrome()
-	clickID("ghromex-forward")
-	assertTitle("员工登记表 · 布局示例")
+	clickID("system-ui-forward")
+	assertTitle("UA 与排版对照 · 浏览器对照")
 
 	// 首页 / 刷新
-	clickID("ghromex-home")
+	clickID("system-ui-home")
 	assertTitle("Ghromex 浏览器 · 起始页")
-	clickID("ghromex-refresh")
+	clickID("system-ui-refresh")
 	assertTitle("Ghromex 浏览器 · 起始页")
 
 	// 滚动后工具条仍固定在视口顶部：滚轮把内容上移，点顶部「后退」仍命中。
-	clickLink("scroll")
-	if !strings.HasSuffix(filepath.ToSlash(app.current), "scroll/index.html") {
-		t.Fatalf("滚动页 current = %q", app.current)
+	clickLink("portal")
+	if !strings.HasSuffix(filepath.ToSlash(app.current), "portal/index.html") {
+		t.Fatalf("门户页 current = %q", app.current)
 	}
 	if !engine.OnDocumentWheel(h.doc, 512, 400, 0, 200) {
 		t.Fatal("滚动页没有发生滚动")
 	}
-	clickID("ghromex-back")
+	clickID("system-ui-back")
 	assertTitle("Ghromex 浏览器 · 起始页")
 
 	// 链接导航后工具条仍在
-	clickLink("login")
-	assertTitle("Ghromex · 登录")
+	clickLink("ua")
+	assertTitle("UA 与排版对照 · 浏览器对照")
 	assertChrome()
 
 	// 外部链接：提示页 + 工具条；about:home 回起始页
-	clickID("ghromex-back")
+	clickID("system-ui-back")
 	clickLink("https://")
 	assertTitle("Ghromex 浏览器 · 外部链接")
 	assertChrome()
@@ -157,7 +157,7 @@ func TestLinkNavigation(t *testing.T) {
 	clickLink("missing.html")
 	assertTitle("Ghromex 浏览器 · 无法打开页面")
 	assertChrome()
-	clickID("ghromex-back")
+	clickID("system-ui-back")
 	assertTitle("Ghromex 浏览器 · 起始页")
 
 	// file:// 绝对路径同样走本地文件加载
@@ -180,7 +180,7 @@ func TestLinkNavigation(t *testing.T) {
 	if err := os.WriteFile(page, []byte("<!doctype html><title>第二版</title>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	clickID("ghromex-refresh")
+	clickID("system-ui-refresh")
 	assertTitle("第二版")
 	assertChrome()
 }
@@ -196,8 +196,8 @@ func TestChromeFollowsViewportResize(t *testing.T) {
 	app.showHome()
 	h.doc.Refresh()
 
-	goBtn := h.doc.QuerySelector("#ghromex-go")
-	addr := h.doc.QuerySelector("#ghromex-addr")
+	goBtn := h.doc.QuerySelector("#system-ui-go")
+	addr := h.doc.QuerySelector("#system-ui-addr")
 	if goBtn == nil || addr == nil {
 		t.Fatal("工具条元素缺失")
 	}
@@ -238,7 +238,7 @@ func TestAddressBarEnterNavigates(t *testing.T) {
 	app.showHome()
 	h.doc.Refresh()
 
-	addr := h.doc.QuerySelector("#ghromex-addr")
+	addr := h.doc.QuerySelector("#system-ui-addr")
 	if addr == nil {
 		t.Fatal("缺少地址栏")
 	}

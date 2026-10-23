@@ -374,8 +374,8 @@ func TestRunWheelOverTextareaKeepsDocumentStill(t *testing.T) {
 // 读不回来说明这会儿用不了剪贴板，剪贴板相关的用例直接跳过。
 func skipIfClipboardUnavailable(t *testing.T) {
 	t.Helper()
-	clipboard.SetText("ghromex-clipboard-probe")
-	if clipboard.Text() != "ghromex-clipboard-probe" {
+	clipboard.SetText("system-ui-clipboard-probe")
+	if clipboard.Text() != "system-ui-clipboard-probe" {
 		t.Skip("系统剪贴板不可用（被其它进程占用或没有桌面会话），跳过剪贴板测试")
 	}
 }
