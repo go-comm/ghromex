@@ -88,6 +88,8 @@ func OnDocumentMouseDown(doc HTMLDocument, x, y int) bool {
 	if !ok {
 		return false
 	}
+	// 按下即视为要操作：收起提示气泡（浏览器同行为，收起后不换目标不追回）。
+	d.dismissTooltip()
 	target := ElementAt(doc, x, y)
 	// 按下态（:active）：命中什么就按在什么上（命中空白则无按下态）。
 	// 状态变化要改样式，故走 SetActiveElement 的变更通知。

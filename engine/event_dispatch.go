@@ -84,6 +84,9 @@ func clipsContain(clips []clipRect, x, y int) bool {
 // （select 展开/收起/选中、radio/checkbox 勾选切换、<a> 导航），
 // value/勾选状态变化补发 change。返回是否有处理器被触发。
 func OnDocumentClick(doc HTMLDocument, x, y int) bool {
+	// 点击也收起提示气泡：点击后气泡不该挡在动作结果上（抬起时可能没发生
+	// 过按下——注入事件/程序派发都直接进这里，故与按下各自收起）。
+	dismissTooltip(doc)
 	ev := &MouseEvent{Type: EventClick, X: x, Y: y}
 	// 展开的 select 浮层绘制在最上层，命中优先于常规树遍历（见 ElementAt）。
 	target := ElementAt(doc, x, y)

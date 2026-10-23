@@ -81,6 +81,9 @@ func SetActiveElement(doc HTMLDocument, el HTMLElement) {
 func OnDocumentMouseMove(doc HTMLDocument, x, y int) bool {
 	target := ElementAt(doc, x, y)
 	SetHoveredElement(doc, target)
+	if d, ok := doc.(*htmlDocument); ok {
+		d.trackTooltip(x, y) // 提示气泡的锚点跟着鼠标走
+	}
 	return target != nil
 }
 

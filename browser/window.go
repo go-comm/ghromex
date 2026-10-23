@@ -362,6 +362,10 @@ func (win *Window) Run() error {
 			if engine.TickScroll(doc) {
 				win.dirty = true
 			}
+			// 提示气泡：目标稳定悬停到点后就弹出，弹出/收起都只要重绘。
+			if engine.TickTooltip(doc) {
+				win.dirty = true
+			}
 			if win.dirty || bench != nil {
 				// 基准模式强制每帧重绘：静态页面平时不重绘（省 CPU），
 				// 那样量到的只是空闲休眠，渲染管线的成本根本测不到。
@@ -384,11 +388,12 @@ func (win *Window) Run() error {
 			// 布局期可能又标记了变更（滚动动画的下一帧）：此时不能睡 10ms，
 			// 否则每帧白等 10ms，120ms 的动画会被拖到 200ms 以上；空闲时仍
 			// 保留 10ms 休眠省 CPU（present 有 vsync 时本就会自然限帧）。
+			// 提示气泡计时在途时同样不休眠，否则弹出会比延时晚一拍。
 			//
 			// 基准模式**不进空闲休眠**：它已强制每帧重绘（模拟持续动画），
 			// 再睡 10ms 量的就是「静态页白等」——既不是真实吞吐，还把
 			// vsync 等待藏进休眠里看不见。
-			pending = doc.ChangeCount() != win.lastChange || engine.ScrollAnimating(doc)
+			pending = doc.ChangeCount() != win.lastChange || engine.ScrollAnimating(doc) || engine.TooltipPending(doc)
 			if bench != nil {
 				pending = true
 			}

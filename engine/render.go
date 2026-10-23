@@ -134,8 +134,10 @@ func RenderNode(g Graphics, node HTMLElement) {
 		g = NewFakeGraphics()
 	}
 	var focus HTMLElement
+	var doc *htmlDocument
 	vpW, vpH := 0, 0
 	if d, ok := node.(*htmlDocument); ok {
+		doc = d
 		focus = d.focus
 		if v := d.Viewport(); v != nil {
 			vpW, vpH = v.ViewportWidth(), v.ViewportHeight()
@@ -150,6 +152,11 @@ func RenderNode(g Graphics, node HTMLElement) {
 	// 浮层豁免裁剪（对齐浏览器原生下拉：可画到滚动容器/视口之外）。
 	for _, sel := range collectOpenSelects(node) {
 		renderSelectPopup(g, sel, focus)
+	}
+	// title 提示气泡压在最顶（select 浮层之上）：系统提示不该被任何页面
+	// 内容盖住；可见性只由 TickTooltip / 鼠标事件推进，这里照状态落笔。
+	if doc != nil && doc.tooltipShown {
+		renderTooltip(g, doc, vpW, vpH)
 	}
 }
 

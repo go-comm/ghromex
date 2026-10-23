@@ -110,6 +110,19 @@ type htmlDocument struct {
 	// 走 markChanged → 重排重绘 → 级联重算。
 	hover  HTMLElement
 	active HTMLElement
+	// tooltip 提示气泡状态：target/text 是上一帧解析出的提示元素与文案
+	// （从 hover 沿父链取最近非空 title），sinceNs 是当前悬停的起算时间
+	// （目标或文案变化就重新计时），mouseX/Y 是鼠标最后位置（气泡锚点，
+	// 弹出后不再跟手），shown 表示气泡是否弹出中，dismissed 表示「被
+	// 按下/点击/滚动收掉、鼠标还没换目标」（不追回，浏览器同行为）。
+	// 推进与绘制见 tooltip.go。
+	tooltipTarget    HTMLElement
+	tooltipText      string
+	tooltipSinceNs   int64
+	tooltipMouseX    int
+	tooltipMouseY    int
+	tooltipShown     bool
+	tooltipDismissed bool
 	// dragInput 是鼠标按下时命中的可编辑控件。拖选期间活动端可移出控件
 	// 甚至窗口，仍应把坐标反推为同一控件的光标位置（浏览器同语义）；
 	// 因此不能在每次 MouseMotion 时重新命中测试。鼠标抬起即清空。

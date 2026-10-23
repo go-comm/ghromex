@@ -527,6 +527,8 @@ func OnDocumentWheel(doc HTMLDocument, x, y, dx, dy int) bool {
 		}
 	}
 	if remX == 0 && remY == 0 {
+		// 元素链吃下了全部位移：确有内容移动，气泡锚点已经指错位置。
+		dismissTooltip(doc)
 		return true
 	}
 
@@ -561,5 +563,9 @@ func OnDocumentWheel(doc HTMLDocument, x, y, dx, dy int) bool {
 			remY = 0
 		}
 	}
-	return dx != remX || dy != remY
+	moved := dx != remX || dy != remY
+	if moved {
+		dismissTooltip(doc) // 内容移动了：锚在旧位置的气泡收起（浏览器同行为）
+	}
+	return moved
 }
