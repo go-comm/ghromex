@@ -255,7 +255,7 @@ func buildPage(entries []ui.IconEntry) string {
 <head>
 <meta charset="utf-8">
 <style>
-body { margin: 0; }
+/* body 的复位（外边距/颜色字体）由 ui 外壳负责，页面只写自己的排版。 */
 .icons-page .icon-search { margin: 0 0 14px 0; }
 .icons-page .icon-search-row .system-ui-input {
 	width: 360px; margin-right: 8px; vertical-align: middle;

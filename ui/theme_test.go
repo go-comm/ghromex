@@ -403,8 +403,8 @@ func hexLuminance(t *testing.T, s string) float64 {
 }
 
 // 主题要真的经 Install 进到文档里，而不只是 css() 能拼出字符串。
-// 取 body 外边距里的像素（页面内容之外）：那是 html 的底色，正好验证
-// 样式表被注入并参与级联。
+// 取一块干净的画布（内容 div 右侧、状态栏上方——body 复位后外边距区没了，
+// 得自己挑不压元素的点）：那是 html 的底色，正好验证样式表注入并参与级联。
 func TestInstallAppliesThemeBackground(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -427,7 +427,7 @@ func TestInstallAppliesThemeBackground(t *testing.T) {
 			doc.Refresh()
 			engine.RenderNode(buf, doc)
 
-			r, g, b, a, ok := buf.ColorAt(4, 4)
+			r, g, b, a, ok := buf.ColorAt(100, 60)
 			if !ok {
 				t.Fatal("取色失败")
 			}
@@ -456,7 +456,7 @@ func TestSetThemeSwitchesBackground(t *testing.T) {
 		t.Helper()
 		doc.Refresh()
 		engine.RenderNode(buf, doc)
-		r, g, b, a, ok := buf.ColorAt(4, 4)
+		r, g, b, a, ok := buf.ColorAt(100, 60)
 		if !ok {
 			t.Fatalf("%s: 取色失败", name)
 		}

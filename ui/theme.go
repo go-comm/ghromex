@@ -488,11 +488,21 @@ func scopeSelectorList(s, scope string) string {
 // themeCSS 是组件库的全部样式；$xxx$ 是 Theme 的占位符。
 //
 // 类名统一 system-ui- 前缀，并由 scopeCSS 挂到 html.system-ui 根作用域下；
-// 组件不会去改页面里的裸标签（只有 .system-ui-list li 这种明确在组件内部
-// 的才用后代选择器）。
+// 除开头的「外壳复位」（画布底色 + body）有意作用于裸标签外，组件不会去改
+// 页面里的裸标签（只有 .system-ui-list li 这种明确在组件内部的才用后代选择器）。
 const themeCSS = `
 /* 画布底色：页面自己的 body 背景仍然优先（引擎按 body → html 传播）。 */
 html { background-color: $bg$; }
+
+/* 外壳复位：装了 ui 外壳的文档，body 就是外壳画布——UA 的 8px 外边距与
+   默认字体字号，不该让每个页面重复复位一遍（颜色字号跟随主题）。
+   根作用域后这条特异度是 0,2,1，页面的裸 body 规则盖不过它：自定义排版
+   请挂在内容容器（.system-ui-page / 卡片）上，确实要改 body 就用同特异度
+   写在本样式表之后。 */
+body {
+	margin: 0; padding: 0;
+	color: $text$; font-family: $font$; font-size: 13px;
+}
 
 /* ===== 外壳：菜单栏 / 工具栏 / 状态栏 ===== */
 

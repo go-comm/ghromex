@@ -154,7 +154,7 @@ func (n *notepad) bind() {
 	if n.theme.MenuHeight == 0 {
 		n.theme = ui.Light()
 	}
-	p := buildPage(n.doc, n.theme, n.findBarActions())
+	p := buildPage(n.doc, n.findBarActions())
 	n.editor = p.editor
 	n.findBar = p.findBar
 	n.findIn = p.findIn

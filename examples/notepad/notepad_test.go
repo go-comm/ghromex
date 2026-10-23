@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/go-comm/ghromex/engine"
-	"github.com/go-comm/ghromex/ui"
 )
 
 // 记事本示例的无头回归：界面排版、文件读写、撤销/重做、菜单机制。
@@ -139,7 +138,7 @@ func TestBuildPageCreatesAllControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	buildPage(doc, ui.Light(), findBarActions{})
+	buildPage(doc, findBarActions{})
 	if got := doc.Title(); got != appName {
 		t.Fatalf("文档标题 = %q, want %q", got, appName)
 	}

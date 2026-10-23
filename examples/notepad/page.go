@@ -18,14 +18,6 @@ import (
 	"github.com/go-comm/ghromex/ui"
 )
 
-// pageCSS 是记事本自己的页面样式；外壳与控件样式由 ui 主题注入。
-func pageCSS(th ui.Theme) string {
-	return `
-body { margin: 0; padding: 0; height: 100%; color: ` + th.Text + `;
-	font-family: ` + th.Font + `; font-size: 13px; }
-`
-}
-
 // findBarActions 是查找替换栏上四个按钮的动作，在装配时交给按钮。
 type findBarActions struct {
 	findNext   func()
@@ -51,9 +43,10 @@ type page struct {
 
 // buildPage 在空文档上搭出记事本页面。每个控件都留了 id：测试和
 // GetElementById 查询用，程序内部一律直接持有视图，不再 QuerySelector 往返。
-func buildPage(doc engine.HTMLDocument, th ui.Theme, acts findBarActions) *page {
+//
+// body 的复位（外边距/颜色/字体）由 ui 外壳负责，页面不再自带样式表。
+func buildPage(doc engine.HTMLDocument, acts findBarActions) *page {
 	doc.Head().Title().SetText(appName)
-	doc.AddStylesheetText(pageCSS(th))
 
 	p := &page{
 		findIn:    ui.NewTextInput(doc, ""),

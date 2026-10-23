@@ -111,6 +111,18 @@ func TestInstallBuildsChrome(t *testing.T) {
 	}
 }
 
+// Install 复位 body：外壳画布没有 UA 外边距，颜色字体跟随主题——页面
+// 不必再自写 margin:0 / padding:0 / color / font-family 这些样板。
+func TestInstallResetsBody(t *testing.T) {
+	doc := newTestDoc(t, 640, 480, `<div id="page">内容</div>`)
+	Install(doc, Spec{Status: "就绪"})
+	doc.Refresh()
+
+	if b := boxOf(doc.Body()); b.x != 0 || b.y != 0 || b.w != 640 {
+		t.Fatalf("body 框 = %+v，期望贴左上且铺满宽（UA 外边距未复位）", b)
+	}
+}
+
 // 没有菜单/工具栏时不生成对应的栏，顶部占位块高度随之收敛。
 func TestInstallWithoutBars(t *testing.T) {
 	doc := newTestDoc(t, 400, 300, `<div>内容</div>`)
