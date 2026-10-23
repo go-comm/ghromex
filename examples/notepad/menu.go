@@ -1,7 +1,7 @@
 // 本文件是记事本的命令表：菜单、工具栏与快捷键都由 ui.Spec 生成。
 //
 // 命令只定义一次，菜单项和工具栏按钮共用同一份 Action；快捷键也由
-// ui.Shell 统一绑定，不再由页面自己处理。
+// ui.Workbench 统一绑定，不再由页面自己处理。
 //
 // 每条命令都配了图标：菜单项在浮层里显示「图标 + 文字」，工具栏则退化成
 // 纯图标按钮（ui 的约定：Action 有图标时工具栏只画图标，Label 留作兜底）。
@@ -13,7 +13,7 @@ import (
 	"github.com/go-comm/ghromex/ui"
 )
 
-// buildSpec 生成记事本的外壳配置。
+// buildSpec 生成记事本的工作台配置。
 func (n *notepad) buildSpec() ui.Spec {
 	cmd := func(label, shortcut string, f func()) ui.Action {
 		return ui.Item(label, shortcut, func() error {

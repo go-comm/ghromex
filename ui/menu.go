@@ -11,7 +11,7 @@ type menuView struct {
 }
 
 // buildMenubar 生成菜单栏。
-func (s *Shell) buildMenubar() {
+func (s *Workbench) buildMenubar() {
 	s.menubar = newEl(s.doc, "div", "system-ui-menubar", "")
 	s.menubar.AppendChild(newEl(s.doc, "div", "system-ui-hairline", ""))
 	for i := range s.spec.Menus {
@@ -25,7 +25,7 @@ func (s *Shell) buildMenubar() {
 // 浮层放进标签内部（而不是 body 下）是关键：标签 position:relative +
 // 浮层 top:菜单栏高度，浮层天然贴在标签左缘，既不用测量文字宽度，也
 // 不用在滚动/缩放后重算坐标。
-func (s *Shell) addMenu(i int) {
+func (s *Workbench) addMenu(i int) {
 	mv := &menuView{menu: s.spec.Menus[i]}
 	mv.label = newEl(s.doc, "div", "system-ui-menu", mv.menu.Title)
 	mv.pop = newEl(s.doc, "div", "system-ui-menu-pop", "")
@@ -54,7 +54,7 @@ func (s *Shell) addMenu(i int) {
 //
 // 每次打开都按当前状态重建浮层：菜单项数量少，重建比「先建好再逐个
 // 更新禁用态」简单，也保证可用性是打开那一刻的最新值。
-func (s *Shell) OpenMenu(i int) {
+func (s *Workbench) OpenMenu(i int) {
 	if s == nil || i < 0 || i >= len(s.menus) {
 		return
 	}
@@ -85,7 +85,7 @@ func (s *Shell) OpenMenu(i int) {
 }
 
 // CloseMenus 收起所有菜单。
-func (s *Shell) CloseMenus() {
+func (s *Workbench) CloseMenus() {
 	if s == nil {
 		return
 	}
@@ -96,7 +96,7 @@ func (s *Shell) CloseMenus() {
 }
 
 // toggle 在「已开 → 关」「未开 → 开」之间切换。
-func (s *Shell) toggle(i int) {
+func (s *Workbench) toggle(i int) {
 	if s.open != nil && s.open == s.menus[i] {
 		s.CloseMenus()
 		return
@@ -105,7 +105,7 @@ func (s *Shell) toggle(i int) {
 }
 
 // menuItemEl 生成一条菜单项（或分隔线）；withIcon 决定是否预留图标列。
-func (s *Shell) menuItemEl(a Action, withIcon bool) engine.HTMLElement {
+func (s *Workbench) menuItemEl(a Action, withIcon bool) engine.HTMLElement {
 	if a.Sep {
 		return newEl(s.doc, "div", "system-ui-menu-sep", "")
 	}
@@ -140,7 +140,7 @@ func (s *Shell) menuItemEl(a Action, withIcon bool) engine.HTMLElement {
 //
 // 用坐标而不是 ev.Element：click 冒泡时引擎会把 ev.Element 逐层改写成
 // 当前元素，冒到 body 时它已经是 body 本身，「点到了谁」的信息丢了。
-func (s *Shell) insideMenu(x, y int) bool {
+func (s *Workbench) insideMenu(x, y int) bool {
 	if hitRect(s.menubar, x, y) {
 		return true
 	}

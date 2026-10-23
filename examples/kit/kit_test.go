@@ -49,8 +49,8 @@ func TestDumpProducesSVG(t *testing.T) {
 	if !strings.Contains(svg, `viewBox="0 0 900 760"`) {
 		t.Fatalf("SVG 尺寸不对，缺少 viewBox：%.80q", svg)
 	}
-	// 菜单栏、工具栏、状态栏、页面内容都要有字，否则就是外壳没装上。
+	// 菜单栏、工具栏、状态栏、页面内容都要有字，否则就是工作台没装上。
 	if n := strings.Count(svg, "<text"); n < 20 {
-		t.Fatalf("SVG 只有 %d 个文本节点，外壳或页面内容可能没渲染", n)
+		t.Fatalf("SVG 只有 %d 个文本节点，工作台或页面内容可能没渲染", n)
 	}
 }

@@ -5,10 +5,14 @@
 
 ## 未发布
 
+- **ui**：`Shell` 更名为 `Workbench`（工作台），`App.Shell()` 相应改为
+  `App.Workbench()`；「工作台」指装在文档四周的菜单栏/工具栏/状态栏加
+  主题样式，`Install` 的返回值与全部方法不变，升级时替换类型名与方法名
+  即可。
 - **ui**：`Install` 自动复位 body（去掉 UA 的 8px 外边距，文字颜色、字体、
   字号跟随主题），应用页面不必再自写 `margin:0` / `padding:0` / `color` /
   `font-family` 样板；自定义排版请挂在内容容器上（根作用域下页面的裸
-  `body` 规则盖不过外壳的复位规则）。
+  `body` 规则盖不过工作台的复位规则）。
 - **engine**：新增原生 `title` 提示气泡：鼠标停在带非空 `title` 的元素（含
   其子孙）上超过 600ms，在鼠标右下弹出系统气泡（圆角描边、豁免裁剪、画在
   最顶层），离开/按下/点击/实际滚动收起，换目标重新计时。每帧推进挂在
@@ -21,9 +25,9 @@
   `BorderStrong` 描边 + `Text` 文字），`Install` / `SetTheme` 自动完成。
 - **ui**：组件类名由 `ui-*` 统一改为 `system-ui-*`，样式自动挂到
   `html.system-ui` 根作用域下；升级时页面里的旧类名需要同步替换。
-- **ui**：新增 `App.SetTheme` / `Shell.SetTheme`，可在运行时切换主题，
+- **ui**：新增 `App.SetTheme` / `Workbench.SetTheme`，可在运行时切换主题，
   不用重建菜单、工具栏或页面。
-- **ui**：新增 `Shell.SetStatusVisible`；菜单栏改在工具栏/状态栏之后插入，
+- **ui**：新增 `Workbench.SetStatusVisible`；菜单栏改在工具栏/状态栏之后插入，
   修复菜单浮层与工具栏重叠时点击被工具栏截胡的问题。
 - **ui**：状态栏支持左侧分段（`StatusSegment` / `Spec.StatusSegments` /
   `SetStatusSegment`），固定或自适应宽度、段内对齐、隐藏与自动分隔线；

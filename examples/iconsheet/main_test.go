@@ -47,7 +47,7 @@ func TestIconSheetContainsEveryIcon(t *testing.T) {
 }
 
 // 卡片尺寸要压过主题的 system-ui-btn（根作用域后是 0,2,1）：这里真正
-// Install 外壳再量布局，防止以后又把 176x136 退回 30px 高的工具栏按钮。
+// Install 工作台再量布局，防止以后又把 176x136 退回 30px 高的工具栏按钮。
 func TestIconCardSize(t *testing.T) {
 	doc := newInstalledSheet(t)
 	card := iconCard(t, doc, "up")

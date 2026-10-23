@@ -31,7 +31,7 @@ type statusSegView struct {
 // 状态栏始终生成（哪怕初始为空）：它是框架感的一部分，应用随时可以
 // 用 SetStatus / SetStatusSegment 写进去，不必为了「先有状态栏」再改
 // Spec 重装。
-func (s *Shell) buildStatus() {
+func (s *Workbench) buildStatus() {
 	s.status = newEl(s.doc, "div", "system-ui-status", "")
 	s.status.AppendChild(newEl(s.doc, "div", "system-ui-hairline", ""))
 
@@ -52,7 +52,7 @@ func (s *Shell) buildStatus() {
 //
 // 结构变化（增删段、改宽度/对齐/隐藏）走这里；只改文字用
 // SetStatusSegment，避免每次光标移动都重建 DOM。
-func (s *Shell) SetStatusSegments(segs []StatusSegment) {
+func (s *Workbench) SetStatusSegments(segs []StatusSegment) {
 	if s == nil || s.statusTrack == nil {
 		return
 	}
@@ -104,7 +104,7 @@ func (s *Shell) SetStatusSegments(segs []StatusSegment) {
 // SetStatusSegment 按 Key 更新一段文字；找不到 Key 时返回 false。
 //
 // 只改文本，不重建段结构：适合光标位置、字符数这类高频更新。
-func (s *Shell) SetStatusSegment(key, text string) bool {
+func (s *Workbench) SetStatusSegment(key, text string) bool {
 	if s == nil {
 		return false
 	}
@@ -121,7 +121,7 @@ func (s *Shell) SetStatusSegment(key, text string) bool {
 }
 
 // StatusSegment 返回一段当前文字；没有该 Key 时返回 "", false。
-func (s *Shell) StatusSegment(key string) (string, bool) {
+func (s *Workbench) StatusSegment(key string) (string, bool) {
 	if s == nil {
 		return "", false
 	}
@@ -138,7 +138,7 @@ func (s *Shell) StatusSegment(key string) (string, bool) {
 // 兼容旧 API：有 Key 为 "status" 的段时更新它；没有分段时创建一个；
 // 已有自定义分段但没有 "status" 时更新最左一段。新代码建议直接用
 // SetStatusSegment。
-func (s *Shell) SetStatus(text string) {
+func (s *Workbench) SetStatus(text string) {
 	if s == nil || s.statusTrack == nil {
 		return
 	}
@@ -158,7 +158,7 @@ func (s *Shell) SetStatus(text string) {
 //
 // 右侧消息固定宽度、右对齐；有消息时左侧轨道自动预留
 // Theme.StatusRightWidth，没有消息时收起预留。
-func (s *Shell) SetStatusRight(text string) {
+func (s *Workbench) SetStatusRight(text string) {
 	if s == nil || s.statusRight == nil {
 		return
 	}

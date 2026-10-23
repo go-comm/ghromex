@@ -43,7 +43,7 @@ func toolTip(a Action) string {
 // 图标按钮只画图标，文字进原生 title 提示（悬停气泡由引擎绘制）；没有
 // 图标时退回文字按钮。横向排列靠 inline-block（引擎没有 flex）；分组用
 // 1px 的竖线。
-func (s *Shell) buildToolbar() {
+func (s *Workbench) buildToolbar() {
 	s.toolbar = newEl(s.doc, "div", "system-ui-toolbar", "")
 	for _, a := range s.spec.Tools {
 		if a.Sep {

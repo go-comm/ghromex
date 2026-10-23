@@ -60,7 +60,7 @@ go run ./examples/snip -source examples/kit/screenshot.png -shot-overlay overlay
 
 交互示例：`examples/browser` 用 `SetOnNavigate` 接管链接点击：读取目标 HTML 并在同一窗口重新 `OpenDocument`，每次换页后把 `position:fixed` 的地址栏、导航按钮与底部状态栏重新注入文档（引擎没有独立的窗口 chrome 层；让位用插在页面内容之前的占位块，既不改页面自己的 padding，也不动 body 的 margin——后者会让固定工具条掉出 body 的命中区），浏览历史支持后退/前进/刷新/首页（没有可后退的页面时按钮置灰），地址栏里按回车直接打开当前输入的地址，未知协议与读取失败会生成带返回链接的提示页；`examples/portal` 用固定顶栏 + 绝对定位侧栏组成购物门户，搜索框聚焦后显示热门提示，所有「加入购物车」按钮共享一个计数徽标。
 
-`examples/notepad` 是最"应用"的一个：菜单、工具栏、快捷键和状态栏交给 `ui`（`ui.Install` 生成外壳，`ui.Spec` 声明命令），示例只保留记事本自己的部分——编辑区几何由程序按窗口尺寸算出（CSS 没有 `calc`，固定栏高度取 `ui.Theme`），查找替换栏与撤销/重做栈由应用层维护（引擎不内置撤销），文件读写与剪贴板走平台能力（`runtime/dialog` 的原生文件对话框 / `runtime/clipboard` 的系统剪贴板）。`ui.Shell.SetStatusVisible` 支撑「视图 → 显示状态栏」，快捷键由 `Shell.HandleKey` 接到窗口。
+`examples/notepad` 是最"应用"的一个：菜单、工具栏、快捷键和状态栏交给 `ui`（`ui.Install` 生成工作台，`ui.Spec` 声明命令），示例只保留记事本自己的部分——编辑区几何由程序按窗口尺寸算出（CSS 没有 `calc`，固定栏高度取 `ui.Theme`），查找替换栏与撤销/重做栈由应用层维护（引擎不内置撤销），文件读写与剪贴板走平台能力（`runtime/dialog` 的原生文件对话框 / `runtime/clipboard` 的系统剪贴板）。`ui.Workbench.SetStatusVisible` 支撑「视图 → 显示状态栏」，快捷键由 `Workbench.HandleKey` 接到窗口。
 
 ## 代码示例
 
@@ -164,7 +164,7 @@ Win32 COM 调用，无 CGO），消息框走 user32 的 `MessageBoxW`（不需�
 
 ## 组件库 ui
 
-`ui` 是建在 `browser` 之上的一层「应用外壳」：菜单栏（下拉浮层、快捷键、
+`ui` 是建在 `browser` 之上的一层「应用工作台」：菜单栏（下拉浮层、快捷键、
 禁用态）、工具栏、状态栏、主题，外加一套只写类名的页面组件。应用侧只需
 一张命令表（`save`/`about` 是返回 `error` 的函数，`editor.Dirty` 是
 `func() bool`）：
@@ -320,7 +320,7 @@ page.AppendChild(preview.Element())
   轮询；禁用项点击无效、快捷键仍会被吞掉（不会漏到页面里）。
 - **快捷键先于页面**：走 `browser.Window.SetKeyHandler`，输入框聚焦时
   `Ctrl+S` 也先到应用。修饰键按家族匹配（左右 Ctrl 都算），字母不分大小写。
-- **换文档自动重装**：外壳是文档的一部分（`position:fixed` + body 首尾占位块），
+- **换文档自动重装**：工作台是文档的一部分（`position:fixed` + body 首尾占位块），
   `App` 通过 `SetOnDocument` 在每次 `OpenDocument` 后重装；只想要文档层
   （无头导出、嵌进已有窗口）时直接用 `ui.Install(doc, spec)`。
 - **主题是令牌**：内置 `ui.Light()` 与 `ui.Dark()`，各生成一整张样式表；改
@@ -362,7 +362,7 @@ page.AppendChild(preview.Element())
 ![按名称搜索 align](examples/iconsheet/screenshot-search.png)
 
 限制：`ui` 不接管原生窗口菜单；菜单只支持鼠标操作（`Esc` 收起，没有方向键/
-回车导航）；页面里 `z-index` 高于外壳（1100）的元素会盖住菜单栏；窗口很窄时
+回车导航）；页面里 `z-index` 高于工作台（1100）的元素会盖住菜单栏；窗口很窄时
 靠右的菜单浮层可能超出右边缘（浮层左对齐菜单标签，不做翻转）；内置主题只有
 浅色/深色两套，更多配色改 `Theme` 字段。
 
@@ -416,9 +416,9 @@ backend/dialog/     原生对话框的平台实现（Windows）：文件对话�
                    MessageBoxW（不需要 COM）。父窗口句柄由调用方传入
 backend/clipboard/   剪贴板的平台实现（复用 SDL2 的剪贴板接口——引擎内部的
                    Ctrl+C / Ctrl+V 走的是同一条路径）
-ui/                应用外壳组件库（在 browser 之上）：菜单栏/工具栏/状态栏、
+ui/                应用工作台组件库（在 browser 之上）：菜单栏/工具栏/状态栏、
                    下拉浮层、快捷键分发、主题令牌与页面组件样式；
-                   `ui.App` 把「建窗 + 装外壳 + 换页重装」封装成十来行
+                   `ui.App` 把「建窗 + 装工作台 + 换页重装」封装成十来行
 examples/          可独立运行的示例（页面源码可能是内嵌 HTML、HTML 资产或由 Go 构造）：
   ua/                原生 UA 表单 + 常用标签（零作者 CSS，与 Chrome 对照）
   kit/               组件库演示（菜单/工具栏/状态栏 + 卡片式页面，零作者 CSS）
@@ -434,7 +434,7 @@ libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll，见 li
 **包内文档**：每个包的入口说明写在各自的 `doc.go`（`go doc ./engine` 可读，
 也进 pkg.go.dev）：engine 讲分层地图与「改代码前必读的不变量」、backend/sdl2
 讲平台边界与线程约束、browser 讲三方分工与用法骨架、ui 讲命令模型（Action/
-Spec）与外壳的三条约定（换文档重装、快捷键先行、只用手册内的 CSS 子集）；
+Spec）与工作台的三条约定（换文档重装、快捷键先行、只用手册内的 CSS 子集）；
 `runtime/` 的分层约定（后端 vs 平台能力）见 `runtime/README.md`；`libs/`
 里第三方 DLL 的版本、出处、许可与查找顺序见 `libs/README.md`。
 

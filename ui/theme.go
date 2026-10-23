@@ -11,10 +11,10 @@ import (
 // Theme 是组件库的视觉令牌：一套配色 + 一组尺寸。
 //
 // 为什么是「令牌 + 生成样式表」而不是让应用写 CSS：
-//   - 引擎的 CSS 是子集（没有 flex/grid），外壳要用的技巧（占位块、
+//   - 引擎的 CSS 是子集（没有 flex/grid），工作台要用的技巧（占位块、
 //     1px 分隔线、绝对定位浮层）容易写错；
 //   - 主题是一处改、全部一致的：应用只写结构，不碰颜色与间距；
-//   - 样式表由 Install 追加在作者样式之后，同特异度时外壳胜出，页面
+//   - 样式表由 Install 追加在作者样式之后，同特异度时工作台胜出，页面
 //     自带的 body/div 规则不会把菜单栏挤歪。
 //
 // 零值字段由 withDefaults 用 Light() 补齐，应用只需改想改的几项。
@@ -89,7 +89,7 @@ type Theme struct {
 // Light 返回默认浅色主题。
 //
 // 其它浅色配色可以在这套令牌上改字段；深色见 Dark。两套主题的尺寸、
-// 字体完全一致，只换颜色——外壳几何不会因为换皮而分叉。
+// 字体完全一致，只换颜色——工作台几何不会因为换皮而分叉。
 func Light() Theme {
 	return Theme{
 		Font:         `"Microsoft YaHei", "Segoe UI", system-ui, sans-serif`,
@@ -488,13 +488,13 @@ func scopeSelectorList(s, scope string) string {
 // themeCSS 是组件库的全部样式；$xxx$ 是 Theme 的占位符。
 //
 // 类名统一 system-ui- 前缀，并由 scopeCSS 挂到 html.system-ui 根作用域下；
-// 除开头的「外壳复位」（画布底色 + body）有意作用于裸标签外，组件不会去改
+// 除开头的「工作台复位」（画布底色 + body）有意作用于裸标签外，组件不会去改
 // 页面里的裸标签（只有 .system-ui-list li 这种明确在组件内部的才用后代选择器）。
 const themeCSS = `
 /* 画布底色：页面自己的 body 背景仍然优先（引擎按 body → html 传播）。 */
 html { background-color: $bg$; }
 
-/* 外壳复位：装了 ui 外壳的文档，body 就是外壳画布——UA 的 8px 外边距与
+/* 工作台复位：装了 ui 工作台的文档，body 就是工作台画布——UA 的 8px 外边距与
    默认字体字号，不该让每个页面重复复位一遍（颜色字号跟随主题）。
    根作用域后这条特异度是 0,2,1，页面的裸 body 规则盖不过它：自定义排版
    请挂在内容容器（.system-ui-page / 卡片）上，确实要改 body 就用同特异度
@@ -504,7 +504,7 @@ body {
 	color: $text$; font-family: $font$; font-size: 13px;
 }
 
-/* ===== 外壳：菜单栏 / 工具栏 / 状态栏 ===== */
+/* ===== 工作台：菜单栏 / 工具栏 / 状态栏 ===== */
 
 .system-ui-hairline { height: 1px; background-color: $border$; pointer-events: none; }
 
@@ -842,7 +842,7 @@ body {
 }
 
 /* 控件条：页面内容里的一行工具（查找替换栏、地址栏这类）。
-   与外壳的工具栏区别在于它属于页面：定位与可见性由应用决定，所以这里
+   与工作台的工具栏区别在于它属于页面：定位与可见性由应用决定，所以这里
    不写 position/top，也不 fixed 在视口上；底色、描边、控件间距由主题给。
    横向排布仍是 inline-block（引擎没有 flex），line-height 用控件高度把
    它们顶到同一基线上。 */

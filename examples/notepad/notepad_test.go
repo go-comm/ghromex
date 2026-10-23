@@ -228,14 +228,14 @@ func TestFindBarVisibilityKeepsPosition(t *testing.T) {
 // 右侧提示不会被编辑事件覆盖。
 func TestStatusSegmentsUpdateIndependently(t *testing.T) {
 	np := newTestNotepad(t)
-	if got, ok := np.shell.StatusSegment("file"); !ok || !strings.Contains(got, untitled) {
+	if got, ok := np.workbench.StatusSegment("file"); !ok || !strings.Contains(got, untitled) {
 		t.Fatalf("文件段 = %q, %v", got, ok)
 	}
 	np.editor.SetValue("ab\ncd")
-	if got, ok := np.shell.StatusSegment("chars"); !ok || got != "5 个字符" {
+	if got, ok := np.workbench.StatusSegment("chars"); !ok || got != "5 个字符" {
 		t.Fatalf("字符段 = %q, %v, want 5 个字符", got, ok)
 	}
-	if got, _ := np.shell.StatusSegment("file"); !strings.Contains(got, "*") {
+	if got, _ := np.workbench.StatusSegment("file"); !strings.Contains(got, "*") {
 		t.Fatalf("编辑后文件段 = %q, want 含未保存标记", got)
 	}
 	if got := statusRight(np); got != "就绪" {
@@ -269,7 +269,7 @@ func TestEditorFollowsViewportResize(t *testing.T) {
 	}
 }
 
-// ui 菜单声明里的快捷键要真正接到 Shell.HandleKey 上。
+// ui 菜单声明里的快捷键要真正接到 Workbench.HandleKey 上。
 func TestShortcutUndoAndFind(t *testing.T) {
 	np := newTestNotepad(t)
 	np.editor.SetValue("abc")

@@ -52,7 +52,7 @@ func boxOf(e engine.HTMLElement) box {
 	return box{x: l, y: t, w: r.Right().Pixel() - l, h: r.Bottom().Pixel() - t}
 }
 
-// 菜单栏/工具栏/状态栏的位置与占位块：外壳装好后不能盖住页面内容。
+// 菜单栏/工具栏/状态栏的位置与占位块：工作台装好后不能盖住页面内容。
 func TestInstallBuildsChrome(t *testing.T) {
 	th := Light()
 	doc := newTestDoc(t, 640, 480, `<div id="page">内容</div>`)
@@ -111,7 +111,7 @@ func TestInstallBuildsChrome(t *testing.T) {
 	}
 }
 
-// Install 复位 body：外壳画布没有 UA 外边距，颜色字体跟随主题——页面
+// Install 复位 body：工作台画布没有 UA 外边距，颜色字体跟随主题——页面
 // 不必再自写 margin:0 / padding:0 / color / font-family 这些样板。
 func TestInstallResetsBody(t *testing.T) {
 	doc := newTestDoc(t, 640, 480, `<div id="page">内容</div>`)
@@ -258,7 +258,7 @@ func TestMenuToggleAndInnerClick(t *testing.T) {
 	}
 }
 
-// 点外壳以外的地方收起菜单。
+// 点工作台以外的地方收起菜单。
 func TestClickOutsideClosesMenu(t *testing.T) {
 	doc := newTestDoc(t, 640, 480, `<div id="page" style="width:300px;height:200px">内容</div>`)
 	sh := Install(doc, Spec{
@@ -570,7 +570,7 @@ func TestShortcutRegisteredOnce(t *testing.T) {
 	}
 }
 
-// 点外壳会让输入框失焦：命令执行后按 Spec.Focus 还回去。
+// 点工作台会让输入框失焦：命令执行后按 Spec.Focus 还回去。
 func TestCommandRestoresFocus(t *testing.T) {
 	doc := newTestDoc(t, 640, 480, `<div id="page">内容</div><input id="ed" type="text">`)
 	doc.Refresh()
@@ -592,7 +592,7 @@ func TestCommandRestoresFocus(t *testing.T) {
 	})
 	doc.Refresh()
 
-	// 命令执行前把焦点放到输入框：点击外壳时它会被清掉，命令跑完应还回来。
+	// 命令执行前把焦点放到输入框：点击工作台时它会被清掉，命令跑完应还回来。
 	engine.SetFocusedElement(doc, editor)
 	btn := doc.QuerySelector(".system-ui-btn")
 	x, y := btn.X()+btn.Width()/2, btn.Y()+btn.Height()/2
@@ -690,7 +690,7 @@ func TestThemeDefaultsAndCSSTokens(t *testing.T) {
 	}
 }
 
-// App 每次换文档都重新装外壳，快捷键路由跟着新 Shell 走。
+// App 每次换文档都重新装工作台，快捷键路由跟着新 Workbench 走。
 func TestAppReinstallsOnNewDocument(t *testing.T) {
 	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
 	defer os.Unsetenv("SDL_VIDEO_DRIVER")
@@ -711,8 +711,8 @@ func TestAppReinstallsOnNewDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("装载第一页失败: %v", err)
 	}
-	if app.Shell() == nil || app.Shell().Doc() != first {
-		t.Fatal("第一页没有装外壳")
+	if app.Workbench() == nil || app.Workbench().Doc() != first {
+		t.Fatal("第一页没有装工作台")
 	}
 	if first.QuerySelector(".system-ui-menubar") == nil {
 		t.Fatal("第一页缺少菜单栏")
@@ -722,13 +722,13 @@ func TestAppReinstallsOnNewDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("装载第二页失败: %v", err)
 	}
-	if app.Shell().Doc() != second {
-		t.Fatal("换页后 Shell 没跟着换文档")
+	if app.Workbench().Doc() != second {
+		t.Fatal("换页后 Workbench 没跟着换文档")
 	}
 	if second.QuerySelector(".system-ui-menubar") == nil {
 		t.Fatal("第二页没有重装菜单栏")
 	}
-	if !app.Shell().HandleKey('s', engine.ModCtrl) {
+	if !app.Workbench().HandleKey('s', engine.ModCtrl) {
 		t.Fatal("换页后快捷键应当仍然生效")
 	}
 }

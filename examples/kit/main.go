@@ -83,7 +83,7 @@ func main() {
 		if *shotMenu != "" {
 			for i, m := range spec.Menus {
 				if m.Title == *shotMenu {
-					app.Shell().OpenMenu(i)
+					app.Workbench().OpenMenu(i)
 					break
 				}
 			}
@@ -229,7 +229,7 @@ func addControls(doc engine.HTMLDocument, status func(string)) {
 	host.AppendChild(apply.Element())
 }
 
-// dump 在没有窗口的情况下装好外壳并出一张图。
+// dump 在没有窗口的情况下装好工作台并出一张图。
 //
 // 这条路径和真实窗口共用 install + 布局 + 渲染，所以 PNG 看到的就是
 // 窗口里的形状与配色（文字是软件光栅后端的占位方块）。
@@ -263,7 +263,7 @@ func dump(spec ui.Spec, pngPath, svgPath string) error {
 func saveShot(app *ui.App, path string) error {
 	// Install 刚改过 DOM 与样式表，必须先重排再画：RenderFrame 只负责
 	// 「清屏 + 画当前布局」，不会自己重排（主循环里由 ChangeCount 驱动）。
-	if doc := app.Shell().Doc(); doc != nil {
+	if doc := app.Workbench().Doc(); doc != nil {
 		doc.Refresh()
 	}
 	app.Window().RenderFrame()

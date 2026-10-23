@@ -2,7 +2,7 @@
 //
 // 界面：ui 生成的菜单栏（文件/编辑/格式/视图/帮助，菜单项带图标）、纯图标
 // 工具栏与状态栏，加上铺满窗口的多行编辑区、查找替换栏。真实窗口下
-// 「打开…」「另存为…」用 Windows 原生文件对话框（Shell 的 IFileDialog）；
+// 「打开…」「另存为…」用 Windows 原生文件对话框（系统 Shell 的 IFileDialog）；
 // 无头模式没有原生对话框，会在状态栏提示。
 //
 //	go run ./examples/notepad
@@ -120,11 +120,11 @@ type viewport interface {
 
 // notepad 是记事本的全部状态。
 type notepad struct {
-	vp    viewport
-	win   *browser.Window // 真实窗口（无头导出模式下为 nil）
-	doc   engine.HTMLDocument
-	shell *ui.Shell
-	theme ui.Theme
+	vp        viewport
+	win       *browser.Window // 真实窗口（无头导出模式下为 nil）
+	doc       engine.HTMLDocument
+	workbench *ui.Workbench
+	theme     ui.Theme
 
 	editor    *ui.TextAreaView  // 编辑区（纸面）
 	findBar   *ui.BarView       // 查找替换栏（控件条）
@@ -146,7 +146,7 @@ type notepad struct {
 	lastTitle    string // 上次写入窗口的标题（避免每次按键都调平台接口）
 }
 
-// bind 装配页面控件、安装 ui 外壳并接上事件。
+// bind 装配页面控件、安装 ui 工作台并接上事件。
 //
 // 控件视图由 buildPage 一次性给出：按钮的动作在构造时就绑好（NewButton 收
 // 回调），所以这里不再按 id 反查元素，也没有单独的「找按钮、接点击」步骤。
@@ -167,7 +167,7 @@ func (n *notepad) bind() {
 	n.showStatus = true
 	n.matchAt = -1
 
-	n.shell = ui.Install(n.doc, n.buildSpec())
+	n.workbench = ui.Install(n.doc, n.buildSpec())
 	if n.win != nil {
 		n.win.SetKeyHandler(n.handleKey)
 	}
@@ -198,7 +198,7 @@ func (n *notepad) editorEl() engine.HTMLElement {
 	return n.editor.Element()
 }
 
-// handleKey 把应用快捷键接到 ui.Shell。
+// handleKey 把应用快捷键接到 ui.Workbench。
 //
 // 查找/替换输入框聚焦时，Ctrl+C/V/X/A/Z 这类编辑快捷键应该留给输入框
 // 自己，只放行保存/打开/查找/退出这类全局命令；否则会去操作背后的编辑区。
@@ -206,7 +206,7 @@ func (n *notepad) handleKey(key int, mods uint16) bool {
 	if focus := engine.FocusedElement(n.doc); focus != nil && focus != n.editorEl() && !isGlobalShortcut(key, mods) {
 		return false
 	}
-	return n.shell != nil && n.shell.HandleKey(key, mods)
+	return n.workbench != nil && n.workbench.HandleKey(key, mods)
 }
 
 // isGlobalShortcut 判断快捷键在输入框聚焦时是否仍然全局有效。
@@ -246,9 +246,9 @@ func (n *notepad) onChanged() {
 		n.cur = v
 		n.dirty = true
 	}
-	if n.shell != nil {
+	if n.workbench != nil {
 		// 撤销/重做栈刚变过，工具栏按钮的可用态要跟着更新。
-		n.shell.Refresh()
+		n.workbench.Refresh()
 	}
 	n.updateStatus()
 }
@@ -322,10 +322,10 @@ func (n *notepad) updateStatus() {
 	if line, col, ok := engine.CaretPosition(n.editorEl()); ok {
 		pos = fmt.Sprintf("行 %d，列 %d", line, col)
 	}
-	if n.shell != nil {
-		n.shell.SetStatusSegment("file", name)
-		n.shell.SetStatusSegment("pos", pos)
-		n.shell.SetStatusSegment("chars", strconv.Itoa(len([]rune(n.cur)))+" 个字符")
+	if n.workbench != nil {
+		n.workbench.SetStatusSegment("file", name)
+		n.workbench.SetStatusSegment("pos", pos)
+		n.workbench.SetStatusSegment("chars", strconv.Itoa(len([]rune(n.cur)))+" 个字符")
 	}
 	n.updateTitle()
 }
@@ -360,8 +360,8 @@ func shortName(path string) string {
 
 // message 在状态栏右侧提示一条消息。
 func (n *notepad) message(s string) {
-	if n.shell != nil {
-		n.shell.SetStatusRight(s)
+	if n.workbench != nil {
+		n.workbench.SetStatusRight(s)
 	}
 }
 
@@ -384,8 +384,8 @@ func (n *notepad) newFile() {
 	n.redo = nil
 	n.path = ""
 	n.dirty = false
-	if n.shell != nil {
-		n.shell.Refresh()
+	if n.workbench != nil {
+		n.workbench.Refresh()
 	}
 	n.updateStatus()
 	n.message("新建文档")
@@ -498,8 +498,8 @@ func (n *notepad) loadFile(path string) {
 	n.redo = nil
 	n.path = path
 	n.dirty = false
-	if n.shell != nil {
-		n.shell.Refresh()
+	if n.workbench != nil {
+		n.workbench.Refresh()
 	}
 	n.updateStatus()
 	n.message("已打开 " + path)
@@ -564,8 +564,8 @@ func (n *notepad) undoEdit() {
 	n.applying = true
 	n.editor.SetValue(prev)
 	n.applying = false
-	if n.shell != nil {
-		n.shell.Refresh()
+	if n.workbench != nil {
+		n.workbench.Refresh()
 	}
 	n.message("已撤销")
 }

@@ -18,7 +18,7 @@ import (
 //     一次），气泡挂同一个帧循环，不新增定时器。
 //   - 气泡是绘制层不是 DOM 元素，拿不到级联样式；配色由引擎给一套
 //     默认值（深底浅字，浅色/深色页面都读得清），应用可用
-//     SetTooltipColors 按自己的主题下发（ui.Shell 会随主题自动配）。
+//     SetTooltipColors 按自己的主题下发（ui.Workbench 会随主题自动配）。
 //
 // 交互语义（对齐浏览器）：悬停目标或文案变化重新计时；弹出后气泡停在原地
 // 不再跟鼠标；按下/点击/实际滚动把气泡收起，直到鼠标换目标才重新计时。
@@ -55,7 +55,7 @@ type TooltipColors struct {
 }
 
 // 默认配色：深底、浅字、中间色描边——浅色/深色页面上都能读清。
-// 接入主题的应用（ui.Shell）会用主题令牌覆盖它。
+// 接入主题的应用（ui.Workbench）会用主题令牌覆盖它。
 var (
 	tooltipBackground = NewColor(0x0F, 0x17, 0x2A, 255)
 	tooltipBorder     = NewColor(0x47, 0x55, 0x69, 255)

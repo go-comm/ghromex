@@ -129,7 +129,7 @@ func main() {
 		}
 		if app != nil {
 			app.SetTheme(theme)
-			if sh := app.Shell(); sh != nil {
+			if sh := app.Workbench(); sh != nil {
 				sh.SetStatusRight(fmt.Sprintf("Segoe MDL2 Assets · %d 个图标名 · %s主题", len(entries), themeLabel()))
 			}
 		}
@@ -255,7 +255,7 @@ func buildPage(entries []ui.IconEntry) string {
 <head>
 <meta charset="utf-8">
 <style>
-/* body 的复位（外边距/颜色字体）由 ui 外壳负责，页面只写自己的排版。 */
+/* body 的复位（外边距/颜色字体）由 ui 工作台负责，页面只写自己的排版。 */
 .icons-page .icon-search { margin: 0 0 14px 0; }
 .icons-page .icon-search-row .system-ui-input {
 	width: 360px; margin-right: 8px; vertical-align: middle;
@@ -545,7 +545,7 @@ func dump(spec ui.Spec, page, search, pngPath, svgPath string) error {
 }
 
 func saveShot(app *ui.App, path string) error {
-	if doc := app.Shell().Doc(); doc != nil {
+	if doc := app.Workbench().Doc(); doc != nil {
 		doc.Refresh()
 	}
 	app.Window().RenderFrame()

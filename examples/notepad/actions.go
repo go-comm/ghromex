@@ -30,8 +30,8 @@ func (n *notepad) redoEdit() {
 	n.applying = true
 	n.editor.SetValue(next)
 	n.applying = false
-	if n.shell != nil {
-		n.shell.Refresh()
+	if n.workbench != nil {
+		n.workbench.Refresh()
 	}
 	n.message("已重做")
 }
@@ -226,8 +226,8 @@ func (n *notepad) setMono(mono bool) {
 // toggleStatus 显示/隐藏状态栏。
 func (n *notepad) toggleStatus() {
 	n.showStatus = !n.showStatus
-	if n.shell != nil {
-		n.shell.SetStatusVisible(n.showStatus)
+	if n.workbench != nil {
+		n.workbench.SetStatusVisible(n.showStatus)
 	}
 	n.lastW = 0
 	n.syncLayout()
