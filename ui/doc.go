@@ -48,7 +48,8 @@
 // body 的复位同样归工作台：装了工作台的文档，body 无外边距、颜色字体跟随
 // 主题，页面不必自写 margin:0 / padding:0 / color / font-family 这些样板；
 // 自定义排版请挂在内容容器上（根作用域下 body 规则特异度更高，页面的
-// 裸 body 规则盖不过它）。
+// 裸 body 规则盖不过它）。确实要保留 body 原样的页面（演示 UA 样式、靠
+// body padding 给固定栏让位）用 Spec.NoBodyReset 跳过复位。
 //
 // # 状态栏
 //
@@ -87,6 +88,13 @@
 //	bar := ui.NewBar(doc, keyword, find).SetInline("position:absolute;left:0;top:72px")
 //	bar.SetVisible(false)
 //	page.AppendChild(bar.Element())
+//
+// 工具栏里也要放输入框/下拉时，用 Slot 把现成控件嵌进去（槽位不是命令，
+// 没有快捷键与可用态；控件句柄仍归应用）：
+//
+//	addr := ui.NewTextInput(doc, "")
+//	...
+//	Tools: []ui.Action{ui.Tool("刷新", refresh), ui.Slot(addr)},
 //
 // 输入框目前没有实时 input/change 事件，实时联动用 OnKeyDown 或在命令执行
 // 时读取 Value；只读多行文本用 TextView，可编辑多行用 TextAreaView——要它

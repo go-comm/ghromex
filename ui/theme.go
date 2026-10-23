@@ -293,13 +293,15 @@ func (t Theme) tooltipColors() engine.TooltipColors {
 }
 
 // css 生成一套组件样式。chromeTop 是页面内容顶部要空出的高度（菜单栏
-// 与工具栏之和），status 是底部要空出的高度（没有状态栏时为 0）。
+// 与工具栏之和），status 是底部要空出的高度（没有状态栏时为 0）；
+// resetBody 控制是否注入 body 复位块（见 Spec.NoBodyReset），画布底色
+// 始终注入。
 //
 // 只使用引擎支持的 CSS 子集：
 //   - 没有 flex/grid：横向排列一律 inline-block，浮层用绝对定位；
 //   - 主题保持扁平、不用阴影：分隔线用 1px 的实体 div（.system-ui-hairline）；
 //   - 没有 transition：悬停/按下靠 :hover/:active 直接切底色。
-func (t Theme) css(menuTop, chromeTop, status int) string {
+func (t Theme) css(menuTop, chromeTop, status int, resetBody bool) string {
 	// 控件条的上下内边距由条高减控件高推出来：条内控件靠这条 padding 垂直
 	// 居中，写死数字的话换主题（改了 BarHeight）就对不上。
 	barDown := (t.BarHeight - t.ButtonHeight) / 2
@@ -360,7 +362,11 @@ func (t Theme) css(menuTop, chromeTop, status int) string {
 		"$chromeH$", strconv.Itoa(chromeTop),
 		"$statusSpace$", strconv.Itoa(status),
 	)
-	return scopeCSS(r.Replace(themeCSS), uiRootClass)
+	src := themeCSS
+	if resetBody {
+		src = bodyResetCSS + themeCSS
+	}
+	return scopeCSS(r.Replace(src), uiRootClass)
 }
 
 // uiRootClass 是组件样式的作用域根类，Install 会把它加到文档根元素上。
@@ -485,6 +491,24 @@ func scopeSelectorList(s, scope string) string {
 	return strings.Join(parts, ", ") + s[len(trimmed):]
 }
 
+// bodyResetCSS 是 body 复位规则，由 css 按需拼在 themeCSS 之前。
+//
+// 单独成块是因为它有 opt-out（Spec.NoBodyReset）：演示 UA 样式的页面
+// （body 的 margin:8px 本身就是内容）、靠 body padding 给固定栏让位的页面，
+// 被复位反而会改坏排版；画布底色（html background-color）没有这个矛盾，
+// 留在 themeCSS 里始终注入。
+const bodyResetCSS = `
+/* 工作台复位：装了 ui 工作台的文档，body 就是工作台画布——UA 的 8px 外边距与
+   默认字体字号，不该让每个页面重复复位一遍（颜色字号跟随主题）。
+   根作用域后这条特异度是 0,2,1，页面的裸 body 规则盖不过它：自定义排版
+   请挂在内容容器（.system-ui-page / 卡片）上，确实要改 body 就用同特异度
+   写在本样式表之后，或干脆用 Spec.NoBodyReset 整体跳过复位。 */
+body {
+	margin: 0; padding: 0;
+	color: $text$; font-family: $font$; font-size: 13px;
+}
+`
+
 // themeCSS 是组件库的全部样式；$xxx$ 是 Theme 的占位符。
 //
 // 类名统一 system-ui- 前缀，并由 scopeCSS 挂到 html.system-ui 根作用域下；
@@ -493,16 +517,6 @@ func scopeSelectorList(s, scope string) string {
 const themeCSS = `
 /* 画布底色：页面自己的 body 背景仍然优先（引擎按 body → html 传播）。 */
 html { background-color: $bg$; }
-
-/* 工作台复位：装了 ui 工作台的文档，body 就是工作台画布——UA 的 8px 外边距与
-   默认字体字号，不该让每个页面重复复位一遍（颜色字号跟随主题）。
-   根作用域后这条特异度是 0,2,1，页面的裸 body 规则盖不过它：自定义排版
-   请挂在内容容器（.system-ui-page / 卡片）上，确实要改 body 就用同特异度
-   写在本样式表之后。 */
-body {
-	margin: 0; padding: 0;
-	color: $text$; font-family: $font$; font-size: 13px;
-}
 
 /* ===== 工作台：菜单栏 / 工具栏 / 状态栏 ===== */
 
@@ -640,6 +654,15 @@ body {
 	display: inline-block; width: 1px; height: 18px; margin: 0 6px;
 	background-color: $borderStrong$; vertical-align: middle;
 }
+
+/* 工具栏槽位（Slot）：现成控件（输入框/下拉等）嵌进工具栏，与命令按钮同排。
+   控件高度与按钮一致（ButtonHeight，正好填满 ToolHeight 减上下内边距）；
+   输入框沿用主题的表单宽度，下拉是「选择器」不是表单字段，收窄一档——
+   都可用内联样式再调（引擎没有 flex，宽度只能定量，不能弹性拉伸）。 */
+.system-ui-tool-slot {
+	display: inline-block; margin-right: 2px; vertical-align: middle;
+}
+.system-ui-tool-slot .system-ui-select { width: 150px; }
 
 .system-ui-status {
 	position: fixed; left: 0; bottom: 0; width: 100%; height: $statusH$px;

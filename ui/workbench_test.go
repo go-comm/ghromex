@@ -123,6 +123,18 @@ func TestInstallResetsBody(t *testing.T) {
 	}
 }
 
+// Spec.NoBodyReset 跳过 body 复位：演示 UA 样式的页面（body 的 margin:8px
+// 本身就是内容）、靠 body padding 给固定栏让位的页面，需要保住原样。
+func TestInstallSkipsBodyReset(t *testing.T) {
+	doc := newTestDoc(t, 640, 480, `<div id="page">内容</div>`)
+	Install(doc, Spec{Status: "就绪", NoBodyReset: true})
+	doc.Refresh()
+
+	if b := boxOf(doc.Body()); b.x != 8 {
+		t.Fatalf("body 框 = %+v，期望保留 UA 的 8px 外边距", b)
+	}
+}
+
 // 没有菜单/工具栏时不生成对应的栏，顶部占位块高度随之收敛。
 func TestInstallWithoutBars(t *testing.T) {
 	doc := newTestDoc(t, 400, 300, `<div>内容</div>`)
@@ -437,6 +449,43 @@ func TestToolbarButtonAndRefresh(t *testing.T) {
 	}
 }
 
+// 工具栏槽位：现成控件（输入框/下拉）嵌进工具栏后仍是应用手里的那一个——
+// 取值设值直接调控件句柄；槽位不是命令，不进按钮刷新表。
+func TestToolbarSlots(t *testing.T) {
+	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
+	addr := NewTextInput(doc, "")
+	sel := NewSelect(doc, []SelectOption{{Value: "a", Label: "甲"}, {Value: "b", Label: "乙"}})
+	sh := Install(doc, Spec{
+		Tools: []Action{
+			Tool("刷新", func() error { return nil }).WithIcon("refresh"),
+			Slot(addr),
+			Slot(sel),
+		},
+	})
+	doc.Refresh()
+
+	bar := doc.QuerySelector(".system-ui-toolbar")
+	if bar == nil {
+		t.Fatal("没有生成工具栏")
+	}
+	if got := len(bar.QuerySelectorAll(".system-ui-tool-slot")); got != 2 {
+		t.Fatalf("槽位数 = %d，期望 2", got)
+	}
+	// 槽位里是控件本体：句柄读写的就是工具栏里的那个元素。
+	addr.SetValue("hello")
+	if got := addr.Value(); got != "hello" {
+		t.Fatalf("经句柄设值后 = %q", got)
+	}
+	// 槽位不是命令：只有命令按钮进可用态刷新表。
+	if got := len(sh.tools); got != 1 {
+		t.Fatalf("命令按钮数 = %d，期望 1（槽位不参与刷新）", got)
+	}
+	// 槽位控件随工具栏布局：高度与按钮同为 ButtonHeight，位置在栏内。
+	if got := boxOf(sel.Element()); got.h != Light().ButtonHeight || got.y < boxOf(bar).y {
+		t.Fatalf("下拉框框 = %+v，期望与按钮同高且在栏内", got)
+	}
+}
+
 // 工具栏：带图标的命令画成方形图标按钮，文字留在 Label 里当兜底；
 // 没有图标（或图标名拼错）时退回文字按钮。
 func TestToolbarIcons(t *testing.T) {
@@ -678,7 +727,7 @@ func TestThemeDefaultsAndCSSTokens(t *testing.T) {
 	if th.Bg != Light().Bg || th.MenuHeight != Light().MenuHeight {
 		t.Fatal("零值字段没有用 Light() 补齐")
 	}
-	css := th.css(30, 68, 24)
+	css := th.css(30, 68, 24, true)
 	if strings.Contains(css, "$") {
 		t.Fatalf("CSS 里残留未替换的占位符:\n%s", css)
 	}

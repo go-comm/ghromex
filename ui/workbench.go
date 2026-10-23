@@ -30,6 +30,10 @@ type Action struct {
 	// Enable 返回命令当前是否可用；nil 表示恒可用。菜单打开时、按钮
 	// 刷新时求值——不做每帧轮询。
 	Enable func() bool
+
+	// slot 非 nil 时这条不是命令，而是嵌进工具栏的现成控件（见 Slot）：
+	// 不参与快捷键注册与可用态刷新，Label/Run/Enable 都忽略。
+	slot Control
 }
 
 // Item 构造一条菜单命令。run 为 nil 时命令只关闭菜单。
@@ -45,6 +49,21 @@ func Tool(label string, run func() error) Action {
 
 // Sep 构造一条分隔线（菜单里是横线，工具栏里是竖线）。
 func Sep() Action { return Action{Sep: true} }
+
+// Slot 把一个现成控件（输入框、下拉等）嵌进工具栏，与命令按钮同排：
+//
+//	addr := ui.NewTextInput(doc, "")
+//	...
+//	Tools: []ui.Action{
+//		ui.Tool("刷新", refresh).WithIcon("refresh"),
+//		ui.Slot(addr),
+//	}
+//
+// 控件句柄仍归应用：取值、设值、禁用直接调控件自己的方法，不必按 id 回查
+// 元素。槽位不是命令：没有快捷键与可用态，禁用请用控件自己的 SetEnabled。
+func Slot(c Control) Action {
+	return Action{slot: c}
+}
 
 // When 给命令挂可用性判断，返回新值便于链式书写：
 //
@@ -82,6 +101,17 @@ type Spec struct {
 
 	// Theme 为空时用 Light()。
 	Theme *Theme
+
+	// NoBodyReset 跳过对 body 的样式复位（margin/padding/color/font）；
+	// 画布底色（html background-color）不受影响，始终注入。
+	//
+	// 默认 Install 会复位 body：UA 的 8px 外边距与默认字体不该让每个页面
+	// 重复写一遍。两类页面需要关掉它：
+	//   - 演示 UA 样式的页面——body 的 margin:8px 本身就是演示内容；
+	//   - 靠 body padding 给固定栏让位的页面——复位会把排版顶歪。
+	//
+	// 关掉之后 body 的外观由页面自己负责。
+	NoBodyReset bool
 
 	Menus []Menu
 	Tools []Action
@@ -163,7 +193,7 @@ func Install(doc engine.HTMLDocument, spec Spec) *Workbench {
 
 	// 样式表最后注入：页面自己的 <style>/<link> 在解析阶段就合并完了，
 	// 这里追加的规则在同特异度时后写胜出。
-	doc.AddStylesheetText(theme.css(menuH, chromeH, theme.StatusHeight))
+	doc.AddStylesheetText(theme.css(menuH, chromeH, theme.StatusHeight, !spec.NoBodyReset))
 	// 提示气泡是绘制层、拿不到级联样式，配色单独随主题下发。
 	engine.SetTooltipColors(doc, theme.tooltipColors())
 
@@ -276,7 +306,7 @@ func (s *Workbench) SetTheme(theme Theme) {
 	if len(s.spec.Tools) > 0 {
 		toolH = theme.ToolHeight
 	}
-	s.doc.AddStylesheetText(theme.css(menuH, menuH+toolH, theme.StatusHeight))
+	s.doc.AddStylesheetText(theme.css(menuH, menuH+toolH, theme.StatusHeight, !s.spec.NoBodyReset))
 	engine.SetTooltipColors(s.doc, theme.tooltipColors())
 	s.theme = theme
 	s.spec.Theme = &theme

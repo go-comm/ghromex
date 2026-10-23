@@ -87,7 +87,7 @@ func TestDarkThemeIsComplete(t *testing.T) {
 // 主题的亮蓝底上压白字会看不清。
 func TestDarkThemeCSS(t *testing.T) {
 	d := Dark()
-	css := d.css(32, 72, 24)
+	css := d.css(32, 72, 24, true)
 	if strings.Contains(css, "$") {
 		t.Fatalf("CSS 里残留未替换的占位符:\n%s", css)
 	}
@@ -121,7 +121,7 @@ func TestSemanticColorsCSS(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			th := tc.th
-			css := th.css(32, 72, 24)
+			css := th.css(32, 72, 24, true)
 			if strings.Contains(css, "$") {
 				t.Fatalf("CSS 里残留未替换的占位符:\n%s", css)
 			}
@@ -204,7 +204,7 @@ func TestScopeCSS(t *testing.T) {
 // 生成的样式必须全部挂在 html.system-ui 下；只改类名前缀不够，
 // 根作用域把组件规则的特异度抬到 0,2,1，第三方 .panel div 压不过。
 func TestThemeCSSScoped(t *testing.T) {
-	css := Light().css(24, 56, 24)
+	css := Light().css(24, 56, 24, true)
 	for _, want := range []string{
 		"html." + uiRootClass + " { background-color:",
 		"html." + uiRootClass + " .system-ui-btn {",
@@ -515,7 +515,7 @@ func TestTooltipColorsFollowTheme(t *testing.T) {
 // 底色与分隔线；textarea 的平铺变体（贴边铺满的编辑区）不带描边与圆角。
 func TestBarThemeCSS(t *testing.T) {
 	th := Light()
-	css := th.css(32, 72, 24)
+	css := th.css(32, 72, 24, true)
 	i := strings.Index(css, " .system-ui-bar {")
 	if i < 0 {
 		t.Fatal("CSS 里没有 .system-ui-bar 规则")
@@ -543,7 +543,7 @@ func TestBarThemeCSS(t *testing.T) {
 	// 换一套条高，内边距要跟着变（否则控件不在条里居中）。
 	custom := th
 	custom.BarHeight = 64
-	if got := custom.css(32, 72, 24); !strings.Contains(got, "height: 64px; padding: 17px") {
+	if got := custom.css(32, 72, 24, true); !strings.Contains(got, "height: 64px; padding: 17px") {
 		t.Error("BarHeight 改 64 后条内边距没跟着推导")
 	}
 	// 零值走 withDefaults 补齐（漏填不该生成 height: 0px 的条）。
@@ -551,8 +551,24 @@ func TestBarThemeCSS(t *testing.T) {
 	if filled.BarHeight != th.BarHeight {
 		t.Fatalf("BarHeight 默认值 = %d, want %d", filled.BarHeight, th.BarHeight)
 	}
-	if got := filled.css(32, 72, 24); !strings.Contains(got, "height: "+strconv.Itoa(th.BarHeight)+"px") {
+	if got := filled.css(32, 72, 24, true); !strings.Contains(got, "height: "+strconv.Itoa(th.BarHeight)+"px") {
 		t.Error("补齐默认值后控件条高度不对")
+	}
+}
+
+// NoBodyReset 只跳过 body 复位块：画布底色（html background-color）没有
+// 与页面排版冲突的语义，无论开关都注入。
+func TestCSSWithoutBodyReset(t *testing.T) {
+	css := Light().css(32, 72, 24, false)
+	if strings.Contains(css, "html.system-ui body {") {
+		t.Fatal("resetBody=false 时不该注入 body 复位规则")
+	}
+	if !strings.Contains(css, "html.system-ui { background-color: "+Light().Bg) {
+		t.Fatal("跳过 body 复位时画布底色仍要注入")
+	}
+	// 开关打开时复位规则照常出现（0,2,1 特异度，页面裸 body 规则盖不过）。
+	if on := Light().css(32, 72, 24, true); !strings.Contains(on, "html.system-ui body {") {
+		t.Fatal("resetBody=true 时要注入 body 复位规则")
 	}
 }
 
@@ -560,7 +576,7 @@ func TestBarThemeCSS(t *testing.T) {
 // 1px 分隔线都要 pointer-events:none——否则浮在内容上的控件条看得见点不到。
 // 反过来，栏与控件条本身必须保持可命中。
 func TestDecorativeCSSPointerEvents(t *testing.T) {
-	css := Light().css(32, 72, 24)
+	css := Light().css(32, 72, 24, true)
 	// ruleBody 返回选择器后第一条规则的正文（到第一个 } 为止）。
 	ruleBody := func(sel string) string {
 		t.Helper()
