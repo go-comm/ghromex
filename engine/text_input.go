@@ -154,6 +154,14 @@ func CaretPosition(el HTMLElement) (line, col int, ok bool) {
 	}
 	caret := clampCaret(b.caret, len([]rune(b.GetAttribute("value"))))
 	if strings.EqualFold(b.tagName, "textarea") {
+		// 折行宽度来自布局结果。还没布局（首次重排之前，应用设完值就急着
+		// 刷状态栏）或已经 display:none 时它是 0，按 0 宽折行会把每个字符
+		// 折成一行，行列号就成了「行 29」这种没意义的数字。这种时候退回
+		// 按硬换行分行：逻辑行列至少和文本本身对得上。
+		if b.width <= 0 {
+			line, col = logicalLineCol(b.GetAttribute("value"), caret)
+			return line, col, true
+		}
 		l := layoutTextarea(docGraphics(docOf(el)), b)
 		if len(l.lines) == 0 {
 			return 1, 1, true
@@ -162,6 +170,24 @@ func CaretPosition(el HTMLElement) (line, col int, ok bool) {
 		return row + 1, caret - l.lines[row].start + 1, true
 	}
 	return 1, caret + 1, true
+}
+
+// logicalLineCol 按硬换行（\n）算光标所在的逻辑行列（均从 1 起）。
+func logicalLineCol(value string, caret int) (int, int) {
+	runes := []rune(value)
+	if caret > len(runes) {
+		caret = len(runes)
+	}
+	line, col := 1, 1
+	for i := 0; i < caret; i++ {
+		if runes[i] == '\n' {
+			line++
+			col = 1
+			continue
+		}
+		col++
+	}
+	return line, col
 }
 
 // focusTargets 按文档顺序收集全部可编辑输入（Tab 循环用）。

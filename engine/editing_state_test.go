@@ -69,6 +69,35 @@ func TestCaretPosition(t *testing.T) {
 	}
 }
 
+// 还没布局就读 textarea 的光标行列，要退回按硬换行分行。
+//
+// 折行宽度取布局结果：首次重排之前（应用设完值就刷状态栏）或元素
+// display:none 时它是 0，按 0 宽折行会把每个字符折成一行，行列号就成了
+// 「行 29」这种没意义的数字——记事本用 -file 启动时状态栏正是这样。
+func TestCaretPositionBeforeLayout(t *testing.T) {
+	const src = `<!doctype html><html><head><style>
+	body { margin: 0; }
+	#t { width: 200px; height: 80px; font-size: 16px; }
+	</style></head><body><textarea id="t"></textarea></body></html>`
+	vp := engine.NewHeadlessViewport(420, 240)
+	doc, err := engine.OpenDocument(vp, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ta := doc.QuerySelector("#t")
+	engine.SetValue(ta, "abc\ndefg\nhi") // 光标在末尾 = 第 3 行第 3 列
+	engine.SetFocusedElement(doc, ta)
+
+	if line, col, ok := engine.CaretPosition(ta); !ok || line != 3 || col != 3 {
+		t.Fatalf("未布局时 textarea 光标位置 = %d,%d ok=%v，want 3,3", line, col, ok)
+	}
+	// 布局之后仍按折行结果给行列（软折行算新行的口径不变）。
+	doc.Refresh()
+	if line, col, ok := engine.CaretPosition(ta); !ok || line != 3 || col != 3 {
+		t.Fatalf("布局后 textarea 光标位置 = %d,%d ok=%v，want 3,3", line, col, ok)
+	}
+}
+
 // 视口尺寸变化要通知文档：窗口缩放不改内容，只靠 onChanged 收不到信号。
 func TestViewportResizeNotifiesDocument(t *testing.T) {
 	vp := engine.NewHeadlessViewport(400, 300)
