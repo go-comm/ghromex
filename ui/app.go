@@ -76,6 +76,20 @@ func (a *App) SetStatus(text string) {
 	}
 }
 
+// SetTheme 切换当前窗口的主题。
+//
+// 已经装好的外壳会追加一套新主题样式，页面内容与滚动位置保持不变；之后
+// 如果换文档，新文档也沿用这套主题。
+func (a *App) SetTheme(theme Theme) {
+	if a == nil {
+		return
+	}
+	a.spec.Theme = &theme
+	if a.shell != nil {
+		a.shell.SetTheme(theme)
+	}
+}
+
 // Run 进入事件循环，直到窗口关闭。
 func (a *App) Run() error { return a.win.Run() }
 

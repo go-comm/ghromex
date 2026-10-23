@@ -12,8 +12,8 @@ type menuView struct {
 
 // buildMenubar 生成菜单栏。
 func (s *Shell) buildMenubar() {
-	s.menubar = newEl(s.doc, "div", "ui-menubar", "")
-	s.menubar.AppendChild(newEl(s.doc, "div", "ui-hairline", ""))
+	s.menubar = newEl(s.doc, "div", "system-ui-menubar", "")
+	s.menubar.AppendChild(newEl(s.doc, "div", "system-ui-hairline", ""))
 	for i := range s.spec.Menus {
 		s.addMenu(i)
 	}
@@ -27,12 +27,12 @@ func (s *Shell) buildMenubar() {
 // 不用在滚动/缩放后重算坐标。
 func (s *Shell) addMenu(i int) {
 	mv := &menuView{menu: s.spec.Menus[i]}
-	mv.label = newEl(s.doc, "div", "ui-menu", mv.menu.Title)
-	mv.pop = newEl(s.doc, "div", "ui-menu-pop", "")
+	mv.label = newEl(s.doc, "div", "system-ui-menu", mv.menu.Title)
+	mv.pop = newEl(s.doc, "div", "system-ui-menu-pop", "")
 	mv.label.AppendChild(mv.pop)
 	// 打开态的下划线：2px 强调色，横跨整个标签。用实体元素而不是
 	// ::after——引擎没实现伪元素。
-	mv.label.AppendChild(newEl(s.doc, "div", "ui-menu-underline", ""))
+	mv.label.AppendChild(newEl(s.doc, "div", "system-ui-menu-underline", ""))
 
 	label, idx := mv.label, i
 	label.OnClick(func(ev *engine.MouseEvent) {
@@ -73,14 +73,14 @@ func (s *Shell) OpenMenu(i int) {
 		}
 	}
 	if withIcon {
-		setClass(mv.pop, "ui-menu-pop has-icon")
+		setClass(mv.pop, "system-ui-menu-pop has-icon")
 	} else {
-		setClass(mv.pop, "ui-menu-pop")
+		setClass(mv.pop, "system-ui-menu-pop")
 	}
 	for _, a := range mv.menu.Items {
 		mv.pop.AppendChild(s.menuItemEl(a, withIcon))
 	}
-	setClass(mv.label, "ui-menu is-open")
+	setClass(mv.label, "system-ui-menu is-open")
 	s.open = mv
 }
 
@@ -90,7 +90,7 @@ func (s *Shell) CloseMenus() {
 		return
 	}
 	for _, mv := range s.menus {
-		setClass(mv.label, "ui-menu")
+		setClass(mv.label, "system-ui-menu")
 	}
 	s.open = nil
 }
@@ -107,24 +107,24 @@ func (s *Shell) toggle(i int) {
 // menuItemEl 生成一条菜单项（或分隔线）；withIcon 决定是否预留图标列。
 func (s *Shell) menuItemEl(a Action, withIcon bool) engine.HTMLElement {
 	if a.Sep {
-		return newEl(s.doc, "div", "ui-menu-sep", "")
+		return newEl(s.doc, "div", "system-ui-menu-sep", "")
 	}
-	el := newEl(s.doc, "div", "ui-menu-item", "")
+	el := newEl(s.doc, "div", "system-ui-menu-item", "")
 	if withIcon {
 		if ic := newIcon(s.doc, a.Icon); ic != nil {
-			setClass(ic, "ui-icon ui-menu-icon")
+			setClass(ic, "system-ui-icon system-ui-menu-icon")
 			el.AppendChild(ic)
 		}
 	}
 	el.AppendChild(newEl(s.doc, "span", "", a.Label))
 	if a.Shortcut != "" {
-		el.AppendChild(newEl(s.doc, "span", "ui-menu-shortcut", a.Shortcut))
+		el.AppendChild(newEl(s.doc, "span", "system-ui-menu-shortcut", a.Shortcut))
 	}
 	// 可用性在生成时求值（即打开菜单那一刻），点的时候再判一次，
 	// 防止浮层还没重建、状态已经变了。
 	ok := enabled(a)
 	if !ok {
-		setClass(el, "ui-menu-item is-disabled")
+		setClass(el, "system-ui-menu-item is-disabled")
 	}
 	act := a
 	el.OnClick(func(*engine.MouseEvent) {

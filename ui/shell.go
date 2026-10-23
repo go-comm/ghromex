@@ -86,8 +86,12 @@ type Spec struct {
 	Tools []Action
 
 	// Status/StatusRight 是状态栏的初始左右文本。
-	Status      string
-	StatusRight string
+	//
+	// StatusSegments 非空时优先使用分段；Status 只在没有分段时作为
+	// 单段状态栏的快捷写法（等价于一个 Key 为 "status" 的段）。
+	Status         string
+	StatusRight    string
+	StatusSegments []StatusSegment
 
 	// Focus 返回「命令执行后该把焦点还给谁」。菜单/工具栏是普通 div，
 	// 点它们会让页面里的输入框失焦；命令跑完把焦点还回去，用户才能
@@ -111,9 +115,12 @@ type Shell struct {
 	toolbar engine.HTMLElement
 	tools   []*toolView
 
-	status      engine.HTMLElement
-	statusLeft  engine.HTMLElement
-	statusRight engine.HTMLElement
+	status       engine.HTMLElement
+	statusTrack  engine.HTMLElement
+	statusLeft   engine.HTMLElement
+	statusRight  engine.HTMLElement
+	statusSegs   []statusSegView
+	spacerBottom engine.HTMLElement
 
 	keys []keyBind
 	open *menuView
@@ -139,6 +146,9 @@ func Install(doc engine.HTMLDocument, spec Spec) *Shell {
 	if spec.Theme != nil {
 		theme = spec.Theme.withDefaults()
 	}
+	// 组件样式全部挂在 html.system-ui 下；根类由 Install 统一加，
+	// 页面不用自己记得写，也不会因为漏写而让外壳失去样式。
+	addClass(doc, uiRootClass)
 
 	menuH, toolH := 0, 0
 	if len(spec.Menus) > 0 {
@@ -158,16 +168,19 @@ func Install(doc engine.HTMLDocument, spec Spec) *Shell {
 
 	// 顶部占位：必须插在页面内容之前。放在 body 首而不是给 body 加
 	// padding，页面自己的内边距才不会被覆盖。
-	body.InsertBefore(newEl(doc, "div", "ui-spacer-top", ""), firstChild(body))
+	body.InsertBefore(newEl(doc, "div", "system-ui-spacer-top", ""), firstChild(body))
 
-	if menuH > 0 {
-		s.buildMenubar()
-	}
 	if toolH > 0 {
 		s.buildToolbar()
 	}
 	s.buildStatus()
-	body.AppendChild(newEl(doc, "div", "ui-spacer-bottom", ""))
+	s.spacerBottom = newEl(doc, "div", "system-ui-spacer-bottom", "")
+	body.AppendChild(s.spacerBottom)
+	// 菜单栏最后插入：菜单浮层会盖住工具栏，而引擎的命中测试按 DOM
+	// 顺序「后者胜出」，菜单栏排在工具栏之前时浮层项会被工具栏截胡。
+	if menuH > 0 {
+		s.buildMenubar()
+	}
 
 	// 快捷键：菜单项与工具栏按钮都参与，先出现的绑定优先。
 	// 同一个 Action 常同时放进菜单和工具栏（示例就是这样），按
@@ -207,10 +220,6 @@ func Install(doc engine.HTMLDocument, spec Spec) *Shell {
 		s.CloseMenus()
 	})
 
-	if spec.Status != "" || spec.StatusRight != "" {
-		s.SetStatus(spec.Status)
-		s.SetStatusRight(spec.StatusRight)
-	}
 	s.Refresh()
 	return s
 }
@@ -223,26 +232,49 @@ func (s *Shell) Doc() engine.HTMLDocument {
 	return s.doc
 }
 
-// SetStatus 更新状态栏左侧文本。
-func (s *Shell) SetStatus(text string) {
-	if s == nil || s.statusLeft == nil {
+// SetStatusVisible 显示或隐藏状态栏，同时收起/恢复底部占位。
+//
+// 应用可以把它接到「视图 → 显示状态栏」这类命令上；隐藏时底部占位一起
+// 收起，页面内容可以使用腾出的高度，不会被固定栏挡住。
+func (s *Shell) SetStatusVisible(visible bool) {
+	if s == nil {
 		return
 	}
-	if s.statusLeft.Text() == text {
-		return
+	display := "none"
+	if visible {
+		display = "block"
 	}
-	s.statusLeft.SetText(text)
+	if s.status != nil {
+		s.status.SetAttribute("style", "display:"+display)
+	}
+	if s.spacerBottom != nil {
+		s.spacerBottom.SetAttribute("style", "display:"+display)
+	}
 }
 
-// SetStatusRight 更新状态栏右侧文本（提示/计数/快捷键）。
-func (s *Shell) SetStatusRight(text string) {
-	if s == nil || s.statusRight == nil {
+// SetTheme 在不重建菜单/工具栏/页面的前提下换一套主题。
+//
+// 新样式表追加在旧样式之后，同特异度时后写胜出；Shell 的尺寸跟着新主题
+// 重算，浅色/深色（尺寸相同）切换时只有配色变化。旧样式表不会被移除，
+// 反复切换会让样式表增长，适合交互式切换而不是高频轮换。
+func (s *Shell) SetTheme(theme Theme) {
+	if s == nil || s.doc == nil {
 		return
 	}
-	if s.statusRight.Text() == text {
+	theme = theme.withDefaults()
+	if s.theme == theme {
 		return
 	}
-	s.statusRight.SetText(text)
+	menuH, toolH := 0, 0
+	if len(s.spec.Menus) > 0 {
+		menuH = theme.MenuHeight
+	}
+	if len(s.spec.Tools) > 0 {
+		toolH = theme.ToolHeight
+	}
+	s.doc.AddStylesheetText(theme.css(menuH, menuH+toolH, theme.StatusHeight))
+	s.theme = theme
+	s.spec.Theme = &theme
 }
 
 // Refresh 重算工具栏按钮的可用态。

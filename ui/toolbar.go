@@ -14,7 +14,7 @@ type toolView struct {
 // 有图标时是方形图标按钮（is-icon），没有图标退回文字按钮（is-label）：
 // 应用不必为每个命令都配图标，混用时也不会把按钮压扁。
 func toolClass(a Action) string {
-	class := "ui-btn ui-tool"
+	class := "system-ui-btn system-ui-tool"
 	if iconGlyph(a.Icon) == "" {
 		class += " is-label"
 	} else {
@@ -31,10 +31,10 @@ func toolClass(a Action) string {
 // 图标按钮只画图标（文字留在 Action.Label 里，给无图标兜底与读屏/文档用）。
 // 横向排列靠 inline-block（引擎没有 flex）；分组用 1px 的竖线。
 func (s *Shell) buildToolbar() {
-	s.toolbar = newEl(s.doc, "div", "ui-toolbar", "")
+	s.toolbar = newEl(s.doc, "div", "system-ui-toolbar", "")
 	for _, a := range s.spec.Tools {
 		if a.Sep {
-			s.toolbar.AppendChild(newEl(s.doc, "div", "ui-sep", ""))
+			s.toolbar.AppendChild(newEl(s.doc, "div", "system-ui-sep", ""))
 			continue
 		}
 		tv := &toolView{act: a, el: newEl(s.doc, "div", toolClass(a), "")}
@@ -55,6 +55,6 @@ func (s *Shell) buildToolbar() {
 		s.tools = append(s.tools, tv)
 		s.toolbar.AppendChild(tv.el)
 	}
-	s.toolbar.AppendChild(newEl(s.doc, "div", "ui-hairline", ""))
+	s.toolbar.AppendChild(newEl(s.doc, "div", "system-ui-hairline", ""))
 	s.doc.Body().AppendChild(s.toolbar)
 }

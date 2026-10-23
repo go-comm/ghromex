@@ -63,7 +63,7 @@ func TestInstallBuildsChrome(t *testing.T) {
 	})
 	doc.Refresh()
 
-	bar := doc.QuerySelector(".ui-menubar")
+	bar := doc.QuerySelector(".system-ui-menubar")
 	if bar == nil {
 		t.Fatal("缺少菜单栏")
 	}
@@ -71,7 +71,7 @@ func TestInstallBuildsChrome(t *testing.T) {
 		t.Fatalf("菜单栏框 = %+v，期望 (0,0) 640x%d", b, th.MenuHeight)
 	}
 
-	toolbar := doc.QuerySelector(".ui-toolbar")
+	toolbar := doc.QuerySelector(".system-ui-toolbar")
 	if toolbar == nil {
 		t.Fatal("缺少工具栏")
 	}
@@ -79,7 +79,7 @@ func TestInstallBuildsChrome(t *testing.T) {
 		t.Fatalf("工具栏框 = %+v，期望 y=%d h=%d", b, th.MenuHeight, th.ToolHeight)
 	}
 
-	status := doc.QuerySelector(".ui-status")
+	status := doc.QuerySelector(".system-ui-status")
 	if status == nil {
 		t.Fatal("缺少状态栏")
 	}
@@ -88,11 +88,11 @@ func TestInstallBuildsChrome(t *testing.T) {
 	}
 
 	// 占位块：顶部 = 菜单栏 + 工具栏，底部 = 状态栏。
-	top := doc.QuerySelector(".ui-spacer-top")
+	top := doc.QuerySelector(".system-ui-spacer-top")
 	if top == nil || boxOf(top).h != th.MenuHeight+th.ToolHeight {
 		t.Fatalf("顶部占位块 = %v，期望高 %d", top, th.MenuHeight+th.ToolHeight)
 	}
-	bottom := doc.QuerySelector(".ui-spacer-bottom")
+	bottom := doc.QuerySelector(".system-ui-spacer-bottom")
 	if bottom == nil || boxOf(bottom).h != th.StatusHeight {
 		t.Fatalf("底部占位块 = %v，期望高 %d", bottom, th.StatusHeight)
 	}
@@ -117,13 +117,13 @@ func TestInstallWithoutBars(t *testing.T) {
 	Install(doc, Spec{Status: "就绪"})
 	doc.Refresh()
 
-	if doc.QuerySelector(".ui-menubar") != nil {
+	if doc.QuerySelector(".system-ui-menubar") != nil {
 		t.Fatal("没有菜单时不该生成菜单栏")
 	}
-	if doc.QuerySelector(".ui-toolbar") != nil {
+	if doc.QuerySelector(".system-ui-toolbar") != nil {
 		t.Fatal("没有工具栏配置时不该生成工具栏")
 	}
-	if got := doc.QuerySelector(".ui-spacer-top").Height(); got != 0 {
+	if got := doc.QuerySelector(".system-ui-spacer-top").Height(); got != 0 {
 		t.Fatalf("顶部占位块 = %d，期望 0", got)
 	}
 }
@@ -132,6 +132,28 @@ func TestInstallNilDocument(t *testing.T) {
 	if sh := Install(nil, Spec{}); sh != nil {
 		t.Fatal("doc 为 nil 时应返回 nil")
 	}
+}
+
+// 组件样式全部挂在 html.system-ui 下；Install 负责加根类，并保留
+// 页面已有的 class，不能因为加了作用域把 <html class="app"> 覆盖掉。
+func TestInstallAddsRootScope(t *testing.T) {
+	doc := newTestDoc(t, 400, 300, `<html class="app"><body><div>内容</div></body></html>`)
+	Install(doc, Spec{})
+	if !hasWord(doc.GetAttribute("class"), uiRootClass) {
+		t.Fatalf("根元素 class = %q，缺少 %s", doc.GetAttribute("class"), uiRootClass)
+	}
+	if !hasWord(doc.GetAttribute("class"), "app") {
+		t.Fatalf("根元素原有 class 丢失: %q", doc.GetAttribute("class"))
+	}
+}
+
+func hasWord(s, word string) bool {
+	for _, f := range strings.Fields(s) {
+		if f == word {
+			return true
+		}
+	}
+	return false
 }
 
 // 点标签开菜单、点菜单项执行并收起。
@@ -147,23 +169,23 @@ func TestMenuOpensRunsAndCloses(t *testing.T) {
 	})
 	doc.Refresh()
 
-	label := doc.QuerySelector(".ui-menu")
+	label := doc.QuerySelector(".system-ui-menu")
 	clickEl(t, doc, label)
 	if sh.open == nil {
 		t.Fatal("点菜单标签应展开菜单")
 	}
-	pop := doc.QuerySelector(".ui-menu-pop")
+	pop := doc.QuerySelector(".system-ui-menu-pop")
 	if pop == nil || boxOf(pop).h == 0 {
 		t.Fatal("展开后浮层应可见（display:block）")
 	}
 	if w := boxOf(pop).w; w != 216 {
 		t.Fatalf("浮层宽度 = %d，期望 216", w)
 	}
-	if doc.QuerySelector(".ui-menu-sep") == nil {
+	if doc.QuerySelector(".system-ui-menu-sep") == nil {
 		t.Fatal("分隔线没有渲染")
 	}
 
-	items := doc.GetElementsByClassName("ui-menu-item")
+	items := doc.GetElementsByClassName("system-ui-menu-item")
 	if len(items) != 2 {
 		t.Fatalf("菜单项数量 = %d，期望 2", len(items))
 	}
@@ -176,6 +198,26 @@ func TestMenuOpensRunsAndCloses(t *testing.T) {
 	}
 }
 
+// 菜单浮层会盖住工具栏。引擎的命中测试按 DOM 顺序「后者胜出」，
+// 菜单栏必须排在工具栏之后，否则浮层里的项会被工具栏按钮截胡。
+func TestMenuPopupOverToolbarIsClickable(t *testing.T) {
+	ran := ""
+	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
+	Install(doc, Spec{
+		Menus: []Menu{{Title: "文件", Items: []Action{
+			Item("保存", "", func() error { ran = "save"; return nil }),
+		}}},
+		Tools: []Action{Button("工具", func() error { ran = "tool"; return nil })},
+	})
+	doc.Refresh()
+
+	clickEl(t, doc, doc.QuerySelector(".system-ui-menu"))
+	clickEl(t, doc, doc.QuerySelector(".system-ui-menu-item"))
+	if ran != "save" {
+		t.Fatalf("点浮层菜单项执行了 %q，期望 save（不应被工具栏截胡）", ran)
+	}
+}
+
 // 点同一个标签第二次收起；点浮层的空白处不应收起（事件会冒泡到标签）。
 func TestMenuToggleAndInnerClick(t *testing.T) {
 	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
@@ -184,12 +226,12 @@ func TestMenuToggleAndInnerClick(t *testing.T) {
 	})
 	doc.Refresh()
 
-	label := doc.QuerySelector(".ui-menu")
+	label := doc.QuerySelector(".system-ui-menu")
 	clickEl(t, doc, label)
 	if sh.open == nil {
 		t.Fatal("应展开")
 	}
-	pop := doc.QuerySelector(".ui-menu-pop")
+	pop := doc.QuerySelector(".system-ui-menu-pop")
 	// 浮层内边距区域：事件目标是浮层本身，不是标签——不能二次 toggle。
 	// 用边框盒 + 3px 落在内边距里（内容盒原点已经越过 1px 边框 + 5px 内边距，
 	// 直接加 2px 会点到第一项上）。
@@ -212,7 +254,7 @@ func TestClickOutsideClosesMenu(t *testing.T) {
 	})
 	doc.Refresh()
 
-	clickEl(t, doc, doc.QuerySelector(".ui-menu"))
+	clickEl(t, doc, doc.QuerySelector(".system-ui-menu"))
 	if sh.open == nil {
 		t.Fatal("应展开")
 	}
@@ -234,8 +276,8 @@ func TestDisabledMenuCommand(t *testing.T) {
 	})
 	doc.Refresh()
 
-	clickEl(t, doc, doc.QuerySelector(".ui-menu"))
-	item := doc.QuerySelector(".ui-menu-item")
+	clickEl(t, doc, doc.QuerySelector(".system-ui-menu"))
+	item := doc.QuerySelector(".system-ui-menu-item")
 	if !strings.Contains(item.GetAttribute("class"), "is-disabled") {
 		t.Fatalf("禁用项类名 = %q", item.GetAttribute("class"))
 	}
@@ -332,7 +374,7 @@ func TestEscapeClosesMenu(t *testing.T) {
 	if sh.HandleKey(engine.KeyEscape, 0) {
 		t.Fatal("没有打开的菜单时 Escape 不该被消费")
 	}
-	clickEl(t, doc, doc.QuerySelector(".ui-menu"))
+	clickEl(t, doc, doc.QuerySelector(".system-ui-menu"))
 	if sh.open == nil {
 		t.Fatal("应展开")
 	}
@@ -358,11 +400,11 @@ func TestToolbarButtonAndRefresh(t *testing.T) {
 	})
 	doc.Refresh()
 
-	buttons := doc.GetElementsByClassName("ui-btn")
+	buttons := doc.GetElementsByClassName("system-ui-btn")
 	if len(buttons) != 2 {
 		t.Fatalf("按钮数量 = %d，期望 2", len(buttons))
 	}
-	if doc.QuerySelector(".ui-sep") == nil {
+	if doc.QuerySelector(".system-ui-sep") == nil {
 		t.Fatal("工具栏分隔线没有渲染")
 	}
 
@@ -395,7 +437,7 @@ func TestToolbarIcons(t *testing.T) {
 	}})
 	doc.Refresh()
 
-	buttons := doc.GetElementsByClassName("ui-btn")
+	buttons := doc.GetElementsByClassName("system-ui-btn")
 	if len(buttons) != 3 {
 		t.Fatalf("按钮数量 = %d，期望 3", len(buttons))
 	}
@@ -441,8 +483,8 @@ func TestMenuIcons(t *testing.T) {
 	}}}})
 	doc.Refresh()
 
-	clickEl(t, doc, doc.QuerySelector(".ui-menu"))
-	pop := doc.QuerySelector(".ui-menu-pop")
+	clickEl(t, doc, doc.QuerySelector(".system-ui-menu"))
+	pop := doc.QuerySelector(".system-ui-menu-pop")
 	if pop == nil {
 		t.Fatal("菜单浮层没有展开")
 	}
@@ -452,7 +494,7 @@ func TestMenuIcons(t *testing.T) {
 	if w := boxOf(pop).w; w != 240 {
 		t.Fatalf("带图标浮层宽度 = %d，期望 240", w)
 	}
-	icons := doc.GetElementsByClassName("ui-menu-icon")
+	icons := doc.GetElementsByClassName("system-ui-menu-icon")
 	if len(icons) != 1 {
 		t.Fatalf("菜单图标数量 = %d，期望 1（只有保存有图标）", len(icons))
 	}
@@ -517,7 +559,7 @@ func TestCommandRestoresFocus(t *testing.T) {
 
 	// 命令执行前把焦点放到输入框：点击外壳时它会被清掉，命令跑完应还回来。
 	engine.SetFocusedElement(doc, editor)
-	btn := doc.QuerySelector(".ui-btn")
+	btn := doc.QuerySelector(".system-ui-btn")
 	x, y := btn.X()+btn.Width()/2, btn.Y()+btn.Height()/2
 	// 点击流程里引擎会先按命中目标更新焦点（普通 div → 清空），再派发
 	// click；命令就是在「焦点已被清掉」的状态下执行的。
@@ -537,7 +579,7 @@ func TestCommandErrorGoesToStatus(t *testing.T) {
 	})
 	doc.Refresh()
 
-	clickEl(t, doc, doc.QuerySelector(".ui-btn"))
+	clickEl(t, doc, doc.QuerySelector(".system-ui-btn"))
 	if got := sh.statusLeft.Text(); got != os.ErrNotExist.Error() {
 		t.Fatalf("状态栏 = %q，期望错误文本", got)
 	}
@@ -560,6 +602,35 @@ func TestSetStatus(t *testing.T) {
 	sh.SetStatusRight("3 个文件")
 	if doc.ChangeCount() != before {
 		t.Fatal("设置相同文本不应产生文档变更")
+	}
+}
+
+// 状态栏隐藏时，底部占位也要一起收起；重新显示时两者都恢复。
+func TestSetStatusVisible(t *testing.T) {
+	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
+	sh := Install(doc, Spec{Status: "就绪"})
+	status := doc.QuerySelector(".system-ui-status")
+	spacer := doc.QuerySelector(".system-ui-spacer-bottom")
+	if status == nil || spacer == nil {
+		t.Fatal("状态栏或底部占位不存在")
+	}
+
+	sh.SetStatusVisible(false)
+	doc.Refresh()
+	if got := status.GetAttribute("style"); !strings.Contains(got, "display:none") {
+		t.Fatalf("隐藏后状态栏样式 = %q", got)
+	}
+	if got := spacer.GetAttribute("style"); !strings.Contains(got, "display:none") {
+		t.Fatalf("隐藏后底部占位样式 = %q", got)
+	}
+
+	sh.SetStatusVisible(true)
+	doc.Refresh()
+	if got := status.GetAttribute("style"); !strings.Contains(got, "display:block") {
+		t.Fatalf("恢复后状态栏样式 = %q", got)
+	}
+	if got := spacer.GetAttribute("style"); !strings.Contains(got, "display:block") {
+		t.Fatalf("恢复后底部占位样式 = %q", got)
 	}
 }
 
@@ -608,7 +679,7 @@ func TestAppReinstallsOnNewDocument(t *testing.T) {
 	if app.Shell() == nil || app.Shell().Doc() != first {
 		t.Fatal("第一页没有装外壳")
 	}
-	if first.QuerySelector(".ui-menubar") == nil {
+	if first.QuerySelector(".system-ui-menubar") == nil {
 		t.Fatal("第一页缺少菜单栏")
 	}
 
@@ -619,7 +690,7 @@ func TestAppReinstallsOnNewDocument(t *testing.T) {
 	if app.Shell().Doc() != second {
 		t.Fatal("换页后 Shell 没跟着换文档")
 	}
-	if second.QuerySelector(".ui-menubar") == nil {
+	if second.QuerySelector(".system-ui-menubar") == nil {
 		t.Fatal("第二页没有重装菜单栏")
 	}
 	if !app.Shell().HandleKey('s', engine.ModCtrl) {

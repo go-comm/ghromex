@@ -33,6 +33,44 @@ func setClass(e engine.HTMLElement, class string) {
 	e.SetAttribute("class", class)
 }
 
+// addClass 把 name 追加到元素的 class 列表（已存在则不重复添加）。
+// 根作用域类要保留页面原有的 class，不能像 setClass 那样整体覆盖。
+func addClass(e engine.HTMLElement, name string) {
+	if e == nil || name == "" {
+		return
+	}
+	classes := strings.Fields(e.GetAttribute("class"))
+	for _, c := range classes {
+		if c == name {
+			return
+		}
+	}
+	setClass(e, strings.Join(append(classes, name), " "))
+}
+
+// removeClass 从元素的 class 列表中删掉 name；不存在时不碰属性。
+func removeClass(e engine.HTMLElement, name string) {
+	if e == nil || name == "" {
+		return
+	}
+	classes := strings.Fields(e.GetAttribute("class"))
+	if len(classes) == 0 {
+		return
+	}
+	out := classes[:0]
+	removed := false
+	for _, c := range classes {
+		if c == name {
+			removed = true
+			continue
+		}
+		out = append(out, c)
+	}
+	if removed {
+		setClass(e, strings.Join(out, " "))
+	}
+}
+
 // firstChild 返回第一个子节点，空容器返回 nil（InsertBefore 的退路是追加）。
 func firstChild(e engine.HTMLElement) engine.HTMLElement {
 	if cs := e.Children(); len(cs) > 0 {

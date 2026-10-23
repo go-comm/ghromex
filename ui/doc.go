@@ -2,8 +2,8 @@
 //
 // 它提供三样东西：
 //
-//   - 外壳：菜单栏（含下拉浮层、快捷键、禁用态）、工具栏、状态栏；
-//   - 页面组件：卡片、标题、副标题、徽标、提示条、列表、操作行、输入框、按钮；
+//   - 外壳：菜单栏（含下拉浮层、快捷键、禁用态）、工具栏、状态栏（左侧分段 + 右侧消息）；
+//   - 页面组件：卡片、标题、副标题、徽标、提示条、列表、操作行、输入框、下拉、勾选、只读文本视图、按钮；
 //   - 主题：浅色/深色两套视觉令牌 + 生成的样式表，应用一行 CSS 都不用写。
 //
 // # 最小用法
@@ -31,8 +31,43 @@
 //	}
 //	return app.Run()
 //
-// 页面内容只写类名（<div class="ui-page">、<div class="ui-card">…），
-// 样式全部来自 Install 注入的主题样式表。
+// 页面内容只写类名（<div class="system-ui-page">、<div class="system-ui-card">…），
+// 样式全部来自 Install 注入的主题样式表。组件类统一带 system-ui- 前缀，并
+// 只在 Install 加到文档根上的 system-ui 作用域下生效；根作用域把组件规则
+// 的特异度抬高一档，第三方 `.panel div` 之类的后代选择器压不过。
+//
+// # 状态栏
+//
+// 左侧可以分段，段有 Key、固定/自适应宽度、段内对齐和隐藏态；右侧消息独立
+// 更新，非空时按 Theme.StatusRightWidth 预留宽度。高频更新只改文字：
+//
+//	spec.StatusSegments = []ui.StatusSegment{
+//		{Key: "file", Text: "未命名", Width: 220},
+//		{Key: "pos", Text: "行 1，列 1", Width: 140},
+//		{Key: "chars", Text: "0 个字符"},
+//	}
+//	sh.SetStatusSegment("pos", "行 2，列 3")
+//	sh.SetStatusRight("已保存")
+//
+// Spec.Status / SetStatus 是单段兼容写法。
+//
+// # 页面控件
+//
+// 页面可以只写类名，也可以用 Go 侧包装构造原生控件；NewXxx 返回的 View 都
+// 实现 Element()，可直接 AppendChild。注意 NewButton 是内容区按钮，工具栏
+// 的 ui.Button 仍构造 Action：
+//
+//	name := ui.NewTextInput(doc, "未命名.txt")
+//	field := ui.NewField(doc, "文件名称", name)
+//	field.SetHint("最多 255 个字符")
+//	page.AppendChild(field.Element())
+//
+//	auto := ui.NewCheckbox(doc, "自动保存", true)
+//	auto.OnChange(func(on bool) { /* ... */ })
+//	page.AppendChild(auto.Element())
+//
+// 输入框目前没有实时 input/change 事件，实时联动用 OnKeyDown 或在命令执行
+// 时读取 Value；只读多行文本用 TextView，可编辑多行用 TextAreaView。
 //
 // # 图标
 //
@@ -61,6 +96,10 @@
 // 额外资源。工具栏按钮有图标时画成方形图标按钮，没有图标时退回文字按钮；
 // 菜单里只要有一项带图标，整张菜单就会预留图标列。
 //
+// 需要枚举全部图标（做选择器、文档或图标表）时调用 Icons()：返回按名称
+// 排序的 Name/Glyph 副本，别名也会作为独立条目出现。examples/iconsheet
+// 是一个可直接运行的图标表。
+//
 // 图标字体是系统字体：跨平台部署时要么在 Theme.IconFont 里给一个同编码
 // 的图标字体，要么只写文字（不调 WithIcon）。
 //
@@ -81,6 +120,9 @@
 // 补齐（零值 Theme 的默认语义是浅色），其余颜色会留在浅色上。OnAccent
 // 是强调色上的文字/图标颜色，深色主题用它把亮蓝底上的字压成深色。
 //
+// 运行时切换用 App.SetTheme（或 Shell.SetTheme）：新主题样式追加在旧样式
+// 之后，页面内容不重建，适合浅色/深色切换。
+//
 // # 语义色
 //
 // 主题提供六组语义色，页面只写类名，不用记十六进制：
@@ -95,10 +137,10 @@
 // 中性色。按钮用 is-primary/is-default/is-success/is-warning/is-danger/
 // is-info；徽标、提示条与文字色类同样接受这些后缀：
 //
-//	<div class="ui-btn is-success">通过</div>
-//	<span class="ui-badge is-warning">待处理</span>
-//	<div class="ui-alert is-danger">删除后无法恢复。</div>
-//	<span class="ui-text-info">共 12 项</span>
+//	<div class="system-ui-btn is-success">通过</div>
+//	<span class="system-ui-badge is-warning">待处理</span>
+//	<div class="system-ui-alert is-danger">删除后无法恢复。</div>
+//	<span class="system-ui-text-info">共 12 项</span>
 //
 // 对比度由主题负责：Warning 的实底用深色 On，其它实底在浅色主题用白字、
 // 深色主题用同色系深字。

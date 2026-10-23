@@ -117,6 +117,36 @@ func TestIconAliases(t *testing.T) {
 	}
 }
 
+// Icons 暴露整张表：数量一致、按名称排序、字形与内置表相同，且是副本。
+func TestIcons(t *testing.T) {
+	entries := Icons()
+	if len(entries) == 0 {
+		t.Fatal("Icons 返回空表")
+	}
+	if len(entries) != len(iconGlyphs) {
+		t.Fatalf("Icons 条目数 = %d，期望 %d", len(entries), len(iconGlyphs))
+	}
+	for i, e := range entries {
+		if i > 0 && entries[i-1].Name >= e.Name {
+			t.Fatalf("Icons 未按名称排序：%q 在 %q 之后", e.Name, entries[i-1].Name)
+		}
+		if want := iconGlyphs[e.Name]; e.Glyph != want {
+			t.Errorf("%s 字形 = %q，期望 %q", e.Name, e.Glyph, want)
+		}
+	}
+
+	// 返回值不能是内置表的别名（当前 map 本来就不是切片，这里防的是
+	// 以后改成包级切片缓存时把内部状态漏出去）。
+	other := Icons()
+	entries[0].Name = "changed"
+	if _, ok := iconGlyphs["changed"]; ok {
+		t.Error("修改 Icons 返回值不应影响内置表")
+	}
+	if other[0].Name == "changed" {
+		t.Error("两次 Icons 调用不应共享同一个切片")
+	}
+}
+
 // 内置表里的值必须是私用区的单个字形；多字符会把图标画成文字。
 func TestIconGlyphsAreSinglePUA(t *testing.T) {
 	for name, glyph := range iconGlyphs {

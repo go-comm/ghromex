@@ -73,11 +73,12 @@ type Theme struct {
 	InfoBorder string
 	InfoText   string
 
-	Radius       int // 面板/浮层圆角
-	MenuHeight   int // 菜单栏高度
-	ToolHeight   int // 工具栏高度
-	StatusHeight int // 状态栏高度
-	ButtonHeight int // 按钮高度
+	Radius           int // 面板/浮层圆角
+	MenuHeight       int // 菜单栏高度
+	ToolHeight       int // 工具栏高度
+	StatusHeight     int // 状态栏高度
+	StatusRightWidth int // 状态栏右侧消息预留宽度
+	ButtonHeight     int // 按钮高度
 }
 
 // Light 返回默认浅色主题。
@@ -132,11 +133,12 @@ func Light() Theme {
 		InfoBorder: "#A5F3FC",
 		InfoText:   "#0E7490",
 
-		Radius:       8,
-		MenuHeight:   32,
-		ToolHeight:   40,
-		StatusHeight: 24,
-		ButtonHeight: 30,
+		Radius:           8,
+		MenuHeight:       32,
+		ToolHeight:       40,
+		StatusHeight:     24,
+		StatusRightWidth: 280,
+		ButtonHeight:     30,
 	}
 }
 
@@ -259,7 +261,7 @@ func (t Theme) withDefaults() Theme {
 	}{
 		{&t.Radius, d.Radius}, {&t.MenuHeight, d.MenuHeight},
 		{&t.ToolHeight, d.ToolHeight}, {&t.StatusHeight, d.StatusHeight},
-		{&t.ButtonHeight, d.ButtonHeight},
+		{&t.StatusRightWidth, d.StatusRightWidth}, {&t.ButtonHeight, d.ButtonHeight},
 	}
 	for _, s := range sizes {
 		if *s.dst <= 0 {
@@ -274,7 +276,7 @@ func (t Theme) withDefaults() Theme {
 //
 // 只使用引擎支持的 CSS 子集：
 //   - 没有 flex/grid：横向排列一律 inline-block，浮层用绝对定位；
-//   - 主题保持扁平、不用阴影：分隔线用 1px 的实体 div（.ui-hairline）；
+//   - 主题保持扁平、不用阴影：分隔线用 1px 的实体 div（.system-ui-hairline）；
 //   - 没有 transition：悬停/按下靠 :hover/:active 直接切底色。
 func (t Theme) css(menuTop, chromeTop, status int) string {
 	r := strings.NewReplacer(
@@ -323,340 +325,531 @@ func (t Theme) css(menuTop, chromeTop, status int) string {
 		"$menuH$", strconv.Itoa(t.MenuHeight),
 		"$toolH$", strconv.Itoa(t.ToolHeight),
 		"$statusH$", strconv.Itoa(t.StatusHeight),
+		"$statusRightW$", strconv.Itoa(t.StatusRightWidth),
 		"$btnH$", strconv.Itoa(t.ButtonHeight),
 		"$toolTop$", strconv.Itoa(menuTop),
 		"$chromeH$", strconv.Itoa(chromeTop),
 		"$statusSpace$", strconv.Itoa(status),
 	)
-	return r.Replace(themeCSS)
+	return scopeCSS(r.Replace(themeCSS), uiRootClass)
+}
+
+// uiRootClass 是组件样式的作用域根类，Install 会把它加到文档根元素上。
+//
+// 只改类名前缀还不够：第三方样式里的 `.panel div`（特异度 0,1,1）会压过
+// `.system-ui-btn`（0,1,0）。把全部规则挂到 `html.system-ui` 下之后，组件
+// 规则至少是 0,2,1；前缀统一后误命中概率降低，隔离主要靠这层根作用域。
+const uiRootClass = "system-ui"
+
+// scopeCSS 给样式表里的每条选择器加上根作用域：
+//
+//	.system-ui-btn -> html.system-ui .system-ui-btn
+//	html         -> html.system-ui
+//
+// 样式表由本包维护，只含顶层规则（没有 @media 等嵌套块），所以按 { }
+// 扫描即可；注释原样保留。
+func scopeCSS(css, rootClass string) string {
+	scope := "." + rootClass
+	var b strings.Builder
+	b.Grow(len(css) + len(css)/3)
+	for len(css) > 0 {
+		open := indexOutsideComment(css, '{')
+		if open < 0 {
+			b.WriteString(css)
+			break
+		}
+		head := css[:open]
+		start := selectorStart(head)
+		b.WriteString(head[:start])
+		b.WriteString(scopeSelectorList(head[start:], scope))
+		b.WriteByte('{')
+
+		depth, end := 1, -1
+		for i := open + 1; i < len(css); i++ {
+			if css[i] == '/' && i+1 < len(css) && css[i+1] == '*' {
+				if j := strings.Index(css[i+2:], "*/"); j >= 0 {
+					i += 2 + j + 1
+					continue
+				}
+				break
+			}
+			switch css[i] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					end = i
+				}
+			}
+			if end >= 0 {
+				break
+			}
+		}
+		if end < 0 {
+			b.WriteString(css[open+1:])
+			break
+		}
+		b.WriteString(css[open+1 : end+1])
+		css = css[end+1:]
+	}
+	return b.String()
+}
+
+// indexOutsideComment 查找 target，但跳过 /* ... */ 注释里的字符。
+func indexOutsideComment(s string, target byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == '/' && i+1 < len(s) && s[i+1] == '*' {
+			if j := strings.Index(s[i+2:], "*/"); j >= 0 {
+				i += 2 + j + 1
+				continue
+			}
+			return -1
+		}
+		if s[i] == target {
+			return i
+		}
+	}
+	return -1
+}
+
+// selectorStart 跳过选择器前面的空白与注释，返回实际选择器的起点。
+func selectorStart(s string) int {
+	i := 0
+	for i < len(s) {
+		switch s[i] {
+		case ' ', '\t', '\r', '\n':
+			i++
+			continue
+		}
+		if strings.HasPrefix(s[i:], "/*") {
+			if j := strings.Index(s[i+2:], "*/"); j >= 0 {
+				i += 2 + j + 2
+				continue
+			}
+		}
+		break
+	}
+	return i
+}
+
+// scopeSelectorList 给逗号分隔的选择器列表逐项加作用域，保留末尾空白。
+func scopeSelectorList(s, scope string) string {
+	trimmed := strings.TrimRight(s, " \t\r\n")
+	if strings.TrimSpace(trimmed) == "" {
+		return s
+	}
+	parts := strings.Split(trimmed, ",")
+	for i, part := range parts {
+		sel := strings.TrimSpace(part)
+		switch {
+		case sel == "":
+			parts[i] = ""
+		case sel == "html":
+			parts[i] = "html" + scope
+		case strings.HasPrefix(sel, "html."):
+			parts[i] = sel
+		default:
+			parts[i] = "html" + scope + " " + sel
+		}
+	}
+	return strings.Join(parts, ", ") + s[len(trimmed):]
 }
 
 // themeCSS 是组件库的全部样式；$xxx$ 是 Theme 的占位符。
 //
-// 类名统一 ui- 前缀：应用自己的样式不会误命中，组件也不会去改页面里
-// 的裸标签（只有 .ui-list li 这种明确在组件内部的才用后代选择器）。
+// 类名统一 system-ui- 前缀，并由 scopeCSS 挂到 html.system-ui 根作用域下；
+// 组件不会去改页面里的裸标签（只有 .system-ui-list li 这种明确在组件内部
+// 的才用后代选择器）。
 const themeCSS = `
 /* 画布底色：页面自己的 body 背景仍然优先（引擎按 body → html 传播）。 */
 html { background-color: $bg$; }
 
 /* ===== 外壳：菜单栏 / 工具栏 / 状态栏 ===== */
 
-.ui-hairline { height: 1px; background-color: $border$; }
+.system-ui-hairline { height: 1px; background-color: $border$; }
 
-.ui-menubar {
+.system-ui-menubar {
 	position: fixed; left: 0; top: 0; width: 100%; height: $menuH$px;
 	background-color: $surface$; z-index: 1000; font-family: $font$;
 }
-.ui-menubar .ui-hairline { position: absolute; left: 0; bottom: 0; width: 100%; }
+.system-ui-menubar .system-ui-hairline { position: absolute; left: 0; bottom: 0; width: 100%; }
 
-.ui-menu {
+.system-ui-menu {
 	display: inline-block; position: relative;
 	height: $menuH$px; line-height: $menuH$px;
 	padding: 0 12px; font-size: 13px; color: $text$;
 }
-.ui-menu:hover { background-color: $accentSoft$; color: $accentText$; }
-.ui-menu.is-open { background-color: $accentSoft$; color: $accentText$; }
+.system-ui-menu:hover { background-color: $accentSoft$; color: $accentText$; }
+.system-ui-menu.is-open { background-color: $accentSoft$; color: $accentText$; }
 /* 打开态的下划线：与浮层同色的强调块，比整块高亮更克制。
    引擎不支持 right 定位（绝对定位只认 left/top/width），所以用
    width:100% 画满标签宽度，而不是左右各留 10px。 */
-.ui-menu-underline {
+.system-ui-menu-underline {
 	display: none; position: absolute; left: 0; bottom: 0;
 	width: 100%; height: 2px; background-color: $accent$;
 }
-.ui-menu.is-open .ui-menu-underline { display: block; }
+.system-ui-menu.is-open .system-ui-menu-underline { display: block; }
 
 /* 浮层是菜单标签的子元素：标签 position:relative + 浮层 top:菜单栏高度，
    不需要知道标签的文字宽度，也不需要把浮层挪到 body 下重算坐标。 */
-.ui-menu-pop {
+.system-ui-menu-pop {
 	display: none; position: absolute; left: 0; top: $menuH$px;
 	width: 216px; padding: 6px 0; box-sizing: border-box;
 	background-color: $surface$; border: 1px solid $borderStrong$;
 	border-radius: $radius$px; z-index: 1100; line-height: 18px;
 }
 /* 有图标的菜单多留一列；没有图标的菜单不留空列。 */
-.ui-menu-pop.has-icon { width: 240px; }
-.ui-menu.is-open .ui-menu-pop { display: block; }
+.system-ui-menu-pop.has-icon { width: 240px; }
+.system-ui-menu.is-open .system-ui-menu-pop { display: block; }
 
-.ui-menu-item {
+.system-ui-menu-item {
 	position: relative; height: 30px; line-height: 30px;
 	margin: 0 6px; padding: 0 74px 0 10px;
 	border-radius: 6px; font-size: 13px; color: $text$;
 }
-.ui-menu-pop.has-icon .ui-menu-item { padding-left: 34px; }
-.ui-menu-item:hover { background-color: $accentSoft$; color: $accentText$; }
-.ui-menu-item.is-disabled { color: $muted$; }
-.ui-menu-item.is-disabled:hover { background-color: transparent; color: $muted$; }
-.ui-menu-shortcut {
+.system-ui-menu-pop.has-icon .system-ui-menu-item { padding-left: 34px; }
+.system-ui-menu-item:hover { background-color: $accentSoft$; color: $accentText$; }
+.system-ui-menu-item.is-disabled { color: $muted$; }
+.system-ui-menu-item.is-disabled:hover { background-color: transparent; color: $muted$; }
+.system-ui-menu-shortcut {
 	position: absolute; right: 10px; top: 0;
 	height: 30px; line-height: 30px; font-size: 12px; color: $muted$;
 }
-.ui-menu-sep { height: 1px; background-color: $border$; margin: 6px 10px; }
-.ui-menu-icon { position: absolute; left: 9px; top: 7px; color: $muted$; }
-.ui-menu-item:hover .ui-menu-icon { color: $accentText$; }
-.ui-menu-item.is-disabled .ui-menu-icon { color: $muted$; }
+.system-ui-menu-sep { height: 1px; background-color: $border$; margin: 6px 10px; }
+.system-ui-menu-icon { position: absolute; left: 9px; top: 7px; color: $muted$; }
+.system-ui-menu-item:hover .system-ui-menu-icon { color: $accentText$; }
+.system-ui-menu-item.is-disabled .system-ui-menu-icon { color: $muted$; }
 
-.ui-toolbar {
+.system-ui-toolbar {
 	position: fixed; left: 0; top: $toolTop$px; width: 100%; height: $toolH$px;
 	padding: 5px 8px; box-sizing: border-box;
 	background-color: $surfaceAlt$; z-index: 999;
 	font-family: $font$; line-height: $btnH$px;
 }
-.ui-toolbar .ui-hairline { position: absolute; left: 0; bottom: 0; width: 100%; }
+.system-ui-toolbar .system-ui-hairline { position: absolute; left: 0; bottom: 0; width: 100%; }
 
-.ui-btn {
+.system-ui-btn {
 	display: inline-block; height: $btnH$px; line-height: $btnH$px;
 	padding: 0 10px; box-sizing: border-box;
 	border: 1px solid transparent; border-radius: 6px;
 	font-size: 13px; color: $text$; background-color: transparent;
-	vertical-align: middle;
+	font-family: $font$; vertical-align: middle;
 }
-.ui-btn:hover { background-color: $hover$; }
-.ui-btn:active { background-color: $press$; }
-.ui-btn.is-primary { background-color: $accent$; border-color: $accent$; color: $onAccent$; }
-.ui-btn.is-primary:hover { background-color: $accentHover$; border-color: $accentHover$; }
-.ui-btn.is-primary:active { background-color: $accentHover$; border-color: $accentHover$; }
+.system-ui-btn:hover { background-color: $hover$; }
+.system-ui-btn:active { background-color: $press$; }
+.system-ui-btn.is-primary { background-color: $accent$; border-color: $accent$; color: $onAccent$; }
+.system-ui-btn.is-primary:hover { background-color: $accentHover$; border-color: $accentHover$; }
+.system-ui-btn.is-primary:active { background-color: $accentHover$; border-color: $accentHover$; }
 
 /* 语义变体：实底 + On* 文字。悬停/按下复用更深一档的 *Hover，不再单独
    维护 active 令牌。Default 是中性描边按钮，复用 Surface/Border/Text
    这组中性色；Warning 的 On 是深色，琥珀底压白字不够清楚。 */
-.ui-btn.is-default { background-color: $surface$; border-color: $border$; color: $text$; }
-.ui-btn.is-default:hover { background-color: $surfaceAlt$; }
-.ui-btn.is-default:active { background-color: $press$; }
-.ui-btn.is-success { background-color: $success$; border-color: $success$; color: $onSuccess$; }
-.ui-btn.is-success:hover { background-color: $successHover$; border-color: $successHover$; }
-.ui-btn.is-success:active { background-color: $successHover$; border-color: $successHover$; }
-.ui-btn.is-warning { background-color: $warning$; border-color: $warning$; color: $onWarning$; }
-.ui-btn.is-warning:hover { background-color: $warningHover$; border-color: $warningHover$; }
-.ui-btn.is-warning:active { background-color: $warningHover$; border-color: $warningHover$; }
-.ui-btn.is-danger { background-color: $danger$; border-color: $danger$; color: $onDanger$; }
-.ui-btn.is-danger:hover { background-color: $dangerHover$; border-color: $dangerHover$; }
-.ui-btn.is-danger:active { background-color: $dangerHover$; border-color: $dangerHover$; }
-.ui-btn.is-info { background-color: $info$; border-color: $info$; color: $onInfo$; }
-.ui-btn.is-info:hover { background-color: $infoHover$; border-color: $infoHover$; }
-.ui-btn.is-info:active { background-color: $infoHover$; border-color: $infoHover$; }
+.system-ui-btn.is-default { background-color: $surface$; border-color: $border$; color: $text$; }
+.system-ui-btn.is-default:hover { background-color: $surfaceAlt$; }
+.system-ui-btn.is-default:active { background-color: $press$; }
+.system-ui-btn.is-success { background-color: $success$; border-color: $success$; color: $onSuccess$; }
+.system-ui-btn.is-success:hover { background-color: $successHover$; border-color: $successHover$; }
+.system-ui-btn.is-success:active { background-color: $successHover$; border-color: $successHover$; }
+.system-ui-btn.is-warning { background-color: $warning$; border-color: $warning$; color: $onWarning$; }
+.system-ui-btn.is-warning:hover { background-color: $warningHover$; border-color: $warningHover$; }
+.system-ui-btn.is-warning:active { background-color: $warningHover$; border-color: $warningHover$; }
+.system-ui-btn.is-danger { background-color: $danger$; border-color: $danger$; color: $onDanger$; }
+.system-ui-btn.is-danger:hover { background-color: $dangerHover$; border-color: $dangerHover$; }
+.system-ui-btn.is-danger:active { background-color: $dangerHover$; border-color: $dangerHover$; }
+.system-ui-btn.is-info { background-color: $info$; border-color: $info$; color: $onInfo$; }
+.system-ui-btn.is-info:hover { background-color: $infoHover$; border-color: $infoHover$; }
+.system-ui-btn.is-info:active { background-color: $infoHover$; border-color: $infoHover$; }
 
-.ui-btn.is-disabled { color: $muted$; }
+.system-ui-btn.is-disabled { color: $muted$; }
 /* 实底变体禁用后要退回中性：只改 color 的话绿/红底还在。 */
-.ui-btn.is-primary.is-disabled,
-.ui-btn.is-default.is-disabled,
-.ui-btn.is-success.is-disabled,
-.ui-btn.is-warning.is-disabled,
-.ui-btn.is-danger.is-disabled,
-.ui-btn.is-info.is-disabled {
+.system-ui-btn.is-primary.is-disabled,
+.system-ui-btn.is-default.is-disabled,
+.system-ui-btn.is-success.is-disabled,
+.system-ui-btn.is-warning.is-disabled,
+.system-ui-btn.is-danger.is-disabled,
+.system-ui-btn.is-info.is-disabled {
 	background-color: transparent; border-color: transparent; color: $muted$;
 }
 /* 禁用态要把悬停/按下底色也压住：只写 .is-disabled 的话 :hover 规则
    特异度更低但后写，仍然会亮起来。 */
-.ui-btn.is-disabled:hover, .ui-btn.is-disabled:active {
+.system-ui-btn.is-disabled:hover, .system-ui-btn.is-disabled:active {
 	background-color: transparent; border-color: transparent; color: $muted$;
 }
 
-.ui-toolbar .ui-btn { margin-right: 2px; }
+.system-ui-toolbar .system-ui-btn { margin-right: 2px; }
 
 /* 图标字形：Segoe MDL2 按 16px 网格设计，颜色跟随 color，所以悬停/禁用
    只需要改按钮的 color，不用为图标单独写状态。 */
-.ui-icon {
+.system-ui-icon {
 	font-family: $iconFont$; font-size: 16px; line-height: 16px;
 	font-weight: normal;
 }
-.ui-tool .ui-icon { line-height: $btnH$px; vertical-align: top; }
+.system-ui-tool .system-ui-icon { line-height: $btnH$px; vertical-align: top; }
 
 /* 工具栏图标按钮：方形、无边框，悬停只铺一层浅底。没有图标的命令退回
    文字按钮（is-label），不会被压成方块。 */
-.ui-tool.is-icon { width: $btnH$px; padding: 0; text-align: center; }
-.ui-tool.is-label { padding: 0 10px; }
-.ui-tool:hover { background-color: $hover$; color: $accent$; }
-.ui-tool:active { background-color: $press$; }
-.ui-tool.is-disabled { color: $muted$; }
-.ui-tool.is-disabled:hover, .ui-tool.is-disabled:active {
+.system-ui-tool.is-icon { width: $btnH$px; padding: 0; text-align: center; }
+.system-ui-tool.is-label { padding: 0 10px; }
+.system-ui-tool:hover { background-color: $hover$; color: $accent$; }
+.system-ui-tool:active { background-color: $press$; }
+.system-ui-tool.is-disabled { color: $muted$; }
+.system-ui-tool.is-disabled:hover, .system-ui-tool.is-disabled:active {
 	background-color: transparent; color: $muted$;
 }
-.ui-sep {
+.system-ui-sep {
 	display: inline-block; width: 1px; height: 18px; margin: 0 6px;
 	background-color: $borderStrong$; vertical-align: middle;
 }
 
-.ui-status {
+.system-ui-status {
 	position: fixed; left: 0; bottom: 0; width: 100%; height: $statusH$px;
 	line-height: $statusH$px; padding: 0 12px; box-sizing: border-box;
 	font-size: 12px; color: $muted$; background-color: $surface$;
 	z-index: 1000; font-family: $font$;
 }
-.ui-status .ui-hairline { position: absolute; left: 0; top: 0; width: 100%; }
-.ui-status-right {
-	position: absolute; right: 12px; top: 0;
-	height: $statusH$px; line-height: $statusH$px; color: $muted$;
+.system-ui-status .system-ui-hairline { position: absolute; left: 0; top: 0; width: 100%; }
+/* 左侧分段轨道：默认占满整行；有右侧消息时由 .has-right 预留固定宽度。
+   white-space:pre 防止分段在空格处折行（引擎没有 nowrap）。 */
+.system-ui-status-track {
+	display: inline-block; width: 100%; height: $statusH$px;
+	box-sizing: border-box; white-space: pre; overflow: hidden;
+	vertical-align: top;
 }
+.system-ui-status.has-right .system-ui-status-track { padding-right: $statusRightW$px; }
+.system-ui-status-seg {
+	display: inline-block; height: $statusH$px; line-height: $statusH$px;
+	padding: 0 10px; box-sizing: border-box; vertical-align: top;
+	overflow: hidden;
+}
+.system-ui-status-seg.is-first { padding-left: 0; }
+.system-ui-status-sep {
+	display: inline-block; width: 1px; height: 12px; margin: 6px 0;
+	background-color: $border$; vertical-align: top;
+}
+.system-ui-status-right {
+	position: absolute; right: 12px; top: 0;
+	width: $statusRightW$px; height: $statusH$px; line-height: $statusH$px;
+	text-align: right; overflow: hidden; color: $muted$;
+	display: none;
+}
+.system-ui-status.has-right .system-ui-status-right { display: block; }
 
 /* 占位块：fixed 的栏不占文档流，页面内容要靠这两块让出空间。
    放在 body 首尾而不是给 body 加 padding，是为了不覆盖应用自己的
    body 内边距（应用的页面通常自己也排了间距）。 */
-.ui-spacer-top { height: $chromeH$px; }
-.ui-spacer-bottom { height: $statusSpace$px; }
+.system-ui-spacer-top { height: $chromeH$px; }
+.system-ui-spacer-bottom { height: $statusSpace$px; }
 
 /* ===== 页面组件 ===== */
 
 /* 页面根节点也要给文字色：深色主题下若只改背景，页面里没套
-   .ui-text/.ui-title 的裸文字会保持默认黑色，等于看不见。 */
-.ui-page {
+   .system-ui-text/.system-ui-title 的裸文字会保持默认黑色，等于看不见。 */
+.system-ui-page {
 	padding: 22px 28px 30px 28px;
 	background-color: $bg$; color: $text$; font-family: $font$;
 }
-.ui-title {
+.system-ui-title {
 	margin: 0 0 6px 0; font-size: 22px; line-height: 30px;
 	font-weight: bold; color: $text$;
 }
-.ui-subtitle {
+.system-ui-subtitle {
 	margin: 0 0 18px 0; font-size: 13px; line-height: 20px; color: $muted$;
 }
-.ui-card {
+.system-ui-card {
 	margin: 0 0 14px 0; padding: 16px 18px;
 	background-color: $surface$; border: 1px solid $border$;
 	border-radius: 10px;
 }
-.ui-h2 {
+.system-ui-h2 {
 	margin: 0 0 8px 0; font-size: 15px; line-height: 22px;
 	font-weight: bold; color: $text$;
 }
-.ui-text {
+.system-ui-text {
 	margin: 0 0 10px 0; font-size: 14px; line-height: 22px; color: $text$;
 }
-.ui-muted { color: $muted$; }
-/* 语义文字色：只改颜色，字号/行高仍由 .ui-text 等容器决定。 */
-.ui-text-primary { color: $accentText$; }
-.ui-text-default { color: $text$; }
-.ui-text-success { color: $successText$; }
-.ui-text-warning { color: $warningText$; }
-.ui-text-danger { color: $dangerText$; }
-.ui-text-info { color: $infoText$; }
+.system-ui-muted { color: $muted$; }
+/* 语义文字色：只改颜色，字号/行高仍由 .system-ui-text 等容器决定。 */
+.system-ui-text-primary { color: $accentText$; }
+.system-ui-text-default { color: $text$; }
+.system-ui-text-success { color: $successText$; }
+.system-ui-text-warning { color: $warningText$; }
+.system-ui-text-danger { color: $dangerText$; }
+.system-ui-text-info { color: $infoText$; }
 
 /* 徽标默认是 Primary，也可以用 is-default/is-success… 换语义。 */
-.ui-badge {
+.system-ui-badge {
 	display: inline-block; padding: 3px 9px; margin: 0 0 10px 0;
 	background-color: $accentSoft$; border: 1px solid $accentBorder$;
 	border-radius: 999px; font-size: 12px; line-height: 16px; color: $accentText$;
 }
-.ui-badge.is-primary {
+.system-ui-badge.is-primary {
 	background-color: $accentSoft$; border-color: $accentBorder$; color: $accentText$;
 }
-.ui-badge.is-default {
+.system-ui-badge.is-default {
 	background-color: $surfaceAlt$; border-color: $border$; color: $text$;
 }
-.ui-badge.is-success {
+.system-ui-badge.is-success {
 	background-color: $successSoft$; border-color: $successBorder$; color: $successText$;
 }
-.ui-badge.is-warning {
+.system-ui-badge.is-warning {
 	background-color: $warningSoft$; border-color: $warningBorder$; color: $warningText$;
 }
-.ui-badge.is-danger {
+.system-ui-badge.is-danger {
 	background-color: $dangerSoft$; border-color: $dangerBorder$; color: $dangerText$;
 }
-.ui-badge.is-info {
+.system-ui-badge.is-info {
 	background-color: $infoSoft$; border-color: $infoBorder$; color: $infoText$;
 }
 /* 提示条：淡底 + 同色描边 + 淡底文字。比实底按钮克制，适合正文里的
    成功/警告/错误说明。 */
-.ui-alert {
+.system-ui-alert {
 	padding: 10px 12px; margin: 0 0 12px 0;
 	border: 1px solid $border$; border-radius: 8px;
 	background-color: $surfaceAlt$; color: $text$;
 	font-size: 13px; line-height: 20px;
 }
-.ui-alert.is-primary {
+.system-ui-alert.is-primary {
 	background-color: $accentSoft$; border-color: $accentBorder$; color: $accentText$;
 }
-.ui-alert.is-default {
+.system-ui-alert.is-default {
 	background-color: $surfaceAlt$; border-color: $border$; color: $text$;
 }
-.ui-alert.is-success {
+.system-ui-alert.is-success {
 	background-color: $successSoft$; border-color: $successBorder$; color: $successText$;
 }
-.ui-alert.is-warning {
+.system-ui-alert.is-warning {
 	background-color: $warningSoft$; border-color: $warningBorder$; color: $warningText$;
 }
-.ui-alert.is-danger {
+.system-ui-alert.is-danger {
 	background-color: $dangerSoft$; border-color: $dangerBorder$; color: $dangerText$;
 }
-.ui-alert.is-info {
+.system-ui-alert.is-info {
 	background-color: $infoSoft$; border-color: $infoBorder$; color: $infoText$;
 }
-.ui-list { margin: 0; padding-left: 18px; }
-.ui-list li { margin: 4px 0; font-size: 14px; line-height: 22px; color: $text$; }
-.ui-actions { margin: 4px 0 0 0; }
+.system-ui-list { margin: 0; padding-left: 18px; }
+.system-ui-list li { margin: 4px 0; font-size: 14px; line-height: 22px; color: $text$; }
+.system-ui-actions { margin: 4px 0 0 0; }
 /* 内容区按钮给描边：白卡片上「透明底 + 无边框」看起来像纯文字，
    分不清可点。工具栏按钮保持无边框（栏本身提供了分组）。 */
-.ui-actions .ui-btn {
+.system-ui-actions .system-ui-btn {
 	border-color: $border$; background-color: $surface$; margin-right: 8px;
 }
-.ui-actions .ui-btn:hover { background-color: $surfaceAlt$; }
-.ui-actions .ui-btn:active { background-color: $press$; }
-.ui-actions .ui-btn.is-primary {
+.system-ui-actions .system-ui-btn:hover { background-color: $surfaceAlt$; }
+.system-ui-actions .system-ui-btn:active { background-color: $press$; }
+.system-ui-actions .system-ui-btn.is-primary {
 	border-color: $accent$; background-color: $accent$; color: $onAccent$;
 }
-.ui-actions .ui-btn.is-primary:hover {
+.system-ui-actions .system-ui-btn.is-primary:hover {
 	border-color: $accentHover$; background-color: $accentHover$;
 }
-.ui-actions .ui-btn.is-primary:active {
+.system-ui-actions .system-ui-btn.is-primary:active {
 	border-color: $accentHover$; background-color: $accentHover$;
 }
-/* 内容区的实底变体也要抬一档特异度，否则后面的 .ui-actions .ui-btn
-   会把底色改回 Surface。Default 与 .ui-actions .ui-btn 同色，不必重复。 */
-.ui-actions .ui-btn.is-success {
+/* 内容区的实底变体也要抬一档特异度，否则后面的 .system-ui-actions .system-ui-btn
+   会把底色改回 Surface。Default 与 .system-ui-actions .system-ui-btn 同色，不必重复。 */
+.system-ui-actions .system-ui-btn.is-success {
 	border-color: $success$; background-color: $success$; color: $onSuccess$;
 }
-.ui-actions .ui-btn.is-success:hover {
+.system-ui-actions .system-ui-btn.is-success:hover {
 	border-color: $successHover$; background-color: $successHover$;
 }
-.ui-actions .ui-btn.is-success:active {
+.system-ui-actions .system-ui-btn.is-success:active {
 	border-color: $successHover$; background-color: $successHover$;
 }
-.ui-actions .ui-btn.is-warning {
+.system-ui-actions .system-ui-btn.is-warning {
 	border-color: $warning$; background-color: $warning$; color: $onWarning$;
 }
-.ui-actions .ui-btn.is-warning:hover {
+.system-ui-actions .system-ui-btn.is-warning:hover {
 	border-color: $warningHover$; background-color: $warningHover$;
 }
-.ui-actions .ui-btn.is-warning:active {
+.system-ui-actions .system-ui-btn.is-warning:active {
 	border-color: $warningHover$; background-color: $warningHover$;
 }
-.ui-actions .ui-btn.is-danger {
+.system-ui-actions .system-ui-btn.is-danger {
 	border-color: $danger$; background-color: $danger$; color: $onDanger$;
 }
-.ui-actions .ui-btn.is-danger:hover {
+.system-ui-actions .system-ui-btn.is-danger:hover {
 	border-color: $dangerHover$; background-color: $dangerHover$;
 }
-.ui-actions .ui-btn.is-danger:active {
+.system-ui-actions .system-ui-btn.is-danger:active {
 	border-color: $dangerHover$; background-color: $dangerHover$;
 }
-.ui-actions .ui-btn.is-info {
+.system-ui-actions .system-ui-btn.is-info {
 	border-color: $info$; background-color: $info$; color: $onInfo$;
 }
-.ui-actions .ui-btn.is-info:hover {
+.system-ui-actions .system-ui-btn.is-info:hover {
 	border-color: $infoHover$; background-color: $infoHover$;
 }
-.ui-actions .ui-btn.is-info:active {
+.system-ui-actions .system-ui-btn.is-info:active {
 	border-color: $infoHover$; background-color: $infoHover$;
 }
 /* 内容区按钮的禁用态要压过上面的 :hover/:active（同特异度时后写胜出，
    这里再抬一档特异度，避免禁用按钮悬停时又亮起来）。 */
-.ui-actions .ui-btn.is-disabled,
-.ui-actions .ui-btn.is-disabled:hover,
-.ui-actions .ui-btn.is-disabled:active {
+.system-ui-actions .system-ui-btn.is-disabled,
+.system-ui-actions .system-ui-btn.is-disabled:hover,
+.system-ui-actions .system-ui-btn.is-disabled:active {
 	border-color: $border$; background-color: $surface$; color: $muted$;
 }
-.ui-actions .ui-btn.is-primary.is-disabled,
-.ui-actions .ui-btn.is-primary.is-disabled:hover,
-.ui-actions .ui-btn.is-primary.is-disabled:active {
+.system-ui-actions .system-ui-btn.is-primary.is-disabled,
+.system-ui-actions .system-ui-btn.is-primary.is-disabled:hover,
+.system-ui-actions .system-ui-btn.is-primary.is-disabled:active {
 	border-color: $border$; background-color: $surface$; color: $muted$;
 }
-.ui-label {
+.system-ui-label {
 	display: block; margin: 0 0 5px 0; font-size: 12px; color: $muted$;
 }
-.ui-input {
+.system-ui-input {
 	width: 280px; height: 30px; padding: 0 10px; box-sizing: border-box;
 	border: 1px solid $borderStrong$; border-radius: 7px;
 	background-color: $surface$; color: $text$; font-size: 13px;
 	font-family: $font$;
 }
-.ui-input:focus { border-color: $accent$; }
+.system-ui-input:focus { border-color: $accent$; }
+.system-ui-input:disabled,
+.system-ui-select:disabled,
+.system-ui-textarea:disabled {
+	background-color: $surfaceAlt$; color: $muted$;
+}
+
+/* 表单控件：与页面卡片同一套圆角/描边。textarea 默认给一个可用的高度，
+   应用需要更高时直接改内联样式（引擎没有 calc，不能做自适应高度）。 */
+.system-ui-select {
+	width: 280px; height: 30px; padding: 0 8px; box-sizing: border-box;
+	border: 1px solid $borderStrong$; border-radius: 7px;
+	background-color: $surface$; color: $text$; font-size: 13px;
+	font-family: $font$;
+}
+.system-ui-select:focus { border-color: $accent$; }
+.system-ui-textarea {
+	width: 100%; height: 120px; padding: 8px 10px; box-sizing: border-box;
+	border: 1px solid $borderStrong$; border-radius: 7px;
+	background-color: $surface$; color: $text$; font-size: 13px;
+	line-height: 20px; font-family: $font$; overflow: auto;
+}
+.system-ui-textarea:focus { border-color: $accent$; }
+.system-ui-textview {
+	height: 140px; padding: 12px; box-sizing: border-box;
+	border: 1px solid $border$; border-radius: $radius$px;
+	background-color: $surfaceAlt$; color: $text$;
+	font-size: 13px; line-height: 20px; white-space: pre; overflow: auto;
+}
+.system-ui-check {
+	display: inline-block; margin: 0 16px 8px 0;
+	font-size: 13px; line-height: 20px; color: $text$;
+}
+.system-ui-check input { margin: 0 6px 0 0; vertical-align: middle; }
+.system-ui-check.is-disabled { color: $muted$; }
+.system-ui-field { margin: 0 0 14px 0; }
+.system-ui-field-hint {
+	margin: 5px 0 0 0; font-size: 12px; line-height: 18px; color: $muted$;
+}
+.system-ui-field-error {
+	margin: 5px 0 0 0; font-size: 12px; line-height: 18px; color: $dangerText$;
+}
+.system-ui-field.is-error .system-ui-input,
+.system-ui-field.is-error .system-ui-select,
+.system-ui-field.is-error .system-ui-textarea {
+	border-color: $danger$;
+}
 `

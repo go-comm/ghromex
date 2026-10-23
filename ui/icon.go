@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"sort"
 	"unicode/utf8"
 
 	"github.com/go-comm/ghromex/engine"
@@ -196,6 +197,25 @@ var iconGlyphs = map[string]string{
 	"upload":        "\uE898", // Upload
 }
 
+// IconEntry 是内置图标表里的一项：图标名与对应的 Segoe MDL2 字形。
+type IconEntry struct {
+	Name  string
+	Glyph string
+}
+
+// Icons 返回全部内置图标，按名称排序。
+//
+// 返回的是副本，修改切片不会影响内置表；别名也会作为独立条目返回。
+// 图标名可以直接传给 Action.WithIcon。
+func Icons() []IconEntry {
+	entries := make([]IconEntry, 0, len(iconGlyphs))
+	for name, glyph := range iconGlyphs {
+		entries = append(entries, IconEntry{Name: name, Glyph: glyph})
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	return entries
+}
+
 // iconGlyph 把 Icon 字段解析成要显示的字形。
 //
 // 未登记的短字符串按「你自己给的字形」处理（可以写 "＋" 或别的图标字体
@@ -217,5 +237,5 @@ func newIcon(doc engine.HTMLDocument, name string) engine.HTMLElement {
 	if g == "" {
 		return nil
 	}
-	return newEl(doc, "span", "ui-icon", g)
+	return newEl(doc, "span", "system-ui-icon", g)
 }

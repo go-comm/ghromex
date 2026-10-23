@@ -77,7 +77,8 @@ func TestDarkThemeIsComplete(t *testing.T) {
 	}
 	if d.Font != l.Font || d.Radius != l.Radius ||
 		d.MenuHeight != l.MenuHeight || d.ToolHeight != l.ToolHeight ||
-		d.StatusHeight != l.StatusHeight || d.ButtonHeight != l.ButtonHeight {
+		d.StatusHeight != l.StatusHeight || d.StatusRightWidth != l.StatusRightWidth ||
+		d.ButtonHeight != l.ButtonHeight {
 		t.Fatal("两套主题的字体/尺寸应保持一致，只换颜色")
 	}
 }
@@ -104,7 +105,7 @@ func TestDarkThemeCSS(t *testing.T) {
 	}
 	// 页面根节点要带文字色，否则深色背景上的裸文字仍是默认黑色。
 	if !strings.Contains(css, "background-color: "+d.Bg+"; color: "+d.Text) {
-		t.Fatal(".ui-page 没有设置主题文字色")
+		t.Fatal(".system-ui-page 没有设置主题文字色")
 	}
 }
 
@@ -129,43 +130,43 @@ func TestSemanticColorsCSS(t *testing.T) {
 				class string
 				decl  string
 			}{
-				{"默认按钮", ".ui-btn.is-default",
+				{"默认按钮", ".system-ui-btn.is-default",
 					"background-color: " + th.Surface + "; border-color: " + th.Border + "; color: " + th.Text},
-				{"主按钮", ".ui-btn.is-primary",
+				{"主按钮", ".system-ui-btn.is-primary",
 					"background-color: " + th.Accent + "; border-color: " + th.Accent + "; color: " + th.OnAccent},
-				{"成功按钮", ".ui-btn.is-success",
+				{"成功按钮", ".system-ui-btn.is-success",
 					"background-color: " + th.Success + "; border-color: " + th.Success + "; color: " + th.OnSuccess},
-				{"警告按钮", ".ui-btn.is-warning",
+				{"警告按钮", ".system-ui-btn.is-warning",
 					"background-color: " + th.Warning + "; border-color: " + th.Warning + "; color: " + th.OnWarning},
-				{"危险按钮", ".ui-btn.is-danger",
+				{"危险按钮", ".system-ui-btn.is-danger",
 					"background-color: " + th.Danger + "; border-color: " + th.Danger + "; color: " + th.OnDanger},
-				{"信息按钮", ".ui-btn.is-info",
+				{"信息按钮", ".system-ui-btn.is-info",
 					"background-color: " + th.Info + "; border-color: " + th.Info + "; color: " + th.OnInfo},
 
-				{"主徽标", ".ui-badge.is-primary",
+				{"主徽标", ".system-ui-badge.is-primary",
 					"background-color: " + th.AccentSoft + "; border-color: " + th.AccentBorder + "; color: " + th.AccentText},
-				{"默认徽标", ".ui-badge.is-default",
+				{"默认徽标", ".system-ui-badge.is-default",
 					"background-color: " + th.SurfaceAlt + "; border-color: " + th.Border + "; color: " + th.Text},
-				{"成功徽标", ".ui-badge.is-success",
+				{"成功徽标", ".system-ui-badge.is-success",
 					"background-color: " + th.SuccessSoft + "; border-color: " + th.SuccessBorder + "; color: " + th.SuccessText},
-				{"警告徽标", ".ui-badge.is-warning",
+				{"警告徽标", ".system-ui-badge.is-warning",
 					"background-color: " + th.WarningSoft + "; border-color: " + th.WarningBorder + "; color: " + th.WarningText},
-				{"危险徽标", ".ui-badge.is-danger",
+				{"危险徽标", ".system-ui-badge.is-danger",
 					"background-color: " + th.DangerSoft + "; border-color: " + th.DangerBorder + "; color: " + th.DangerText},
-				{"信息徽标", ".ui-badge.is-info",
+				{"信息徽标", ".system-ui-badge.is-info",
 					"background-color: " + th.InfoSoft + "; border-color: " + th.InfoBorder + "; color: " + th.InfoText},
 
-				{"主提示", ".ui-alert.is-primary",
+				{"主提示", ".system-ui-alert.is-primary",
 					"background-color: " + th.AccentSoft + "; border-color: " + th.AccentBorder + "; color: " + th.AccentText},
-				{"默认提示", ".ui-alert.is-default",
+				{"默认提示", ".system-ui-alert.is-default",
 					"background-color: " + th.SurfaceAlt + "; border-color: " + th.Border + "; color: " + th.Text},
-				{"成功提示", ".ui-alert.is-success",
+				{"成功提示", ".system-ui-alert.is-success",
 					"background-color: " + th.SuccessSoft + "; border-color: " + th.SuccessBorder + "; color: " + th.SuccessText},
-				{"警告提示", ".ui-alert.is-warning",
+				{"警告提示", ".system-ui-alert.is-warning",
 					"background-color: " + th.WarningSoft + "; border-color: " + th.WarningBorder + "; color: " + th.WarningText},
-				{"危险提示", ".ui-alert.is-danger",
+				{"危险提示", ".system-ui-alert.is-danger",
 					"background-color: " + th.DangerSoft + "; border-color: " + th.DangerBorder + "; color: " + th.DangerText},
-				{"信息提示", ".ui-alert.is-info",
+				{"信息提示", ".system-ui-alert.is-info",
 					"background-color: " + th.InfoSoft + "; border-color: " + th.InfoBorder + "; color: " + th.InfoText},
 			}
 			for _, c := range checks {
@@ -177,8 +178,8 @@ func TestSemanticColorsCSS(t *testing.T) {
 				}
 			}
 			for _, class := range []string{
-				".ui-text-primary", ".ui-text-default", ".ui-text-success",
-				".ui-text-warning", ".ui-text-danger", ".ui-text-info",
+				".system-ui-text-primary", ".system-ui-text-default", ".system-ui-text-success",
+				".system-ui-text-warning", ".system-ui-text-danger", ".system-ui-text-info",
 			} {
 				if !strings.Contains(css, class) {
 					t.Errorf("CSS 缺少语义文字类 %s", class)
@@ -188,8 +189,77 @@ func TestSemanticColorsCSS(t *testing.T) {
 	}
 }
 
-// 字符串级测试看不出级联顺序：内容区的 .ui-actions .ui-btn 会覆盖基础
+// 字符串级测试看不出级联顺序：内容区的 .system-ui-actions .system-ui-btn 会覆盖基础
 // 按钮底色。这里真渲染一颗语义按钮，从边框盒中心取色确认最终颜色。
+// scopeCSS 必须给每条顶层选择器加根作用域，同时保留注释与 html 特例。
+func TestScopeCSS(t *testing.T) {
+	got := scopeCSS("/* top { } */\nhtml { a: b; }\n.a, .b { c: d; }\n/* keep { */\n.a .b { e: f; }", uiRootClass)
+	want := "/* top { } */\nhtml." + uiRootClass + " { a: b; }\nhtml." + uiRootClass + " .a, html." +
+		uiRootClass + " .b { c: d; }\n/* keep { */\nhtml." + uiRootClass + " .a .b { e: f; }"
+	if got != want {
+		t.Fatalf("scopeCSS 输出 =\n%s\n期望:\n%s", got, want)
+	}
+}
+
+// 生成的样式必须全部挂在 html.system-ui 下；只改类名前缀不够，
+// 根作用域把组件规则的特异度抬到 0,2,1，第三方 .panel div 压不过。
+func TestThemeCSSScoped(t *testing.T) {
+	css := Light().css(24, 56, 24)
+	for _, want := range []string{
+		"html." + uiRootClass + " { background-color:",
+		"html." + uiRootClass + " .system-ui-btn {",
+		"html." + uiRootClass + " .system-ui-actions .system-ui-btn {",
+		"html." + uiRootClass + " .system-ui-page {",
+		"html." + uiRootClass + " .system-ui-status-track {",
+		"html." + uiRootClass + " .system-ui-status-seg {",
+		"html." + uiRootClass + " .system-ui-status-right {",
+		"html." + uiRootClass + " .system-ui-textview {",
+		"html." + uiRootClass + " .system-ui-select {",
+		"html." + uiRootClass + " .system-ui-check {",
+	} {
+		if !strings.Contains(css, want) {
+			t.Errorf("CSS 缺少带根作用域的选择器: %s", want)
+		}
+	}
+	if !strings.Contains(css, "padding-right: 280px") {
+		t.Error("状态栏没有按 Theme.StatusRightWidth 预留右侧消息宽度")
+	}
+	if strings.Contains(css, ".ui-") {
+		t.Error("CSS 里仍有旧 ui- 类名")
+	}
+}
+
+// 根作用域要真的挡住第三方后代选择器：.panel div（0,1,1）本来能压过
+// .system-ui-btn（0,1,0），挂到 html.system-ui 下之后组件规则（0,2,1）胜出。
+func TestRootScopeBeatsThirdPartyDescendant(t *testing.T) {
+	vp, buf := engine.NewBufferedViewport(160, 80)
+	doc, err := engine.OpenDocument(vp, `<style>
+		.panel div { background-color: #FF0000; }
+	</style>
+	<div class="panel"><div class="system-ui-btn" style="width:80px;height:24px"></div></div>`)
+	if err != nil {
+		t.Fatalf("打开文档失败: %v", err)
+	}
+	Install(doc, Spec{})
+	doc.Refresh()
+	engine.RenderNode(buf, doc)
+
+	el := doc.QuerySelector(".system-ui-btn")
+	if el == nil {
+		t.Fatal("找不到按钮")
+	}
+	b := el.GetBoundingClientRect()
+	x := (b.Left().Pixel() + b.Right().Pixel()) / 2
+	y := (b.Top().Pixel() + b.Bottom().Pixel()) / 2
+	r, g, bl, _, ok := buf.ColorAt(x, y)
+	if !ok {
+		t.Fatalf("取色失败: (%d,%d)", x, y)
+	}
+	if r == 0xFF && g == 0 && bl == 0 {
+		t.Fatal("第三方 .panel div 覆盖了组件底色：根作用域没有生效")
+	}
+}
+
 func TestSemanticButtonPaint(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -216,7 +286,7 @@ func TestSemanticButtonPaint(t *testing.T) {
 					th := tc.th
 					vp, buf := engine.NewBufferedViewport(200, 120)
 					doc, err := engine.OpenDocument(vp,
-						`<div class="ui-actions"><div class="ui-btn `+v.class+`" style="width:80px;height:24px"></div></div>`)
+						`<div class="system-ui-actions"><div class="system-ui-btn `+v.class+`" style="width:80px;height:24px"></div></div>`)
 					if err != nil {
 						t.Fatalf("打开文档失败: %v", err)
 					}
@@ -224,7 +294,7 @@ func TestSemanticButtonPaint(t *testing.T) {
 					doc.Refresh()
 					engine.RenderNode(buf, doc)
 
-					el := doc.QuerySelector(".ui-btn")
+					el := doc.QuerySelector(".system-ui-btn")
 					if el == nil {
 						t.Fatal("找不到按钮")
 					}
@@ -367,4 +437,38 @@ func TestInstallAppliesThemeBackground(t *testing.T) {
 			}
 		})
 	}
+}
+
+// SetTheme 要在同一份文档上追加新主题，不能重建页面。连续切回浅色时，
+// 后追加的浅色规则也要压过前面深色规则（同特异度后写胜出）。
+func TestSetThemeSwitchesBackground(t *testing.T) {
+	vp, buf := engine.NewBufferedViewport(160, 120)
+	doc, err := engine.OpenDocument(vp, `<div style="width:40px;height:40px">x</div>`)
+	if err != nil {
+		t.Fatalf("打开文档失败: %v", err)
+	}
+	sh := Install(doc, Spec{})
+	if sh == nil {
+		t.Fatal("Install 返回 nil")
+	}
+
+	check := func(name string, want [3]uint8) {
+		t.Helper()
+		doc.Refresh()
+		engine.RenderNode(buf, doc)
+		r, g, b, a, ok := buf.ColorAt(4, 4)
+		if !ok {
+			t.Fatalf("%s: 取色失败", name)
+		}
+		if r != want[0] || g != want[1] || b != want[2] || a != 255 {
+			t.Fatalf("%s 画布底色 = #%02X%02X%02X（alpha %d），期望 #%02X%02X%02X",
+				name, r, g, b, a, want[0], want[1], want[2])
+		}
+	}
+
+	check("初始浅色", [3]uint8{0xF1, 0xF5, 0xF9})
+	sh.SetTheme(Dark())
+	check("切换深色", [3]uint8{0x0F, 0x17, 0x2A})
+	sh.SetTheme(Light())
+	check("切回浅色", [3]uint8{0xF1, 0xF5, 0xF9})
 }
