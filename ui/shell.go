@@ -162,6 +162,8 @@ func Install(doc engine.HTMLDocument, spec Spec) *Shell {
 	// 样式表最后注入：页面自己的 <style>/<link> 在解析阶段就合并完了，
 	// 这里追加的规则在同特异度时后写胜出。
 	doc.AddStylesheetText(theme.css(menuH, chromeH, theme.StatusHeight))
+	// 提示气泡是绘制层、拿不到级联样式，配色单独随主题下发。
+	engine.SetTooltipColors(doc, theme.tooltipColors())
 
 	s := &Shell{doc: doc, theme: theme, spec: spec}
 	body := doc.Body()
@@ -273,6 +275,7 @@ func (s *Shell) SetTheme(theme Theme) {
 		toolH = theme.ToolHeight
 	}
 	s.doc.AddStylesheetText(theme.css(menuH, menuH+toolH, theme.StatusHeight))
+	engine.SetTooltipColors(s.doc, theme.tooltipColors())
 	s.theme = theme
 	s.spec.Theme = &theme
 }

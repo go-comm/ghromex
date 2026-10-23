@@ -473,6 +473,43 @@ func TestSetThemeSwitchesBackground(t *testing.T) {
 	check("切回浅色", [3]uint8{0xF1, 0xF5, 0xF9})
 }
 
+// colorEq 断言两个 Color 的 RGBA 一致（want 为 nil 时断言 got 也为 nil）。
+func colorEq(t *testing.T, name string, got, want engine.Color) {
+	t.Helper()
+	if want == nil {
+		if got != nil {
+			t.Fatalf("%s = 非 nil，期望未设置", name)
+		}
+		return
+	}
+	if got == nil {
+		t.Fatalf("%s 未设置，期望 %v", name, want)
+	}
+	gr, gg, gb, ga := got.RGBA()
+	wr, wg, wb, wa := want.RGBA()
+	if gr != wr || gg != wg || gb != wb || ga != wa {
+		t.Fatalf("%s = %02X%02X%02X%02X，期望 %02X%02X%02X%02X", name, gr, gg, gb, ga, wr, wg, wb, wa)
+	}
+}
+
+// 提示气泡是绘制层、拿不到级联样式，配色由 Install / SetTheme 按主题令牌
+// 下发（浮层底色 + 浮层描边 + 主文字）——浅色主题上是浅底深字，深色相反。
+func TestTooltipColorsFollowTheme(t *testing.T) {
+	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
+	dk := Dark()
+	sh := Install(doc, Spec{Theme: &dk})
+	c := engine.TooltipColorsOf(doc)
+	colorEq(t, "深色底色", c.Background, engine.ParseColor(dk.Surface))
+	colorEq(t, "深色描边", c.Border, engine.ParseColor(dk.BorderStrong))
+	colorEq(t, "深色文字", c.Text, engine.ParseColor(dk.Text))
+
+	lt := Light()
+	sh.SetTheme(lt)
+	c = engine.TooltipColorsOf(doc)
+	colorEq(t, "浅色底色", c.Background, engine.ParseColor(lt.Surface))
+	colorEq(t, "浅色文字", c.Text, engine.ParseColor(lt.Text))
+}
+
 // 控件条（NewBar）的样式必须跟着令牌走：条高取 Theme.BarHeight，条内控件
 // 靠推导出的上下内边距垂直居中（写死数字的话换主题就散了），并且带上主题
 // 底色与分隔线；textarea 的平铺变体（贴边铺满的编辑区）不带描边与圆角。

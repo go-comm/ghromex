@@ -90,7 +90,8 @@
 //
 //	btn.Element().SetAttribute("title", "保存到当前文件（Ctrl+S）")
 //
-// 气泡配色由引擎固定（深底浅字），和系统提示一样不跟随页面主题。
+// 气泡配色跟随主题（Install / SetTheme 自动下发：浮层底色 + 描边 + 主文字）；
+// 不用 ui 的裸引擎应用可用 engine.SetTooltipColors 自行指定，默认深底浅字。
 //
 // # 图标
 //

@@ -4,6 +4,8 @@ package ui
 import (
 	"strconv"
 	"strings"
+
+	"github.com/go-comm/ghromex/engine"
 )
 
 // Theme 是组件库的视觉令牌：一套配色 + 一组尺寸。
@@ -274,6 +276,20 @@ func (t Theme) withDefaults() Theme {
 		}
 	}
 	return t
+}
+
+// tooltipColors 把主题令牌换算成提示气泡的配色（交给
+// engine.SetTooltipColors）。
+//
+// 气泡是文档之上的绘制层，拿不到级联样式，只能显式下发同一套颜色：
+// Surface 本就是「面板/栏/浮层底色」，描边用浮层的 BorderStrong，
+// 文字跟主文字色。
+func (t Theme) tooltipColors() engine.TooltipColors {
+	return engine.TooltipColors{
+		Background: engine.ParseColor(t.Surface),
+		Border:     engine.ParseColor(t.BorderStrong),
+		Text:       engine.ParseColor(t.Text),
+	}
 }
 
 // css 生成一套组件样式。chromeTop 是页面内容顶部要空出的高度（菜单栏
