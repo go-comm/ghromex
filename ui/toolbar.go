@@ -50,6 +50,16 @@ func (s *Workbench) buildToolbar() {
 			s.toolbar.AppendChild(newEl(s.doc, "div", "system-ui-sep", ""))
 			continue
 		}
+		if a.slot != nil {
+			// 槽位：现成控件套一层定位 div，控件本体就是应用手里那一个
+			// （Element 直接搬进来，不复制、不换 id）。
+			if el := a.slot.Element(); el != nil {
+				wrap := newEl(s.doc, "div", "system-ui-tool-slot", "")
+				wrap.AppendChild(el)
+				s.toolbar.AppendChild(wrap)
+			}
+			continue
+		}
 		tv := &toolView{act: a, el: newEl(s.doc, "div", toolClass(a), "")}
 		if tip := toolTip(a); tip != "" {
 			// 悬停提示走原生 title 属性：引擎的提示气泡负责显示
