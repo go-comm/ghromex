@@ -5,6 +5,18 @@
 
 ## 未发布
 
+- **ui**：新增 `Spec.NoBodyReset`：跳过 `Install` 注入的 body 复位块（margin /
+  padding / 颜色 / 字体），画布底色（`html` 的 `background-color`）不受影响、
+  始终注入。演示 UA 样式的页面（body 的 `margin:8px` 本身就是演示内容）与
+  靠 body padding 给固定栏让位的页面不再被复位顶歪。
+- **ui**：工具栏支持嵌入现成控件：`ui.Slot(control)` 可作为 `Spec.Tools` 的
+  一项，把输入框、下拉等控件排在命令按钮之间（与 `Sep()` 同属「非命令条目」，
+  不参与快捷键注册与可用态刷新）；控件句柄仍归应用，取值设值直接在应用手里
+  的对象上完成，不必按 id 回查元素。槽位随工具栏主题样式排版。
+- **examples/browser**：外壳从手写工具条（chrome.go，逐个控件算绝对坐标 +
+  视口变化重排）改为 `ui.Install` 装配的工作台：后退/前进/刷新/首页是带图标
+  的 `ui.Tool`（带 `When` 可用态），示例页面下拉与地址输入框是 `ui.Slot`，
+  状态栏走 `StatusSegments`；换页重排地址栏坐标的整条路径删除。
 - **ui**：工具栏 `Action` 构造器 `Button` 更名 `Tool`（对应 `Spec.Tools` 与
   `.system-ui-tool`），与内容区控件 `NewButton` 不再一字之差；`Item` / `Sep`
   不变。

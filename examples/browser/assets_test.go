@@ -84,7 +84,7 @@ func TestShowLoadsExternalStylesheets(t *testing.T) {
 		<link rel="stylesheet" href="css/main.css">
 		</head><body style="margin:0"><p id="x">x</p><p id="y">y</p></body></html>`)
 
-	h := &headlessOpener{vp: engine.NewHeadlessViewport(800, 600), width: 800}
+	h := &headlessOpener{vp: engine.NewHeadlessViewport(800, 600)}
 	app := &browserApp{win: h, homeDir: dir, index: -1}
 	data, err := os.ReadFile(page)
 	if err != nil {

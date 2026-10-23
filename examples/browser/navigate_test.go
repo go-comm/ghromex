@@ -10,9 +10,8 @@ import (
 )
 
 type headlessOpener struct {
-	vp    engine.Viewport
-	width int
-	doc   engine.HTMLDocument
+	vp  engine.Viewport
+	doc engine.HTMLDocument
 }
 
 func (h *headlessOpener) OpenDocument(src string) (engine.HTMLDocument, error) {
@@ -27,22 +26,34 @@ func (h *headlessOpener) OpenDocumentWith(src string, opts engine.DocumentOption
 	return doc, err
 }
 
-func (h *headlessOpener) ViewportWidth() int { return h.width }
-
 func TestLinkNavigation(t *testing.T) {
-	h := &headlessOpener{vp: engine.NewHeadlessViewport(1024, 720), width: 1024}
+	h := &headlessOpener{vp: engine.NewHeadlessViewport(1024, 720)}
 	app := &browserApp{win: h, homeDir: ".", index: -1}
 
 	// 无头视口不会自动触发布局，点击前先 Refresh，模拟后端的换页重排。
-	clickID := func(id string) {
+	clickCenter := func(el engine.HTMLElement) {
 		t.Helper()
 		h.doc.Refresh()
-		el := h.doc.QuerySelector("#" + id)
-		if el == nil {
-			t.Fatalf("找不到 #%s", id)
-		}
 		r := el.GetBoundingClientRect()
 		engine.OnDocumentClick(h.doc, (r.Left().Pixel()+r.Right().Pixel())/2, (r.Top().Pixel()+r.Bottom().Pixel())/2)
+	}
+	// 工作台控件按 ui 的类名与 title 找：工具栏按钮的悬停提示就是 Label
+	// （见 ui.toolTip），不必给控件单独设 id。
+	clickTool := func(title string) {
+		t.Helper()
+		el := h.doc.QuerySelector(`.system-ui-tool[title="` + title + `"]`)
+		if el == nil {
+			t.Fatalf("找不到工具按钮 %q", title)
+		}
+		clickCenter(el)
+	}
+	addrEl := func() engine.HTMLElement {
+		t.Helper()
+		el := h.doc.QuerySelector(".system-ui-tool-slot .system-ui-input")
+		if el == nil {
+			t.Fatal("工具栏里没有地址栏")
+		}
+		return el
 	}
 	clickLink := func(part string) {
 		t.Helper()
@@ -62,11 +73,19 @@ func TestLinkNavigation(t *testing.T) {
 			t.Fatalf("标题 = %q, want %q", got, want)
 		}
 	}
+	// 外壳由 ui 工作台装配：工具栏（5 个按钮 + 示例页面下拉 + address input）
+	// 与状态栏在每份文档上都必须在场。
 	assertChrome := func() {
 		t.Helper()
-		for _, id := range []string{"system-ui-chrome", "system-ui-back", "system-ui-forward", "system-ui-refresh", "system-ui-home", "system-ui-addr", "system-ui-go"} {
-			if h.doc.QuerySelector("#"+id) == nil {
-				t.Fatalf("当前页面缺少工具条元素 #%s", id)
+		for _, sel := range []string{
+			".system-ui-toolbar", ".system-ui-status",
+			`.system-ui-tool[title="后退"]`, `.system-ui-tool[title="前进"]`,
+			`.system-ui-tool[title="刷新"]`, `.system-ui-tool[title="首页"]`,
+			`.system-ui-tool[title="打开"]`,
+			".system-ui-tool-slot .system-ui-input", ".system-ui-tool-slot .system-ui-select",
+		} {
+			if h.doc.QuerySelector(sel) == nil {
+				t.Fatalf("当前页面缺少工作台元素 %s", sel)
 			}
 		}
 	}
@@ -74,19 +93,26 @@ func TestLinkNavigation(t *testing.T) {
 	app.showHome()
 	assertTitle("Ghromex 浏览器 · 起始页")
 	assertChrome()
-	if got := h.doc.QuerySelector("#system-ui-addr").GetAttribute("value"); got != homeURL {
+	if got := engine.GetValue(addrEl()); got != homeURL {
 		t.Fatalf("起始页地址栏 = %q, want %q", got, homeURL)
 	}
+	// 起始页没有来路：后退按钮必须一眼看出禁用（点了也无效）。
+	back := h.doc.QuerySelector(`.system-ui-tool[title="后退"]`)
+	if !strings.Contains(back.GetAttribute("class"), "is-disabled") {
+		t.Fatalf("起始页后退按钮类名 = %q，期望 is-disabled", back.GetAttribute("class"))
+	}
+	clickCenter(back)
+	assertTitle("Ghromex 浏览器 · 起始页")
 
-	// 地址栏是固定工具条里的 input：鼠标拖选必须命中并产生选区，
+	// 地址栏是工具栏槽位里的 input：鼠标拖选必须命中并产生选区，
 	// 再点右侧可折叠选区继续输入（用户报告过 input 无法选中文字）。
 	h.doc.Refresh()
-	addrBox := h.doc.QuerySelector("#system-ui-addr")
-	r := addrBox.GetBoundingClientRect()
+	addr := addrEl()
+	r := addr.GetBoundingClientRect()
 	midY := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
 	if !engine.OnDocumentMouseDown(h.doc, r.Left().Pixel()+2, midY) ||
 		!engine.OnDocumentMouseDrag(h.doc, r.Right().Pixel()-2, midY) {
-		t.Fatal("地址栏未进入拖选状态（固定工具条的 input 命中失败）")
+		t.Fatal("地址栏未进入拖选状态（固定工具栏槽位的 input 命中失败）")
 	}
 	engine.OnDocumentMouseUp(h.doc)
 	if got, ok := engine.SelectedText(h.doc); !ok || got != homeURL {
@@ -94,42 +120,43 @@ func TestLinkNavigation(t *testing.T) {
 	}
 
 	// 地址栏是可编辑 input：点右侧后键入应追加到末尾（真实窗口可直接输入）。
-	r = addrBox.GetBoundingClientRect()
+	r = addr.GetBoundingClientRect()
 	engine.OnDocumentClick(h.doc, r.Right().Pixel()-4, (r.Top().Pixel()+r.Bottom().Pixel())/2)
+	addr = addrEl()
 	if !engine.OnDocumentTextInput(h.doc, "x") {
 		t.Fatal("地址栏没有消费键盘输入")
 	}
-	if got := addrBox.GetAttribute("value"); got != homeURL+"x" {
+	if got := engine.GetValue(addrEl()); got != homeURL+"x" {
 		t.Fatalf("地址栏输入后 = %q, want %q", got, homeURL+"x")
 	}
 
 	// 地址栏「打开」
-	h.doc.QuerySelector("#system-ui-addr").SetAttribute("value", "../ua/index.html")
-	clickID("system-ui-go")
+	addrEl().SetAttribute("value", "../ua/index.html")
+	clickTool("打开")
 	assertTitle("UA 与排版对照 · 浏览器对照")
 	assertChrome()
 	wantUA := filepath.Join("..", "ua", "index.html")
 	if app.current != wantUA {
 		t.Fatalf("地址栏导航后 current = %q, want %q", app.current, wantUA)
 	}
-	if got := h.doc.QuerySelector("#system-ui-addr").GetAttribute("value"); got != wantUA {
+	if got := engine.GetValue(addrEl()); got != wantUA {
 		t.Fatalf("新页面地址栏 = %q, want %q", got, wantUA)
 	}
 
 	// 后退 / 前进
-	clickID("system-ui-back")
+	clickTool("后退")
 	assertTitle("Ghromex 浏览器 · 起始页")
 	assertChrome()
-	clickID("system-ui-forward")
+	clickTool("前进")
 	assertTitle("UA 与排版对照 · 浏览器对照")
 
 	// 首页 / 刷新
-	clickID("system-ui-home")
+	clickTool("首页")
 	assertTitle("Ghromex 浏览器 · 起始页")
-	clickID("system-ui-refresh")
+	clickTool("刷新")
 	assertTitle("Ghromex 浏览器 · 起始页")
 
-	// 滚动后工具条仍固定在视口顶部：滚轮把内容上移，点顶部「后退」仍命中。
+	// 滚动后工具栏仍固定在视口顶部：滚轮把内容上移，点顶部后退仍命中。
 	clickLink("portal")
 	if !strings.HasSuffix(filepath.ToSlash(app.current), "portal/index.html") {
 		t.Fatalf("门户页 current = %q", app.current)
@@ -137,27 +164,28 @@ func TestLinkNavigation(t *testing.T) {
 	if !engine.OnDocumentWheel(h.doc, 512, 400, 0, 200) {
 		t.Fatal("滚动页没有发生滚动")
 	}
-	clickID("system-ui-back")
+	clickTool("后退")
+	assertChrome()
 	assertTitle("Ghromex 浏览器 · 起始页")
 
-	// 链接导航后工具条仍在
+	// 链接导航后工具栏仍在
 	clickLink("ua")
 	assertTitle("UA 与排版对照 · 浏览器对照")
 	assertChrome()
 
-	// 外部链接：提示页 + 工具条；about:home 回起始页
-	clickID("system-ui-back")
+	// 外部链接：提示页 + 工具栏；about:home 回起始页
+	clickTool("后退")
 	clickLink("https://")
 	assertTitle("Ghromex 浏览器 · 外部链接")
 	assertChrome()
 	clickLink("about:home")
 	assertTitle("Ghromex 浏览器 · 起始页")
 
-	// 缺失文件：错误页 + 工具条；后退返回
+	// 缺失文件：错误页 + 工具栏；后退返回
 	clickLink("missing.html")
 	assertTitle("Ghromex 浏览器 · 无法打开页面")
 	assertChrome()
-	clickID("system-ui-back")
+	clickTool("后退")
 	assertTitle("Ghromex 浏览器 · 起始页")
 
 	// file:// 绝对路径同样走本地文件加载
@@ -180,51 +208,79 @@ func TestLinkNavigation(t *testing.T) {
 	if err := os.WriteFile(page, []byte("<!doctype html><title>第二版</title>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	clickID("system-ui-refresh")
+	clickTool("刷新")
 	assertTitle("第二版")
 	assertChrome()
 }
 
-// 视口变宽后工具条要重排：地址栏变宽、「打开」按钮贴到窗口右边缘。
-//
-// 工具条是换页时注入的，不跟着视口宽度重排的话，窗口最大化后「打开」
-// 按钮会停在旧位置（不再右对齐）。
-func TestChromeFollowsViewportResize(t *testing.T) {
-	vp := engine.NewHeadlessViewport(1024, 720)
-	h := &headlessOpener{vp: vp, width: 1024}
+// 示例页面下拉（工具栏槽位里的 select）：选中一项就导航过去；
+// 导航换文档后下拉重新生成，自动回到占位项。
+func TestExamplePagesSelect(t *testing.T) {
+	h := &headlessOpener{vp: engine.NewHeadlessViewport(1024, 720)}
 	app := &browserApp{win: h, homeDir: ".", index: -1}
 	app.showHome()
 	h.doc.Refresh()
 
-	goBtn := h.doc.QuerySelector("#system-ui-go")
-	addr := h.doc.QuerySelector("#system-ui-addr")
-	if goBtn == nil || addr == nil {
-		t.Fatal("工具条元素缺失")
+	sel := func() engine.HTMLElement {
+		t.Helper()
+		el := h.doc.QuerySelector(".system-ui-tool-slot .system-ui-select")
+		if el == nil {
+			t.Fatal("工具栏里没有示例页面下拉")
+		}
+		return el
 	}
-	before := goBtn.GetBoundingClientRect()
-	addrBefore := addr.GetBoundingClientRect()
-	if got := before.Right().Pixel(); got != 1024-chromeLeft {
-		t.Fatalf("「打开」按钮右缘 = %d, want %d", got, 1024-chromeLeft)
+	if got := engine.SelectValue(sel()); got != pagesPlaceholder {
+		t.Fatalf("初始选中值 = %q, want %q（占位项）", got, pagesPlaceholder)
 	}
 
-	// 模拟窗口最大化：视口变宽，引擎补一次变更通知。
-	h.width = 1400
+	// 用户选择触发 change → 导航。值按 homeDir 解析（这里是测试工作目录
+	// examples/browser，"../portal/index.html" 指向 examples/portal）。
+	if !engine.SetSelectValue(sel(), "../portal/index.html") {
+		t.Fatal("SetSelectValue 没找到该选项")
+	}
+	if got := h.doc.Title(); got != "GHROMEX MARKET · 今日上新" {
+		t.Fatalf("下拉导航后标题 = %q", got)
+	}
+	assertChrome := func() {
+		t.Helper()
+		for _, s := range []string{".system-ui-toolbar", ".system-ui-status"} {
+			if h.doc.QuerySelector(s) == nil {
+				t.Fatalf("新页面缺少 %s", s)
+			}
+		}
+	}
+	assertChrome()
+	if sel() == nil {
+		t.Fatal("换页后示例页面下拉丢失")
+	}
+	if got := engine.SelectValue(sel()); got != pagesPlaceholder {
+		t.Fatalf("换页后下拉选中值 = %q, want %q（回到占位项）", got, pagesPlaceholder)
+	}
+}
+
+// 工具栏（含地址栏槽位）fixed 在视口上：视口变宽后整栏跟着变宽，
+// 不需要应用参与重排（引擎没有窗口 chrome 层，宽度全靠 width:100% +
+// 重排；旧实现按视口宽度算控件坐标的路径已经删掉了）。
+func TestToolbarFollowsViewportResize(t *testing.T) {
+	vp := engine.NewHeadlessViewport(1024, 720)
+	h := &headlessOpener{vp: vp}
+	app := &browserApp{win: h, homeDir: ".", index: -1}
+	app.showHome()
+	h.doc.Refresh()
+
+	toolbar := h.doc.QuerySelector(".system-ui-toolbar")
+	if toolbar == nil {
+		t.Fatal("没有生成工具栏")
+	}
+	if got := toolbar.GetBoundingClientRect().Right().Pixel(); got != 1024 {
+		t.Fatalf("工具栏右缘 = %d, want 1024", got)
+	}
+
+	// 模拟窗口最大化：视口变宽后重排一次即可。
 	vp.W = 1400
 	h.doc.Refresh()
-	h.doc.Refresh()
-
-	after := goBtn.GetBoundingClientRect()
-	if got := after.Right().Pixel(); got != 1400-chromeLeft {
-		t.Fatalf("放大后「打开」按钮右缘 = %d, want %d", got, 1400-chromeLeft)
-	}
-	if got := after.Right().Pixel() - after.Left().Pixel(); got != before.Right().Pixel()-before.Left().Pixel() {
-		t.Fatalf("放大后按钮宽度 = %d, want %d", got, before.Right().Pixel()-before.Left().Pixel())
-	}
-	addrAfter := addr.GetBoundingClientRect()
-	if addrAfter.Right().Pixel()-addrAfter.Left().Pixel() <= addrBefore.Right().Pixel()-addrBefore.Left().Pixel() {
-		t.Fatalf("放大后地址栏宽度 = %d, want > %d",
-			addrAfter.Right().Pixel()-addrAfter.Left().Pixel(),
-			addrBefore.Right().Pixel()-addrBefore.Left().Pixel())
+	if got := toolbar.GetBoundingClientRect().Right().Pixel(); got != 1400 {
+		t.Fatalf("放大后工具栏右缘 = %d, want 1400", got)
 	}
 }
 
@@ -233,12 +289,12 @@ func TestChromeFollowsViewportResize(t *testing.T) {
 // 回车由引擎派发给聚焦元素的 keydown 处理器（元素级 OnKeyDown）：浏览器
 // 应用不用改引擎的默认动作，也不用在窗口层单独截按键。
 func TestAddressBarEnterNavigates(t *testing.T) {
-	h := &headlessOpener{vp: engine.NewHeadlessViewport(1024, 720), width: 1024}
+	h := &headlessOpener{vp: engine.NewHeadlessViewport(1024, 720)}
 	app := &browserApp{win: h, homeDir: ".", index: -1}
 	app.showHome()
 	h.doc.Refresh()
 
-	addr := h.doc.QuerySelector("#system-ui-addr")
+	addr := h.doc.QuerySelector(".system-ui-tool-slot .system-ui-input")
 	if addr == nil {
 		t.Fatal("缺少地址栏")
 	}
