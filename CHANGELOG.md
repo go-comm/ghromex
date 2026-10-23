@@ -19,8 +19,25 @@
   `NewCheckbox` / `NewSelect` / `NewTextInput` / `NewTextArea` / `NewField`，
   统一处理类名、取值/设值、禁用态与事件适配；`NewButton` 与工具栏的
   `ui.Button` 区分，后者仍构造 `Action`。
+- **ui**：新增控件条 `NewBar`（配 `Append` / `SetInline` / `SetVisible`）与
+  主题令牌 `Theme.BarHeight`：条内控件排成一行并按条高垂直居中（内边距由
+  条高减控件高推导）；定位声明与显隐分开管，`SetVisible` 只在应用那份声明
+  上补 `display:none`，不会把 `top` 冲掉。`NewTextArea` 增加平铺变体
+  `SetVariant("plain")`（去描边与圆角，贴边铺满的内容区用）。
+- **ui**：占位块（`system-ui-spacer-top/bottom`）与 1px 分隔线
+  （`system-ui-hairline`）改为 `pointer-events: none`：它们只是为排版存在，
+  DOM 序又排在页面内容之后，留着可命中就会吃掉浮层内容的点击。
 - **engine**：新增 `RemoveAttribute`，用于真正移除 `disabled` 等布尔属性
   （只把值改成空串仍然表示属性存在）。
+- **engine**：新增 `pointer-events`（`auto` / `none`，沿父链继承）：装饰性
+  与纯排版的盒子不再成为命中目标，修复「看得见点不到」。只影响命中测试，
+  布局与渲染不变。
+- **engine**：`display:none` 的元素矩形彻底空掉——`GetBoundingClientRect`
+  返回边框盒，此前留着布局期缓存的 padding/border 边长，隐藏元素仍会报出
+  16x15 之类的空壳尺寸。
+- **engine**：textarea 在首次布局前（或 `display:none` 时）读 `CaretPosition`
+  改为退回按硬换行算逻辑行列：此前折行宽度取未布局的 0，每个字符折成一行，
+  状态栏会报出「行 29」这类没意义的数字。
 - **examples/kit**：新增「基础控件」卡片，演示 Go 侧构造表单控件。
 - **examples/notepad**：状态栏改为文件名/行列/字符数三段独立更新。
 - **examples/iconsheet**：工具栏「切换主题」与「视图」菜单支持浅色/深色
@@ -28,8 +45,10 @@
 - **examples/notepad**：菜单、工具栏、快捷键和状态栏改用 `ui` 生成，
   删除自绘菜单/按钮/状态栏；编辑、查找替换、撤销和文件逻辑保持不变。
 - **examples/notepad**：页面不再依赖 HTML：删除 `index.html` 与 `go:embed`，
-  查找栏和编辑区改由 `page.go` 用 DOM API 构造（`CreateElement` +
-  `AddStylesheetText`）。
+  查找栏与编辑区由 `page.go` 用 `ui` 控件拼装（`NewBar` + `NewTextInput` /
+  `NewButton` + `NewTextArea` 平铺变体），类名、取值/设值、点击绑定都归控件，
+  条内排布与配色归主题；页面 CSS 只留 `body` 归零边距与文字/字体，颜色一律
+  取 `ui.Theme` 令牌，不再逐控件写绝对坐标与颜色。
 - **examples/notepad**：全部命令配图标——菜单项显示图标列，工具栏退化为
   纯图标按钮。
 - **examples**：删除 `examples/form`、`examples/login`、`examples/scroll`；
