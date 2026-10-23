@@ -1,147 +1,90 @@
-// 本文件是记事本的菜单：菜单表与菜单栏/浮层的实现；包文档见 main.go。
+// 本文件是记事本的命令表：菜单、工具栏与快捷键都由 ui.Spec 生成。
 //
-// 引擎没有通用弹层，菜单用「菜单栏标签 + 浮层面板」实现：浮层绝对定位、
-// 盖在内容之上（与 <select> 的选项浮层同理）——点标签打开、点菜单项执行
-// 动作、点别处关闭。
-
+// 命令只定义一次，菜单项和工具栏按钮共用同一份 Action；快捷键也由
+// ui.Shell 统一绑定，不再由页面自己处理。
+//
+// 每条命令都配了图标：菜单项在浮层里显示「图标 + 文字」，工具栏则退化成
+// 纯图标按钮（ui 的约定：Action 有图标时工具栏只画图标，Label 留作兜底）。
+// 图标名见 ui/icon.go 的 iconGlyphs。
 package main
 
 import (
-	"fmt"
-
 	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/ui"
 )
 
-// menuSlot 是菜单栏里每个菜单标签占的宽度。
-//
-// 固定槽位而不是按文字排布：引擎不提供文本测量接口，应用层拿不到标签的
-// 实际宽度，菜单浮层的左缘只能按槽位算。
-const menuSlot = 62
-
-// menuItem 是一个菜单项；sep 为真时是分隔线（没有动作）。
-type menuItem struct {
-	id    string // 动作 id（分发给 action）
-	label string // 显示文字
-	sep   bool   // 是否是分隔线
-}
-
-// menu 是一个下拉菜单。
-type menu struct {
-	title string
-	items []menuItem
-}
-
-// menus 是记事本的菜单表。新增功能在这里加一项即可——菜单栏标签与浮层
-// 面板都由它生成。
-var menus = []menu{
-	{title: "文件", items: []menuItem{
-		{id: "new", label: "新建"},
-		{id: "open", label: "打开…"},
-		{id: "opendir", label: "打开文件夹…"},
-		{sep: true},
-		{id: "save", label: "保存"},
-		{id: "saveas", label: "另存为…"},
-		{sep: true},
-		{id: "exit", label: "退出"},
-	}},
-	{title: "编辑", items: []menuItem{
-		{id: "undo", label: "撤销"},
-		{id: "redo", label: "重做"},
-		{sep: true},
-		{id: "cut", label: "剪切"},
-		{id: "copy", label: "复制"},
-		{id: "paste", label: "粘贴"},
-		{id: "delete", label: "删除"},
-		{sep: true},
-		{id: "selectall", label: "全选"},
-		{id: "find", label: "查找/替换…"},
-		{sep: true},
-		{id: "time", label: "时间/日期"},
-	}},
-	{title: "格式", items: []menuItem{
-		{id: "zoomin", label: "放大字号"},
-		{id: "zoomout", label: "缩小字号"},
-		{id: "zoomreset", label: "默认字号"},
-		{sep: true},
-		{id: "fontmono", label: "等宽字体"},
-		{id: "fontsans", label: "无衬线字体"},
-	}},
-	{title: "视图", items: []menuItem{
-		{id: "statusbar", label: "显示状态栏"},
-	}},
-	{title: "帮助", items: []menuItem{
-		{id: "about", label: "关于记事本"},
-	}},
-}
-
-// buildMenuBar 在菜单栏里生成菜单标签。
-func (n *notepad) buildMenuBar() {
-	if n.menuBar == nil {
-		return
-	}
-	for i, m := range menus {
-		label := n.doc.CreateElement("div")
-		label.SetAttribute("class", "menu")
-		label.SetAttribute("style", fmt.Sprintf("left:%dpx", i*menuSlot))
-		label.SetText(m.title)
-		idx := i
-		label.OnClick(func(*engine.MouseEvent) { n.openMenu(idx) })
-		n.menuLabels = append(n.menuLabels, label)
-		n.menuBar.AppendChild(label)
-	}
-}
-
-// openMenu 打开第 i 个菜单：在菜单栏下方弹出浮层面板。
-func (n *notepad) openMenu(i int) {
-	if n.menuPop == nil || i < 0 || i >= len(menus) {
-		return
-	}
-	m := menus[i]
-
-	// 菜单项每次重建：菜单表变了不用改这里，重开一次就是新的。
-	old := append([]engine.HTMLElement(nil), n.menuPop.Children()...)
-	for _, c := range old {
-		n.menuPop.RemoveChild(c)
-	}
-	for _, it := range m.items {
-		if it.sep {
-			sep := n.doc.CreateElement("div")
-			sep.SetAttribute("class", "menu-sep")
-			n.menuPop.AppendChild(sep)
-			continue
-		}
-		item := n.doc.CreateElement("div")
-		item.SetAttribute("class", "menu-item")
-		item.SetText(it.label)
-		act := it.id
-		item.OnClick(func(*engine.MouseEvent) {
-			n.closeMenu()
-			n.action(act)
+// buildSpec 生成记事本的外壳配置。
+func (n *notepad) buildSpec() ui.Spec {
+	cmd := func(label, shortcut string, f func()) ui.Action {
+		return ui.Item(label, shortcut, func() error {
+			f()
+			return nil
 		})
-		n.menuPop.AppendChild(item)
 	}
-	n.menuPop.SetAttribute("style", fmt.Sprintf("display:block;left:%dpx;top:%dpx", i*menuSlot, menuH))
-	n.menuOpen = true
-	n.highlightMenu(i)
-}
 
-// closeMenu 关闭菜单浮层。
-func (n *notepad) closeMenu() {
-	if n.menuPop == nil || !n.menuOpen {
-		return
-	}
-	n.menuPop.SetAttribute("style", "display:none")
-	n.menuOpen = false
-	n.highlightMenu(-1)
-}
-
-// highlightMenu 高亮当前打开的菜单标签（-1 表示不高亮）。
-func (n *notepad) highlightMenu(i int) {
-	for idx, label := range n.menuLabels {
-		if idx == i {
-			label.SetAttribute("class", "menu menu-open")
-			continue
+	newAct := cmd("新建", "Ctrl+N", n.newFile).WithIcon("new")
+	openAct := cmd("打开…", "Ctrl+O", n.openFile).WithIcon("open")
+	openDirAct := cmd("打开文件夹…", "", n.openDir).WithIcon("folder-open")
+	saveAct := cmd("保存", "Ctrl+S", n.saveFile).WithIcon("save")
+	saveAsAct := cmd("另存为…", "Ctrl+Shift+S", n.saveAs).WithIcon("save-as")
+	exitAct := ui.Item("退出", "Alt+Q", func() error {
+		if n.win == nil {
+			n.message("无头模式没有窗口，无法退出")
+			return nil
 		}
-		label.SetAttribute("class", "menu")
+		n.win.RequestClose()
+		return nil
+	}).WithIcon("close")
+
+	undoAct := cmd("撤销", "Ctrl+Z", n.undoEdit).
+		WithIcon("undo").
+		When(func() bool { return len(n.undo) > 0 })
+	redoAct := cmd("重做", "Ctrl+Y", n.redoEdit).
+		WithIcon("redo").
+		When(func() bool { return len(n.redo) > 0 })
+	cutAct := cmd("剪切", "Ctrl+X", n.cut).WithIcon("cut")
+	copyAct := cmd("复制", "Ctrl+C", n.copySelection).WithIcon("copy")
+	pasteAct := cmd("粘贴", "Ctrl+V", n.paste).WithIcon("paste")
+	deleteAct := cmd("删除", "", n.deleteSelection).WithIcon("delete")
+	selectAllAct := cmd("全选", "Ctrl+A", n.selectAll).WithIcon("select-all")
+	findAct := cmd("查找/替换…", "Ctrl+F", n.showFindBar).WithIcon("search")
+	timeAct := cmd("时间/日期", "", n.insertTime).WithIcon("history")
+
+	zoomInAct := cmd("放大字号", "", func() { n.zoom(1) }).WithIcon("font-increase")
+	zoomOutAct := cmd("缩小字号", "", func() { n.zoom(-1) }).WithIcon("font-decrease")
+	zoomResetAct := cmd("默认字号", "", func() { n.zoom(0) }).WithIcon("font-size")
+	monoAct := cmd("等宽字体", "", func() { n.setMono(true) }).WithIcon("code")
+	sansAct := cmd("无衬线字体", "", func() { n.setMono(false) }).WithIcon("align-left")
+
+	statusAct := cmd("显示状态栏", "", n.toggleStatus).WithIcon("dock-bottom")
+	aboutAct := cmd("关于记事本", "", func() {
+		n.message(appName + " — 基于 Ghromex 引擎的示例（纯 Go，无 CGO）")
+	}).WithIcon("info")
+
+	return ui.Spec{
+		Theme: &n.theme,
+		StatusSegments: []ui.StatusSegment{
+			{Key: "file", Text: untitled, Width: 220},
+			{Key: "pos", Text: "行 1，列 1", Width: 140},
+			{Key: "chars", Text: "0 个字符", Width: 110},
+		},
+		Menus: []ui.Menu{
+			{Title: "文件", Items: []ui.Action{
+				newAct, openAct, openDirAct, ui.Sep(), saveAct, saveAsAct, ui.Sep(), exitAct,
+			}},
+			{Title: "编辑", Items: []ui.Action{
+				undoAct, redoAct, ui.Sep(), cutAct, copyAct, pasteAct, deleteAct,
+				ui.Sep(), selectAllAct, findAct, ui.Sep(), timeAct,
+			}},
+			{Title: "格式", Items: []ui.Action{
+				zoomInAct, zoomOutAct, zoomResetAct, ui.Sep(), monoAct, sansAct,
+			}},
+			{Title: "视图", Items: []ui.Action{statusAct}},
+			{Title: "帮助", Items: []ui.Action{aboutAct}},
+		},
+		Tools: []ui.Action{
+			newAct, openAct, saveAct, saveAsAct, ui.Sep(), undoAct, redoAct,
+		},
+		Focus: func() engine.HTMLElement { return n.editor },
 	}
 }

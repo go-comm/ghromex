@@ -1,31 +1,29 @@
 // 示例：仿 Windows 记事本。
 //
-// 界面：菜单栏（文件/编辑/视图/帮助）、路径栏、铺满窗口的多行编辑区、
-// 状态栏（文件名、光标位置、字符数、提示消息）。真实窗口下「打开…」
-// 「另存为…」用 Windows 原生文件对话框（Shell 的 IFileDialog），
-// 路径栏仍可直接输入路径（无头模式没有原生对话框，只能用它）。
+// 界面：ui 生成的菜单栏（文件/编辑/格式/视图/帮助，菜单项带图标）、纯图标
+// 工具栏与状态栏，加上铺满窗口的多行编辑区、查找替换栏。真实窗口下
+// 「打开…」「另存为…」用 Windows 原生文件对话框（Shell 的 IFileDialog）；
+// 无头模式没有原生对话框，会在状态栏提示。
 //
 //	go run ./examples/notepad
 //	go run ./examples/notepad -file notes.txt      # 启动时打开文件
 //	go run ./examples/notepad -exit-after 3s       # 调试/CI
 //	go run ./examples/notepad -dump-svg out.svg    # 无头导出
 //
-// 页面 index.html 与本文件同目录，用 go:embed 打进二进制。
+// 页面完全由 page.go 用 Go 构造，没有 HTML 文件。
 //
 // 实现要点：
-//   - 下拉菜单借 <select> 的选项浮层实现：引擎没有通用弹层，select 的
-//     展开态恰好是「点标题弹出选项列表」，选中触发 change，示例程序
-//     据此执行动作并把 select 复位成菜单标题；
+//   - 菜单、工具栏、快捷键统一由 ui.Spec 声明，不再手写浮层和按钮绑定；
 //   - 编辑区几何（left/top/width/height）由程序按窗口尺寸计算：引擎的
 //     CSS 没有 calc，"视口高度 - 固定栏高" 这类尺寸只能由应用层算；
-//     窗口缩放由引擎的「视口尺寸变化」变更通知驱动（见 engine 的
+//     固定栏高度直接取 ui.Theme，和 ui.Install 插入的占位块一致；
+//   - 窗口缩放由引擎的「视口尺寸变化」变更通知驱动（见 engine 的
 //     LayoutDocument），文档内容不变时 onChanged 不触发，收不到信号；
-//   - 菜单点击会先让编辑区失焦，但引擎保留编辑状态（光标与选区不失，
-//     只是不画高亮），所以动作前把焦点交还编辑区即可继续操作。
+//   - ui 在命令执行后通过 Spec.Focus 把焦点还给编辑区；直接调用动作的
+//     路径仍显式 focusEditor。
 package main
 
 import (
-	_ "embed"
 	"flag"
 	"fmt"
 	"os"
@@ -38,19 +36,14 @@ import (
 	"github.com/go-comm/ghromex/engine"
 	"github.com/go-comm/ghromex/runtime/clipboard"
 	"github.com/go-comm/ghromex/runtime/dialog"
+	"github.com/go-comm/ghromex/ui"
 )
-
-//go:embed index.html
-var page []byte
 
 const (
 	winW = 900
 	winH = 620
 
-	menuH   = 30 // 菜单栏高
-	toolH   = 36 // 工具栏高
-	findH   = 32 // 查找替换栏高
-	statusH = 24 // 状态栏高
+	findH = 32 // 查找替换栏高（菜单/工具栏/状态栏高度由 ui.Theme 提供）
 
 	baseFont = 14 // 编辑区默认字号
 	minFont  = 8
@@ -66,16 +59,17 @@ func main() {
 	dumpSVG := flag.String("dump-svg", "", "无头模式：完成级联与布局后把结果导出为 SVG 并退出")
 	flag.Parse()
 
+	theme := ui.Light()
+
 	if *dumpSVG != "" {
 		vp := engine.NewHeadlessViewport(winW, winH)
-		doc, err := engine.OpenDocument(vp, string(page))
+		doc, err := engine.OpenDocument(vp, "")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "打开文档失败:", err)
 			os.Exit(1)
 		}
-		np := &notepad{vp: vp, doc: doc}
+		np := &notepad{vp: vp, doc: doc, theme: theme}
 		np.bind()
-		np.syncLayout()
 		doc.Refresh()
 		if err := os.WriteFile(*dumpSVG, []byte(doc.DumpSVG()), 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -92,17 +86,14 @@ func main() {
 	}
 	defer win.Close()
 
-	doc, err := win.OpenDocument(string(page))
+	doc, err := win.OpenDocument("")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "打开文档失败:", err)
 		os.Exit(1)
 	}
 
-	np := &notepad{vp: win, win: win, doc: doc}
+	np := &notepad{vp: win, win: win, doc: doc, theme: theme}
 	np.bind()
-	doc.SetOnChanged(np.onChanged)
-	np.syncLayout()
-	np.updateStatus()
 	if *file != "" {
 		np.loadFile(*file)
 	}
@@ -125,19 +116,16 @@ type viewport interface {
 
 // notepad 是记事本的全部状态。
 type notepad struct {
-	vp  viewport
-	win *browser.Window // 真实窗口（无头导出模式下为 nil）
-	doc engine.HTMLDocument
+	vp    viewport
+	win   *browser.Window // 真实窗口（无头导出模式下为 nil）
+	doc   engine.HTMLDocument
+	shell *ui.Shell
+	theme ui.Theme
 
-	editor                        engine.HTMLElement // 编辑区（textarea）
-	menuBar                       engine.HTMLElement // 菜单栏
-	menuPop                       engine.HTMLElement // 菜单浮层
-	menuLabels                    []engine.HTMLElement
-	findBar                       engine.HTMLElement // 查找替换栏
-	findIn                        engine.HTMLElement // 查找内容输入框
-	replaceIn                     engine.HTMLElement // 替换内容输入框
-	stBar                         engine.HTMLElement // 状态栏
-	stName, stPos, stCount, stMsg engine.HTMLElement
+	editor    engine.HTMLElement // 编辑区（textarea）
+	findBar   engine.HTMLElement // 查找替换栏
+	findIn    engine.HTMLElement // 查找内容输入框
+	replaceIn engine.HTMLElement // 替换内容输入框
 
 	path         string // 当前文件路径（空 = 未命名）
 	cur          string // 编辑区最近一次的文本（撤销快照与状态栏都用它）
@@ -150,24 +138,19 @@ type notepad struct {
 	showStatus   bool   // 显示状态栏
 	findOpen     bool   // 查找替换栏是展开的
 	matchAt      int    // 上一次找到的匹配位置（-1 = 没有）
-	menuOpen     bool   // 菜单浮层是打开的
 	lastW, lastH int    // 上次排版时的视口尺寸
 	lastTitle    string // 上次写入窗口的标题（避免每次按键都调平台接口）
 }
 
-// bind 取出页面元素并接上事件。
+// bind 在空文档上搭页面、取出元素、安装 ui 外壳并接上事件。
 func (n *notepad) bind() {
+	if n.doc.QuerySelector("#editor") == nil {
+		buildPage(n.doc)
+	}
 	n.editor = n.doc.QuerySelector("#editor")
-	n.menuBar = n.doc.QuerySelector("#menubar")
-	n.menuPop = n.doc.QuerySelector("#menupop")
 	n.findBar = n.doc.QuerySelector("#findbar")
 	n.findIn = n.doc.QuerySelector("#find-text")
 	n.replaceIn = n.doc.QuerySelector("#replace-text")
-	n.stBar = n.doc.QuerySelector("#statusbar")
-	n.stName = n.doc.QuerySelector("#st-name")
-	n.stPos = n.doc.QuerySelector("#st-pos")
-	n.stCount = n.doc.QuerySelector("#st-count")
-	n.stMsg = n.doc.QuerySelector("#st-msg")
 	if n.editor == nil {
 		return
 	}
@@ -175,123 +158,71 @@ func (n *notepad) bind() {
 	n.font = baseFont
 	n.showStatus = true
 	n.matchAt = -1
+	if n.theme.MenuHeight == 0 {
+		n.theme = ui.Light()
+	}
 
-	n.buildMenuBar()
-	n.bindToolbar()
+	n.shell = ui.Install(n.doc, n.buildSpec())
+	if n.win != nil {
+		n.win.SetKeyHandler(n.handleKey)
+	}
 	n.bindFindBar()
-
-	// 点菜单栏以外的地方关闭菜单浮层。点在菜单标签上时由标签自己处理
-	// （标签的处理器先跑，随后冒泡到 body——所以这里按坐标让开）。
-	n.doc.Body().OnClick(func(ev *engine.MouseEvent) {
-		if ev.Y < menuH {
-			return
-		}
-		n.closeMenu()
-	})
+	n.doc.SetOnChanged(n.onChanged)
+	n.syncLayout()
+	n.updateStatus()
+	n.message("就绪")
 }
 
-// bindToolbar 把工具栏按钮接到动作分发上。
-func (n *notepad) bindToolbar() {
-	buttons := []struct {
-		id  string
-		act string
-	}{
-		{"#btn-new", "new"},
-		{"#btn-open", "open"},
-		{"#btn-save", "save"},
-		{"#btn-saveas", "saveas"},
-		{"#btn-undo", "undo"},
-		{"#btn-redo", "redo"},
-	}
-	for _, b := range buttons {
-		el := n.doc.QuerySelector(b.id)
-		if el == nil {
-			continue
-		}
-		act := b.act
-		el.OnClick(func(*engine.MouseEvent) { n.action(act) })
-	}
-}
-
-// bindFindBar 把查找替换栏的按钮接到动作分发上。
+// bindFindBar 把查找替换栏的按钮接到具体动作上。
 func (n *notepad) bindFindBar() {
 	buttons := []struct {
 		id  string
-		act string
+		run func()
 	}{
-		{"#btn-find-next", "findnext"},
-		{"#btn-replace", "replace"},
-		{"#btn-replace-all", "replaceall"},
-		{"#btn-find-close", "findclose"},
+		{"#btn-find-next", n.findNext},
+		{"#btn-replace", n.replaceCurrent},
+		{"#btn-replace-all", n.replaceAll},
+		{"#btn-find-close", n.hideFindBar},
 	}
 	for _, b := range buttons {
 		el := n.doc.QuerySelector(b.id)
 		if el == nil {
 			continue
 		}
-		act := b.act
-		el.OnClick(func(*engine.MouseEvent) { n.action(act) })
+		run := b.run
+		el.OnClick(func(*engine.MouseEvent) { run() })
 	}
 }
 
-// action 分发菜单动作。
-func (n *notepad) action(act string) {
-	switch act {
-	case "new":
-		n.newFile()
-	case "open":
-		n.openFile()
-	case "opendir":
-		n.openDir()
-	case "save":
-		n.saveFile()
-	case "saveas":
-		n.saveAs()
-	case "exit":
-		if n.win != nil {
-			n.win.RequestClose()
-		}
-	case "undo":
-		n.undoEdit()
-	case "redo":
-		n.redoEdit()
-	case "cut":
-		n.cut()
-	case "copy":
-		n.copySelection()
-	case "paste":
-		n.paste()
-	case "delete":
-		n.deleteSelection()
-	case "selectall":
-		n.selectAll()
-	case "find":
-		n.showFindBar()
-	case "findnext":
-		n.findNext()
-	case "replace":
-		n.replaceCurrent()
-	case "replaceall":
-		n.replaceAll()
-	case "findclose":
-		n.hideFindBar()
-	case "time":
-		n.insertTime()
-	case "zoomin":
-		n.zoom(1)
-	case "zoomout":
-		n.zoom(-1)
-	case "zoomreset":
-		n.zoom(0)
-	case "fontmono":
-		n.setMono(true)
-	case "fontsans":
-		n.setMono(false)
-	case "statusbar":
-		n.toggleStatus()
-	case "about":
-		n.message(appName + " — 基于 Ghromex 引擎的示例（纯 Go，无 CGO）")
+// handleKey 把应用快捷键接到 ui.Shell。
+//
+// 查找/替换输入框聚焦时，Ctrl+C/V/X/A/Z 这类编辑快捷键应该留给输入框
+// 自己，只放行保存/打开/查找/退出这类全局命令；否则会去操作背后的编辑区。
+func (n *notepad) handleKey(key int, mods uint16) bool {
+	if focus := engine.FocusedElement(n.doc); focus != nil && focus != n.editor && !isGlobalShortcut(key, mods) {
+		return false
 	}
+	return n.shell != nil && n.shell.HandleKey(key, mods)
+}
+
+// isGlobalShortcut 判断快捷键在输入框聚焦时是否仍然全局有效。
+func isGlobalShortcut(key int, mods uint16) bool {
+	if key >= 'A' && key <= 'Z' {
+		key += 'a' - 'A'
+	}
+	ctrl := mods&engine.ModCtrl != 0
+	shift := mods&engine.ModShift != 0
+	alt := mods&engine.ModAlt != 0
+	if alt && !ctrl && !shift {
+		return key == 'q'
+	}
+	if ctrl && !alt {
+		if key == 's' {
+			return true // Ctrl+S / Ctrl+Shift+S
+		}
+		return !shift && (key == 'n' || key == 'o' || key == 'f')
+	}
+	return false
 }
 
 // onChanged 是文档变更回调：文本变化进撤销栈、视口变化重排编辑区。
@@ -310,6 +241,10 @@ func (n *notepad) onChanged() {
 		}
 		n.cur = v
 		n.dirty = true
+	}
+	if n.shell != nil {
+		// 撤销/重做栈刚变过，工具栏按钮的可用态要跟着更新。
+		n.shell.Refresh()
 	}
 	n.updateStatus()
 }
@@ -330,13 +265,22 @@ func (n *notepad) syncLayout() {
 	n.lastW, n.lastH = w, h
 
 	// 查找替换栏展开时把编辑区往下挤一行；状态栏隐藏时编辑区多占一行。
-	editorTop := menuH + toolH
+	// 菜单/工具栏/状态栏的高度来自 ui 主题，和 ui.Install 插入的占位块一致。
+	barTop := n.theme.MenuHeight + n.theme.ToolHeight
+	editorTop := barTop
 	if n.findOpen {
 		editorTop += findH
 	}
-	barH := statusH
+	barH := n.theme.StatusHeight
 	if !n.showStatus {
 		barH = 0
+	}
+	if n.findBar != nil {
+		display := "none"
+		if n.findOpen {
+			display = "block"
+		}
+		n.findBar.SetAttribute("style", fmt.Sprintf("top:%dpx;display:%s", barTop, display))
 	}
 	eh := h - editorTop - barH
 	if eh < 40 {
@@ -360,6 +304,7 @@ func (n *notepad) editorValue() string {
 }
 
 // updateStatus 刷新状态栏：文件名（带未保存标记）、光标位置、字符数。
+// 三段独立更新，右侧消息不随每次光标移动被覆盖。
 func (n *notepad) updateStatus() {
 	name := n.path
 	if name == "" {
@@ -370,12 +315,15 @@ func (n *notepad) updateStatus() {
 	if n.dirty {
 		name += " *"
 	}
-	setText(n.stName, name)
-
+	pos := ""
 	if line, col, ok := engine.CaretPosition(n.editor); ok {
-		setText(n.stPos, fmt.Sprintf("行 %d，列 %d", line, col))
+		pos = fmt.Sprintf("行 %d，列 %d", line, col)
 	}
-	setText(n.stCount, strconv.Itoa(len([]rune(n.cur)))+" 个字符")
+	if n.shell != nil {
+		n.shell.SetStatusSegment("file", name)
+		n.shell.SetStatusSegment("pos", pos)
+		n.shell.SetStatusSegment("chars", strconv.Itoa(len([]rune(n.cur)))+" 个字符")
+	}
 	n.updateTitle()
 }
 
@@ -407,25 +355,18 @@ func shortName(path string) string {
 	return path
 }
 
-// setText 写文本，内容不变则跳过：SetText 会触发文档变更通知，
-// 而变更通知又会回调 updateStatus——不比较内容就会无限递归。
-func setText(el engine.HTMLElement, s string) {
-	if el == nil {
-		return
+// message 在状态栏右侧提示一条消息。
+func (n *notepad) message(s string) {
+	if n.shell != nil {
+		n.shell.SetStatusRight(s)
 	}
-	if el.InnerText() == s {
-		return
-	}
-	el.SetText(s)
 }
-
-// message 在状态栏提示一条消息。
-func (n *notepad) message(s string) { setText(n.stMsg, s) }
 
 // focusEditor 把焦点交还编辑区。
 //
-// 点菜单会先让编辑区失焦（引擎的失焦只停画、不丢编辑状态），所以动作
-// 之前把焦点要回来：光标与选区随焦点一起回来，粘贴/剪切才有落点。
+// ui 在菜单/工具栏命令执行后也会通过 Spec.Focus 还焦点；这里仍保留一次
+// 显式聚焦，供直接调用动作的路径使用（例如测试和快捷键）。
+// 光标与选区随焦点一起回来，粘贴/剪切才有落点。
 func (n *notepad) focusEditor() {
 	if n.editor == nil {
 		return
@@ -440,6 +381,10 @@ func (n *notepad) newFile() {
 	n.redo = nil
 	n.path = ""
 	n.dirty = false
+	if n.shell != nil {
+		n.shell.Refresh()
+	}
+	n.updateStatus()
 	n.message("新建文档")
 }
 
@@ -492,11 +437,11 @@ func (n *notepad) dialogParent() (dialog.Parent, error) {
 	return dialog.Parent(hwnd), nil
 }
 
-// openDir 选一个文件夹（原生「选择文件夹」对话框），把结果填进路径栏。
+// openDir 选一个文件夹（原生「选择文件夹」对话框），结果在状态栏提示。
 func (n *notepad) openDir() {
 	parent, err := n.dialogParent()
 	if err != nil {
-		n.message("无头模式没有原生对话框，请直接在路径栏填写目录")
+		n.message("无头模式没有原生对话框，无法选择文件夹")
 		return
 	}
 	dir, err := dialog.OpenDirectoryDialog(parent, dialog.Options{
@@ -550,6 +495,10 @@ func (n *notepad) loadFile(path string) {
 	n.redo = nil
 	n.path = path
 	n.dirty = false
+	if n.shell != nil {
+		n.shell.Refresh()
+	}
+	n.updateStatus()
 	n.message("已打开 " + path)
 }
 
@@ -593,6 +542,7 @@ func (n *notepad) writeFile(path string) {
 	}
 	n.path = path
 	n.dirty = false
+	n.updateStatus()
 	n.message("已保存 " + path)
 }
 
@@ -611,6 +561,9 @@ func (n *notepad) undoEdit() {
 	n.applying = true
 	engine.SetValue(n.editor, prev)
 	n.applying = false
+	if n.shell != nil {
+		n.shell.Refresh()
+	}
 	n.message("已撤销")
 }
 

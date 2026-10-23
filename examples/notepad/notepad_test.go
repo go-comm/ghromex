@@ -17,14 +17,12 @@ import (
 func newTestNotepad(t *testing.T) *notepad {
 	t.Helper()
 	vp := engine.NewHeadlessViewport(900, 620)
-	doc, err := engine.OpenDocument(vp, string(page))
+	doc, err := engine.OpenDocument(vp, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	np := &notepad{vp: vp, doc: doc}
 	np.bind()
-	doc.SetOnChanged(np.onChanged)
-	np.syncLayout()
 	doc.Refresh()
 	return np
 }
@@ -36,28 +34,72 @@ func clickAt(t *testing.T, doc engine.HTMLDocument, x, y int) {
 	engine.OnDocumentClick(doc, x, y)
 }
 
+// menuHead 返回标题对应的 ui 菜单标签。
+func menuHead(t *testing.T, np *notepad, title string) engine.HTMLElement {
+	t.Helper()
+	for _, el := range np.doc.QuerySelectorAll(".system-ui-menu") {
+		if el.Text() == title {
+			return el
+		}
+	}
+	t.Fatalf("菜单栏里没有 %q", title)
+	return nil
+}
+
+// menuItemLabel 取菜单项的文字（第一个无类名的 span；快捷键/图标有类名）。
+func menuItemLabel(item engine.HTMLElement) string {
+	for _, child := range item.Children() {
+		if child.GetAttribute("class") == "" {
+			return child.InnerText()
+		}
+	}
+	return ""
+}
+
+// statusLeft/statusRight 取 ui 状态栏左右两段的文字。
+func statusLeft(np *notepad) string {
+	spans := np.doc.QuerySelectorAll(".system-ui-status span")
+	if len(spans) == 0 {
+		return ""
+	}
+	return spans[0].InnerText()
+}
+
+func statusRight(np *notepad) string {
+	el := np.doc.QuerySelector(".system-ui-status-right")
+	if el == nil {
+		return ""
+	}
+	return el.InnerText()
+}
+
+// openMenu 返回当前展开的 ui 菜单；没有展开的菜单时返回 nil。
+func openMenu(np *notepad) engine.HTMLElement {
+	for _, el := range np.doc.QuerySelectorAll(".system-ui-menu") {
+		if strings.Contains(el.GetAttribute("class"), "is-open") {
+			return el
+		}
+	}
+	return nil
+}
+
 // clickMenu 走真实菜单链路：点菜单栏标签 → 浮层面板展开 → 点菜单项。
 func clickMenu(t *testing.T, np *notepad, title, label string) {
 	t.Helper()
 	np.doc.Refresh()
 
-	var head engine.HTMLElement
-	for _, l := range np.menuLabels {
-		if l.InnerText() == title {
-			head = l
-			break
-		}
-	}
-	if head == nil {
-		t.Fatalf("菜单栏里没有 %q", title)
-	}
+	head := menuHead(t, np, title)
 	r := head.GetBoundingClientRect()
 	clickAt(t, np.doc, r.Left().Pixel()+2, r.Top().Pixel()+2)
 
 	// 浮层里的菜单项：展开后要重排一次，项才有可点的盒子。
 	np.doc.Refresh()
-	for _, item := range np.menuPop.Children() {
-		if item.InnerText() != label {
+	pop := head.QuerySelector(".system-ui-menu-pop")
+	if pop == nil {
+		t.Fatalf("菜单 %q 没有浮层", title)
+	}
+	for _, item := range pop.Children() {
+		if menuItemLabel(item) != label {
 			continue
 		}
 		ir := item.GetBoundingClientRect()
@@ -76,16 +118,63 @@ func clickMenu(t *testing.T, np *notepad, title, label string) {
 func TestEditorFillsWindow(t *testing.T) {
 	np := newTestNotepad(t)
 	r := np.editor.GetBoundingClientRect()
-	top := menuH + toolH
+	top := np.theme.MenuHeight + np.theme.ToolHeight
 	if got := r.Top().Pixel(); got != top {
 		t.Fatalf("编辑区上沿 = %d, want %d", got, top)
 	}
 	if got := r.Right().Pixel() - r.Left().Pixel(); got != 900 {
 		t.Fatalf("编辑区宽 = %d, want 900", got)
 	}
-	wantH := 620 - top - statusH
+	wantH := 620 - top - np.theme.StatusHeight
 	if got := r.Bottom().Pixel() - r.Top().Pixel(); got != wantH {
 		t.Fatalf("编辑区高 = %d, want %d", got, wantH)
+	}
+}
+
+// buildPage 不依赖 HTML：空文档上也能建出标题、查找栏与编辑区。
+func TestBuildPageCreatesAllControls(t *testing.T) {
+	vp := engine.NewHeadlessViewport(900, 620)
+	doc, err := engine.OpenDocument(vp, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	buildPage(doc)
+	if got := doc.Title(); got != appName {
+		t.Fatalf("文档标题 = %q, want %q", got, appName)
+	}
+	for _, id := range []string{
+		"findbar", "find-text", "btn-find-next",
+		"replace-text", "btn-replace", "btn-replace-all",
+		"btn-find-close", "editor",
+	} {
+		if doc.GetElementById(id) == nil {
+			t.Fatalf("buildPage 后缺少 #%s", id)
+		}
+	}
+	if got := doc.GetElementById("editor").TagName(); got != "textarea" {
+		t.Fatalf("编辑区标签 = %q, want textarea", got)
+	}
+	if got := len(doc.GetElementById("findbar").Children()); got != 6 {
+		t.Fatalf("查找栏子元素数 = %d, want 6", got)
+	}
+}
+
+// 状态栏三段各自更新：改文字只影响字符数，文件段仍保留未保存标记，
+// 右侧提示不会被编辑事件覆盖。
+func TestStatusSegmentsUpdateIndependently(t *testing.T) {
+	np := newTestNotepad(t)
+	if got, ok := np.shell.StatusSegment("file"); !ok || !strings.Contains(got, untitled) {
+		t.Fatalf("文件段 = %q, %v", got, ok)
+	}
+	np.editor.SetAttribute("value", "ab\ncd")
+	if got, ok := np.shell.StatusSegment("chars"); !ok || got != "5 个字符" {
+		t.Fatalf("字符段 = %q, %v, want 5 个字符", got, ok)
+	}
+	if got, _ := np.shell.StatusSegment("file"); !strings.Contains(got, "*") {
+		t.Fatalf("编辑后文件段 = %q, want 含未保存标记", got)
+	}
+	if got := statusRight(np); got != "就绪" {
+		t.Fatalf("右侧提示 = %q, want 就绪（不应被编辑事件覆盖）", got)
 	}
 }
 
@@ -93,14 +182,12 @@ func TestEditorFillsWindow(t *testing.T) {
 // 应用层据此重排（否则编辑区不会跟着窗口长宽变化）。
 func TestEditorFollowsViewportResize(t *testing.T) {
 	vp := engine.NewHeadlessViewport(900, 620)
-	doc, err := engine.OpenDocument(vp, string(page))
+	doc, err := engine.OpenDocument(vp, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	np := &notepad{vp: vp, doc: doc}
 	np.bind()
-	doc.SetOnChanged(np.onChanged)
-	np.syncLayout()
 
 	vp.W, vp.H = 640, 400
 	doc.Refresh() // 后端在窗口缩放后强制重排，尺寸变化的通知随之发出
@@ -111,9 +198,56 @@ func TestEditorFollowsViewportResize(t *testing.T) {
 	if got := r.Right().Pixel() - r.Left().Pixel(); got != 640 {
 		t.Fatalf("缩放后编辑区宽 = %d, want 640", got)
 	}
-	wantH := 400 - (menuH + toolH) - statusH
+	wantH := 400 - (np.theme.MenuHeight + np.theme.ToolHeight) - np.theme.StatusHeight
 	if got := r.Bottom().Pixel() - r.Top().Pixel(); got != wantH {
 		t.Fatalf("缩放后编辑区高 = %d, want %d", got, wantH)
+	}
+}
+
+// ui 菜单声明里的快捷键要真正接到 Shell.HandleKey 上。
+func TestShortcutUndoAndFind(t *testing.T) {
+	np := newTestNotepad(t)
+	np.editor.SetAttribute("value", "abc")
+	if !np.handleKey('z', engine.ModCtrl) {
+		t.Fatal("Ctrl+Z 没有被应用快捷键消费")
+	}
+	if got := np.editor.GetAttribute("value"); got != "" {
+		t.Fatalf("Ctrl+Z 后编辑区 = %q，期望空", got)
+	}
+
+	before := np.editor.GetBoundingClientRect().Top().Pixel()
+	if !np.handleKey('f', engine.ModCtrl) {
+		t.Fatal("Ctrl+F 没有被应用快捷键消费")
+	}
+	np.doc.Refresh()
+	if !np.findOpen {
+		t.Fatal("Ctrl+F 没有展开查找替换栏")
+	}
+	r := np.editor.GetBoundingClientRect()
+	wantTop := np.theme.MenuHeight + np.theme.ToolHeight + findH
+	if got := r.Top().Pixel(); got != wantTop {
+		t.Fatalf("查找栏展开后编辑区上沿 = %d，期望 %d（展开前 %d）", got, wantTop, before)
+	}
+	findBar := np.doc.QuerySelector("#findbar")
+	if got := findBar.GetAttribute("style"); !strings.Contains(got, "display:block") {
+		t.Fatalf("查找栏样式 = %q，期望 display:block", got)
+	}
+}
+
+// 查找框聚焦时，编辑类快捷键不能被应用层抢走；保存类全局命令仍然有效。
+func TestShortcutDoesNotStealFromFindInput(t *testing.T) {
+	np := newTestNotepad(t)
+	np.showFindBar()
+	if focus := engine.FocusedElement(np.doc); focus != np.findIn {
+		t.Fatal("查找栏没有拿到焦点")
+	}
+	for _, key := range []int{'a', 'c', 'v', 'x', 'z'} {
+		if np.handleKey(key, engine.ModCtrl) {
+			t.Fatalf("Ctrl+%c 在查找框里被应用快捷键抢走了", key)
+		}
+	}
+	if !np.handleKey('s', engine.ModCtrl) {
+		t.Fatal("Ctrl+S 应始终是全局快捷键")
 	}
 }
 
@@ -136,11 +270,17 @@ func TestOpenAndSaveFile(t *testing.T) {
 	if np.dirty {
 		t.Fatal("刚打开的文件不应标记为已修改")
 	}
+	if got := statusLeft(np); !strings.Contains(got, "note.txt") || strings.Contains(got, "*") {
+		t.Fatalf("打开后状态栏 = %q，期望含文件名且不带未保存标记", got)
+	}
 
 	// 改内容 → 标记已修改 → 保存后落盘。
 	np.editor.SetAttribute("value", "changed")
 	if !np.dirty {
 		t.Fatal("编辑后未标记为已修改")
+	}
+	if got := statusLeft(np); !strings.Contains(got, "*") {
+		t.Fatalf("编辑后状态栏 = %q，期望带未保存标记", got)
 	}
 	np.saveFile()
 	data, err := os.ReadFile(path)
@@ -152,6 +292,9 @@ func TestOpenAndSaveFile(t *testing.T) {
 	}
 	if np.dirty {
 		t.Fatal("保存后仍标记为已修改")
+	}
+	if got := statusLeft(np); strings.Contains(got, "*") {
+		t.Fatalf("保存后状态栏 = %q，不应带未保存标记", got)
 	}
 
 	// 打开不存在的文件：状态栏提示，编辑区内容不变。
@@ -221,37 +364,35 @@ func TestMenuPopupOpensAndCloses(t *testing.T) {
 
 	// 点菜单栏标签：浮层展开。
 	np.doc.Refresh()
-	head := np.menuLabels[0]
+	head := menuHead(t, np, "文件")
 	hr := head.GetBoundingClientRect()
 	clickAt(t, np.doc, hr.Left().Pixel()+2, hr.Top().Pixel()+2)
 	np.doc.Refresh()
-	if !np.menuOpen {
+	if openMenu(np) != head {
 		t.Fatal("点菜单标签后浮层没有打开")
 	}
-	if got := np.menuPop.GetAttribute("style"); !strings.Contains(got, "display:block") {
-		t.Fatalf("浮层样式 = %q, want 含 display:block", got)
+	pop := head.QuerySelector(".system-ui-menu-pop")
+	if pop == nil || len(pop.Children()) == 0 {
+		t.Fatal("菜单浮层没有生成菜单项")
 	}
 
 	// 点菜单项：动作执行、浮层收起。
 	clickMenu(t, np, "编辑", "全选")
-	if np.menuOpen {
+	if openMenu(np) != nil {
 		t.Fatal("点菜单项后浮层没有关闭")
-	}
-	if got := np.menuPop.GetAttribute("style"); !strings.Contains(got, "display:none") {
-		t.Fatalf("浮层样式 = %q, want 含 display:none", got)
 	}
 
 	// 点浮层之外（编辑区）也应关闭菜单。
 	np.doc.Refresh()
-	head = np.menuLabels[0]
+	head = menuHead(t, np, "文件")
 	hr = head.GetBoundingClientRect()
 	clickAt(t, np.doc, hr.Left().Pixel()+2, hr.Top().Pixel()+2)
-	if !np.menuOpen {
+	if openMenu(np) != head {
 		t.Fatal("浮层没有再次打开")
 	}
 	r := np.editor.GetBoundingClientRect()
 	clickAt(t, np.doc, r.Left().Pixel()+10, r.Top().Pixel()+10)
-	if np.menuOpen {
+	if openMenu(np) != nil {
 		t.Fatal("点浮层之外后菜单没有关闭")
 	}
 }
@@ -260,7 +401,7 @@ func TestMenuPopupOpensAndCloses(t *testing.T) {
 func TestHeadlessOpenExplainsNoDialog(t *testing.T) {
 	np := newTestNotepad(t)
 	clickMenu(t, np, "文件", "打开…")
-	if msg := np.stMsg.InnerText(); !strings.Contains(msg, "原生窗口") {
+	if msg := statusRight(np); !strings.Contains(msg, "原生窗口") {
 		t.Errorf("状态栏提示 = %q, want 含「原生窗口」", msg)
 	}
 }
@@ -291,7 +432,7 @@ func TestFindAndReplace(t *testing.T) {
 	if np.matchAt != 0 {
 		t.Fatalf("第一次查找位置 = %d, want 0", np.matchAt)
 	}
-	if msg := np.stMsg.InnerText(); !strings.Contains(msg, "第 1 处") {
+	if msg := statusRight(np); !strings.Contains(msg, "第 1 处") {
 		t.Errorf("状态栏提示 = %q, want 含「第 1 处」", msg)
 	}
 
@@ -317,10 +458,14 @@ func TestToggleStatusBar(t *testing.T) {
 	np.doc.Refresh()
 	r := np.editor.GetBoundingClientRect()
 	got := r.Bottom().Pixel() - r.Top().Pixel()
-	if got != before+statusH {
-		t.Fatalf("隐藏状态栏后编辑区高 = %d, want %d", got, before+statusH)
+	if got != before+np.theme.StatusHeight {
+		t.Fatalf("隐藏状态栏后编辑区高 = %d, want %d", got, before+np.theme.StatusHeight)
 	}
-	if got := np.stBar.GetAttribute("style"); !strings.Contains(got, "display:none") {
+	status := np.doc.QuerySelector(".system-ui-status")
+	if status == nil {
+		t.Fatal("状态栏不存在")
+	}
+	if got := status.GetAttribute("style"); !strings.Contains(got, "display:none") {
 		t.Fatalf("状态栏样式 = %q, want 含 display:none", got)
 	}
 }
@@ -335,13 +480,14 @@ func TestClosedMenuItemNotClickable(t *testing.T) {
 	np.doc.Refresh()
 
 	// 打开「编辑」菜单，记下「时间/日期」项的位置，再点它。
-	head := np.menuLabels[1]
+	head := menuHead(t, np, "编辑")
 	hr := head.GetBoundingClientRect()
-	engine.OnDocumentClick(np.doc, hr.Left().Pixel()+2, hr.Top().Pixel()+2)
+	clickAt(t, np.doc, hr.Left().Pixel()+2, hr.Top().Pixel()+2)
 	np.doc.Refresh()
 	x, y := 0, 0
-	for _, item := range np.menuPop.Children() {
-		if item.InnerText() == "时间/日期" {
+	pop := head.QuerySelector(".system-ui-menu-pop")
+	for _, item := range pop.Children() {
+		if menuItemLabel(item) == "时间/日期" {
 			ir := item.GetBoundingClientRect()
 			x = (ir.Left().Pixel() + ir.Right().Pixel()) / 2
 			y = (ir.Top().Pixel() + ir.Bottom().Pixel()) / 2
@@ -350,7 +496,7 @@ func TestClosedMenuItemNotClickable(t *testing.T) {
 	if x == 0 && y == 0 {
 		t.Fatal("菜单里没有「时间/日期」项")
 	}
-	engine.OnDocumentClick(np.doc, x, y)
+	clickAt(t, np.doc, x, y)
 	first := np.editor.GetAttribute("value")
 	if first == "x" {
 		t.Fatal("「时间/日期」没有插入日期")
@@ -362,5 +508,57 @@ func TestClosedMenuItemNotClickable(t *testing.T) {
 	engine.OnDocumentClick(np.doc, x, y)
 	if got := np.editor.GetAttribute("value"); got != first {
 		t.Fatalf("菜单收起后再点原位置，编辑区 = %q, want %q（菜单项不该再被点到）", got, first)
+	}
+}
+
+// 工具栏只用图标：每个按钮都是 is-icon 方形按钮，盒子里只有 .system-ui-icon，
+// 不带文字（Label 只作兜底与读屏用途）。
+func TestToolbarUsesIconsOnly(t *testing.T) {
+	np := newTestNotepad(t)
+	tools := np.doc.GetElementsByClassName("system-ui-tool")
+	if len(tools) != 6 {
+		t.Fatalf("工具栏按钮数 = %d, want 6（新建/打开/保存/另存为/撤销/重做）", len(tools))
+	}
+	for i, el := range tools {
+		if class := el.GetAttribute("class"); !strings.Contains(class, "is-icon") {
+			t.Fatalf("第 %d 个按钮类名 = %q, want 含 is-icon", i+1, class)
+		}
+		if el.QuerySelector(".system-ui-icon") == nil {
+			t.Fatalf("第 %d 个按钮没有图标子元素", i+1)
+		}
+		if got := el.Text(); got != "" {
+			t.Fatalf("图标按钮不该带文字 = %q", got)
+		}
+	}
+}
+
+// 菜单项带图标：展开「文件」后浮层应带 has-icon 类，每个菜单项都要渲染
+// .system-ui-menu-icon（图标列没有空位）。
+func TestMenuItemsHaveIcons(t *testing.T) {
+	np := newTestNotepad(t)
+	head := menuHead(t, np, "文件")
+	hr := head.GetBoundingClientRect()
+	clickAt(t, np.doc, hr.Left().Pixel()+2, hr.Top().Pixel()+2)
+	np.doc.Refresh()
+
+	pop := head.QuerySelector(".system-ui-menu-pop")
+	if pop == nil {
+		t.Fatal("菜单没有浮层")
+	}
+	if class := pop.GetAttribute("class"); !strings.Contains(class, "has-icon") {
+		t.Fatalf("浮层类名 = %q, want 含 has-icon", class)
+	}
+	items := 0
+	for _, item := range pop.Children() {
+		if !strings.Contains(item.GetAttribute("class"), "system-ui-menu-item") {
+			continue
+		}
+		items++
+		if item.QuerySelector(".system-ui-menu-icon") == nil {
+			t.Fatalf("菜单项 %q 没有图标", menuItemLabel(item))
+		}
+	}
+	if items != 6 {
+		t.Fatalf("「文件」菜单项数 = %d, want 6（不含分隔线）", items)
 	}
 }

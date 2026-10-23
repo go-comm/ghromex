@@ -29,6 +29,9 @@ func (n *notepad) redoEdit() {
 	n.applying = true
 	engine.SetValue(n.editor, next)
 	n.applying = false
+	if n.shell != nil {
+		n.shell.Refresh()
+	}
 	n.message("已重做")
 }
 
@@ -46,8 +49,7 @@ func (n *notepad) showFindBar() {
 		return
 	}
 	n.findOpen = true
-	n.findBar.SetAttribute("style", "display:block")
-	n.lastW = 0 // 强制重排：编辑区位置变了
+	n.lastW = 0 // 强制重排：查找栏显示、编辑区位置变了
 	n.syncLayout()
 	if n.findIn != nil {
 		engine.SetFocusedElement(n.doc, n.findIn)
@@ -60,7 +62,6 @@ func (n *notepad) hideFindBar() {
 		return
 	}
 	n.findOpen = false
-	n.findBar.SetAttribute("style", "display:none")
 	n.lastW = 0
 	n.syncLayout()
 	n.focusEditor()
@@ -219,12 +220,8 @@ func (n *notepad) setMono(mono bool) {
 // toggleStatus 显示/隐藏状态栏。
 func (n *notepad) toggleStatus() {
 	n.showStatus = !n.showStatus
-	if n.stBar != nil {
-		if n.showStatus {
-			n.stBar.SetAttribute("style", "display:block")
-		} else {
-			n.stBar.SetAttribute("style", "display:none")
-		}
+	if n.shell != nil {
+		n.shell.SetStatusVisible(n.showStatus)
 	}
 	n.lastW = 0
 	n.syncLayout()
