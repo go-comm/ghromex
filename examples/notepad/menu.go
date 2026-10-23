@@ -85,6 +85,6 @@ func (n *notepad) buildSpec() ui.Spec {
 		Tools: []ui.Action{
 			newAct, openAct, saveAct, saveAsAct, ui.Sep(), undoAct, redoAct,
 		},
-		Focus: func() engine.HTMLElement { return n.editor },
+		Focus: func() engine.HTMLElement { return n.editorEl() },
 	}
 }

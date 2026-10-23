@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/ui"
 )
 
 // 记事本示例的无头回归：界面排版、文件读写、撤销/重做、菜单机制。
@@ -117,7 +118,7 @@ func clickMenu(t *testing.T, np *notepad, title, label string) {
 // 几何由应用层算并写进内联样式。
 func TestEditorFillsWindow(t *testing.T) {
 	np := newTestNotepad(t)
-	r := np.editor.GetBoundingClientRect()
+	r := np.editorEl().GetBoundingClientRect()
 	top := np.theme.MenuHeight + np.theme.ToolHeight
 	if got := r.Top().Pixel(); got != top {
 		t.Fatalf("编辑区上沿 = %d, want %d", got, top)
@@ -138,7 +139,7 @@ func TestBuildPageCreatesAllControls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	buildPage(doc)
+	buildPage(doc, ui.Light(), findBarActions{})
 	if got := doc.Title(); got != appName {
 		t.Fatalf("文档标题 = %q, want %q", got, appName)
 	}
@@ -151,11 +152,76 @@ func TestBuildPageCreatesAllControls(t *testing.T) {
 			t.Fatalf("buildPage 后缺少 #%s", id)
 		}
 	}
+	// 页面是 ui 控件拼的而不是手搭 DOM：类名齐了才有主题外观。
+	for _, tc := range []struct{ id, class string }{
+		{"findbar", "system-ui-bar"},
+		{"find-text", "system-ui-input"},
+		{"btn-find-next", "system-ui-btn"},
+		{"editor", "system-ui-textarea"},
+	} {
+		el := doc.GetElementById(tc.id)
+		if got := el.GetAttribute("class"); !strings.Contains(got, tc.class) {
+			t.Fatalf("#%s 的 class = %q，期望含 %s", tc.id, got, tc.class)
+		}
+	}
 	if got := doc.GetElementById("editor").TagName(); got != "textarea" {
 		t.Fatalf("编辑区标签 = %q, want textarea", got)
 	}
+	// 编辑区是铺满内容区的纸面：平铺变体（无描边、无圆角）。
+	if got := doc.GetElementById("editor").GetAttribute("class"); !strings.Contains(got, "is-plain") {
+		t.Fatalf("编辑区 class = %q，期望含 is-plain", got)
+	}
 	if got := len(doc.GetElementById("findbar").Children()); got != 6 {
 		t.Fatalf("查找栏子元素数 = %d, want 6", got)
+	}
+}
+
+// 查找栏的显隐与定位分开管：收起时写 display:none（既看不见也点不到），
+// 应用写的 top 不会被冲掉；展开时栏是主题的控件条，控件排成一行并垂直居中。
+func TestFindBarVisibilityKeepsPosition(t *testing.T) {
+	np := newTestNotepad(t)
+	bar := np.doc.QuerySelector("#findbar")
+	barTop := np.theme.MenuHeight + np.theme.ToolHeight
+
+	style := bar.GetAttribute("style")
+	if np.findBar.Visible() || !strings.Contains(style, "display:none") {
+		t.Fatalf("默认应收起：visible=%v style=%q", np.findBar.Visible(), style)
+	}
+	// 收起的栏不能还能被命中：渲染层按 display:none 跳过，命中层靠零尺寸盒
+	// 跳过，两边同口径（否则会点到看不见的按钮）。
+	if got := engine.ElementAt(np.doc, 200, barTop+10); got == np.findIn.Element() {
+		t.Fatal("收起的查找栏仍被命中，隐藏与渲染不同口径")
+	}
+
+	np.showFindBar()
+	np.doc.Refresh()
+	style = bar.GetAttribute("style")
+	if strings.Contains(style, "display:none") {
+		t.Fatalf("展开后样式 = %q，期望去掉 display:none", style)
+	}
+	if !strings.Contains(style, "position:absolute") {
+		t.Fatalf("展开后样式 = %q，期望保留定位声明", style)
+	}
+
+	// 栏贴在工具栏下面，横贯整个视口，高度取主题的 BarHeight。
+	r := bar.GetBoundingClientRect()
+	if got := r.Top().Pixel(); got != barTop {
+		t.Fatalf("查找栏上沿 = %d, want %d（菜单+工具栏）", got, barTop)
+	}
+	if got := r.Right().Pixel() - r.Left().Pixel(); got != 900 {
+		t.Fatalf("查找栏宽 = %d, want 900（主题 width:100%%）", got)
+	}
+	if got := r.Bottom().Pixel() - r.Top().Pixel(); got != np.theme.BarHeight {
+		t.Fatalf("查找栏高 = %d, want %d（主题 BarHeight）", got, np.theme.BarHeight)
+	}
+	// 条内第一个控件（查找框）能被命中，且在这条栏里垂直居中。
+	if got := engine.ElementAt(np.doc, 20, barTop+np.theme.BarHeight/2); got != np.findIn.Element() {
+		t.Fatal("展开后没有命中查找框，条内排布或命中测试不对")
+	}
+	c := np.findIn.Element().GetBoundingClientRect()
+	mid := c.Top().Pixel() + (c.Bottom().Pixel()-c.Top().Pixel())/2
+	if d := mid - (r.Top().Pixel() + np.theme.BarHeight/2); d > 1 || d < -1 {
+		t.Fatalf("查找框中心偏离栏中心 %d px，期望垂直居中", d)
 	}
 }
 
@@ -166,7 +232,7 @@ func TestStatusSegmentsUpdateIndependently(t *testing.T) {
 	if got, ok := np.shell.StatusSegment("file"); !ok || !strings.Contains(got, untitled) {
 		t.Fatalf("文件段 = %q, %v", got, ok)
 	}
-	np.editor.SetAttribute("value", "ab\ncd")
+	np.editor.SetValue("ab\ncd")
 	if got, ok := np.shell.StatusSegment("chars"); !ok || got != "5 个字符" {
 		t.Fatalf("字符段 = %q, %v, want 5 个字符", got, ok)
 	}
@@ -194,7 +260,7 @@ func TestEditorFollowsViewportResize(t *testing.T) {
 	doc.Refresh() // 通知里应用层改写了编辑区的内联样式，再排一次才生效
 	// （真实窗口由后端按 ChangeCount 自动补这一遍）
 
-	r := np.editor.GetBoundingClientRect()
+	r := np.editorEl().GetBoundingClientRect()
 	if got := r.Right().Pixel() - r.Left().Pixel(); got != 640 {
 		t.Fatalf("缩放后编辑区宽 = %d, want 640", got)
 	}
@@ -207,15 +273,15 @@ func TestEditorFollowsViewportResize(t *testing.T) {
 // ui 菜单声明里的快捷键要真正接到 Shell.HandleKey 上。
 func TestShortcutUndoAndFind(t *testing.T) {
 	np := newTestNotepad(t)
-	np.editor.SetAttribute("value", "abc")
+	np.editor.SetValue("abc")
 	if !np.handleKey('z', engine.ModCtrl) {
 		t.Fatal("Ctrl+Z 没有被应用快捷键消费")
 	}
-	if got := np.editor.GetAttribute("value"); got != "" {
+	if got := np.editor.Value(); got != "" {
 		t.Fatalf("Ctrl+Z 后编辑区 = %q，期望空", got)
 	}
 
-	before := np.editor.GetBoundingClientRect().Top().Pixel()
+	before := np.editorEl().GetBoundingClientRect().Top().Pixel()
 	if !np.handleKey('f', engine.ModCtrl) {
 		t.Fatal("Ctrl+F 没有被应用快捷键消费")
 	}
@@ -223,14 +289,20 @@ func TestShortcutUndoAndFind(t *testing.T) {
 	if !np.findOpen {
 		t.Fatal("Ctrl+F 没有展开查找替换栏")
 	}
-	r := np.editor.GetBoundingClientRect()
-	wantTop := np.theme.MenuHeight + np.theme.ToolHeight + findH
+	r := np.editorEl().GetBoundingClientRect()
+	wantTop := np.theme.MenuHeight + np.theme.ToolHeight + np.theme.BarHeight
 	if got := r.Top().Pixel(); got != wantTop {
 		t.Fatalf("查找栏展开后编辑区上沿 = %d，期望 %d（展开前 %d）", got, wantTop, before)
 	}
 	findBar := np.doc.QuerySelector("#findbar")
-	if got := findBar.GetAttribute("style"); !strings.Contains(got, "display:block") {
-		t.Fatalf("查找栏样式 = %q，期望 display:block", got)
+	// 展开时栏只写定位声明（可见性靠「没有 display:none」表达）：
+	// BarView 把定位与显隐分开管，切显隐不会把 top 冲掉。
+	style := findBar.GetAttribute("style")
+	if strings.Contains(style, "display:none") {
+		t.Fatalf("查找栏样式 = %q，期望可见", style)
+	}
+	if !strings.Contains(style, "position:absolute") {
+		t.Fatalf("查找栏样式 = %q，期望绝对定位浮在内容上方", style)
 	}
 }
 
@@ -238,7 +310,7 @@ func TestShortcutUndoAndFind(t *testing.T) {
 func TestShortcutDoesNotStealFromFindInput(t *testing.T) {
 	np := newTestNotepad(t)
 	np.showFindBar()
-	if focus := engine.FocusedElement(np.doc); focus != np.findIn {
+	if focus := engine.FocusedElement(np.doc); focus != np.findIn.Element() {
 		t.Fatal("查找栏没有拿到焦点")
 	}
 	for _, key := range []int{'a', 'c', 'v', 'x', 'z'} {
@@ -261,7 +333,7 @@ func TestOpenAndSaveFile(t *testing.T) {
 	}
 
 	np.loadFile(path)
-	if got := np.editor.GetAttribute("value"); got != "hello\nworld" {
+	if got := np.editor.Value(); got != "hello\nworld" {
 		t.Fatalf("打开后编辑区 = %q, want %q", got, "hello\nworld")
 	}
 	if np.path != path {
@@ -275,7 +347,7 @@ func TestOpenAndSaveFile(t *testing.T) {
 	}
 
 	// 改内容 → 标记已修改 → 保存后落盘。
-	np.editor.SetAttribute("value", "changed")
+	np.editor.SetValue("changed")
 	if !np.dirty {
 		t.Fatal("编辑后未标记为已修改")
 	}
@@ -298,9 +370,9 @@ func TestOpenAndSaveFile(t *testing.T) {
 	}
 
 	// 打开不存在的文件：状态栏提示，编辑区内容不变。
-	np.editor.SetAttribute("value", "keep")
+	np.editor.SetValue("keep")
 	np.loadFile(filepath.Join(dir, "missing.txt"))
-	if got := np.editor.GetAttribute("value"); got != "keep" {
+	if got := np.editor.Value(); got != "keep" {
 		t.Fatalf("打开失败后编辑区 = %q, want keep", got)
 	}
 }
@@ -308,12 +380,12 @@ func TestOpenAndSaveFile(t *testing.T) {
 // 撤销：每次文本变化压一条快照，撤销弹栈并写回。
 func TestUndoRestoresPreviousText(t *testing.T) {
 	np := newTestNotepad(t)
-	np.editor.SetAttribute("value", "abc")
+	np.editor.SetValue("abc")
 	if len(np.undo) == 0 {
 		t.Fatal("文本变化后没有压入撤销快照")
 	}
 	np.undoEdit()
-	if got := np.editor.GetAttribute("value"); got != "" {
+	if got := np.editor.Value(); got != "" {
 		t.Fatalf("撤销后编辑区 = %q, want 空", got)
 	}
 	// 撤销动作自身不再压快照（否则连撤会来回抖）。
@@ -327,22 +399,22 @@ func TestUndoRestoresPreviousText(t *testing.T) {
 // 重做：撤销之后能把内容恢复回去；新的改动会让重做栈作废。
 func TestRedoRestoresUndoneText(t *testing.T) {
 	np := newTestNotepad(t)
-	np.editor.SetAttribute("value", "abc")
+	np.editor.SetValue("abc")
 	np.undoEdit()
-	if got := np.editor.GetAttribute("value"); got != "" {
+	if got := np.editor.Value(); got != "" {
 		t.Fatalf("撤销后编辑区 = %q, want 空", got)
 	}
 	np.redoEdit()
-	if got := np.editor.GetAttribute("value"); got != "abc" {
+	if got := np.editor.Value(); got != "abc" {
 		t.Fatalf("重做后编辑区 = %q, want %q", got, "abc")
 	}
 
 	// 撤销之后又有新改动：重做栈作废。
-	np.editor.SetAttribute("value", "xyz")
+	np.editor.SetValue("xyz")
 	np.undoEdit()
-	np.editor.SetAttribute("value", "new")
+	np.editor.SetValue("new")
 	np.redoEdit()
-	if got := np.editor.GetAttribute("value"); got != "new" {
+	if got := np.editor.Value(); got != "new" {
 		t.Fatalf("新改动后重做 = %q, want new（重做栈应已作废）", got)
 	}
 }
@@ -350,10 +422,10 @@ func TestRedoRestoresUndoneText(t *testing.T) {
 // 菜单链路：点「文件」→ 浮层展开 → 点「新建」→ 编辑区清空。
 func TestMenuActionClearsEditor(t *testing.T) {
 	np := newTestNotepad(t)
-	np.editor.SetAttribute("value", "old text")
+	np.editor.SetValue("old text")
 
 	clickMenu(t, np, "文件", "新建")
-	if got := np.editor.GetAttribute("value"); got != "" {
+	if got := np.editor.Value(); got != "" {
 		t.Fatalf("「新建」后编辑区 = %q, want 空", got)
 	}
 }
@@ -390,7 +462,7 @@ func TestMenuPopupOpensAndCloses(t *testing.T) {
 	if openMenu(np) != head {
 		t.Fatal("浮层没有再次打开")
 	}
-	r := np.editor.GetBoundingClientRect()
+	r := np.editorEl().GetBoundingClientRect()
 	clickAt(t, np.doc, r.Left().Pixel()+10, r.Top().Pixel()+10)
 	if openMenu(np) != nil {
 		t.Fatal("点浮层之外后菜单没有关闭")
@@ -413,7 +485,7 @@ func TestFormatZoomChangesFontSize(t *testing.T) {
 	if np.font != baseFont+1 {
 		t.Fatalf("放大后字号 = %d, want %d", np.font, baseFont+1)
 	}
-	if got := np.editor.GetAttribute("style"); !strings.Contains(got, "font-size:15px") {
+	if got := np.editorEl().GetAttribute("style"); !strings.Contains(got, "font-size:15px") {
 		t.Fatalf("编辑区内联样式 = %q, want 含 font-size:15px", got)
 	}
 	clickMenu(t, np, "格式", "默认字号")
@@ -425,9 +497,9 @@ func TestFormatZoomChangesFontSize(t *testing.T) {
 // 查找/替换：查找报出位置，替换改文本，全部替换改所有匹配。
 func TestFindAndReplace(t *testing.T) {
 	np := newTestNotepad(t)
-	np.editor.SetAttribute("value", "hello world hello")
+	np.editor.SetValue("hello world hello")
 
-	np.findIn.SetAttribute("value", "hello")
+	np.findIn.SetValue("hello")
 	np.findNext()
 	if np.matchAt != 0 {
 		t.Fatalf("第一次查找位置 = %d, want 0", np.matchAt)
@@ -436,14 +508,14 @@ func TestFindAndReplace(t *testing.T) {
 		t.Errorf("状态栏提示 = %q, want 含「第 1 处」", msg)
 	}
 
-	np.replaceIn.SetAttribute("value", "HI")
+	np.replaceIn.SetValue("HI")
 	np.replaceCurrent()
-	if got := np.editor.GetAttribute("value"); got != "HI world hello" {
+	if got := np.editor.Value(); got != "HI world hello" {
 		t.Fatalf("替换一处后 = %q, want %q", got, "HI world hello")
 	}
 
 	np.replaceAll()
-	if got := np.editor.GetAttribute("value"); got != "HI world HI" {
+	if got := np.editor.Value(); got != "HI world HI" {
 		t.Fatalf("全部替换后 = %q, want %q", got, "HI world HI")
 	}
 }
@@ -451,12 +523,12 @@ func TestFindAndReplace(t *testing.T) {
 // 视图 → 显示状态栏：状态栏可隐藏，编辑区相应变高。
 func TestToggleStatusBar(t *testing.T) {
 	np := newTestNotepad(t)
-	before := np.editor.GetBoundingClientRect().Bottom().Pixel() -
-		np.editor.GetBoundingClientRect().Top().Pixel()
+	before := np.editorEl().GetBoundingClientRect().Bottom().Pixel() -
+		np.editorEl().GetBoundingClientRect().Top().Pixel()
 
 	clickMenu(t, np, "视图", "显示状态栏")
 	np.doc.Refresh()
-	r := np.editor.GetBoundingClientRect()
+	r := np.editorEl().GetBoundingClientRect()
 	got := r.Bottom().Pixel() - r.Top().Pixel()
 	if got != before+np.theme.StatusHeight {
 		t.Fatalf("隐藏状态栏后编辑区高 = %d, want %d", got, before+np.theme.StatusHeight)
@@ -476,7 +548,7 @@ func TestToggleStatusBar(t *testing.T) {
 // 项原来的位置再点一次，会又执行一次动作（「时间/日期」连插两次日期）。
 func TestClosedMenuItemNotClickable(t *testing.T) {
 	np := newTestNotepad(t)
-	np.editor.SetAttribute("value", "x")
+	np.editor.SetValue("x")
 	np.doc.Refresh()
 
 	// 打开「编辑」菜单，记下「时间/日期」项的位置，再点它。
@@ -497,7 +569,7 @@ func TestClosedMenuItemNotClickable(t *testing.T) {
 		t.Fatal("菜单里没有「时间/日期」项")
 	}
 	clickAt(t, np.doc, x, y)
-	first := np.editor.GetAttribute("value")
+	first := np.editor.Value()
 	if first == "x" {
 		t.Fatal("「时间/日期」没有插入日期")
 	}
@@ -506,7 +578,7 @@ func TestClosedMenuItemNotClickable(t *testing.T) {
 	// 不该再执行「时间/日期」。
 	np.doc.Refresh()
 	engine.OnDocumentClick(np.doc, x, y)
-	if got := np.editor.GetAttribute("value"); got != first {
+	if got := np.editor.Value(); got != first {
 		t.Fatalf("菜单收起后再点原位置，编辑区 = %q, want %q（菜单项不该再被点到）", got, first)
 	}
 }

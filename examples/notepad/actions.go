@@ -27,7 +27,7 @@ func (n *notepad) redoEdit() {
 		n.undo = n.undo[1:]
 	}
 	n.applying = true
-	engine.SetValue(n.editor, next)
+	n.editor.SetValue(next)
 	n.applying = false
 	if n.shell != nil {
 		n.shell.Refresh()
@@ -52,7 +52,7 @@ func (n *notepad) showFindBar() {
 	n.lastW = 0 // 强制重排：查找栏显示、编辑区位置变了
 	n.syncLayout()
 	if n.findIn != nil {
-		engine.SetFocusedElement(n.doc, n.findIn)
+		engine.SetFocusedElement(n.doc, n.findIn.Element())
 	}
 }
 
@@ -72,7 +72,7 @@ func (n *notepad) hideFindBar() {
 // 引擎没有「设置选区」的接口，应用层无法把匹配处选中（浏览器里的高亮
 // 做不到），只能报出它的位置——状态栏给出行列，够用了。
 func (n *notepad) findNext() {
-	needle := strings.TrimSpace(n.findIn.GetAttribute("value"))
+	needle := strings.TrimSpace(n.findIn.Value())
 	if needle == "" {
 		n.message("请输入查找内容")
 		return
@@ -103,7 +103,7 @@ func (n *notepad) matchCount(text, needle string, pos int) int {
 
 // replaceCurrent 把当前找到的一处替换掉（先「查找下一个」再「替换」）。
 func (n *notepad) replaceCurrent() {
-	needle := strings.TrimSpace(n.findIn.GetAttribute("value"))
+	needle := strings.TrimSpace(n.findIn.Value())
 	if needle == "" {
 		n.message("请输入查找内容")
 		return
@@ -114,7 +114,7 @@ func (n *notepad) replaceCurrent() {
 			return
 		}
 	}
-	repl := n.replaceIn.GetAttribute("value")
+	repl := n.replaceIn.Value()
 	text := n.cur
 	updated := text[:n.matchAt] + repl + text[n.matchAt+len(needle):]
 	n.applyText(updated)
@@ -124,7 +124,7 @@ func (n *notepad) replaceCurrent() {
 
 // replaceAll 替换全部匹配。
 func (n *notepad) replaceAll() {
-	needle := strings.TrimSpace(n.findIn.GetAttribute("value"))
+	needle := strings.TrimSpace(n.findIn.Value())
 	if needle == "" {
 		n.message("请输入查找内容")
 		return
@@ -134,7 +134,7 @@ func (n *notepad) replaceAll() {
 		n.message("未找到「" + needle + "」")
 		return
 	}
-	repl := n.replaceIn.GetAttribute("value")
+	repl := n.replaceIn.Value()
 	n.applyText(strings.ReplaceAll(n.cur, needle, repl))
 	n.message(fmt.Sprintf("已替换 %d 处", count))
 }
@@ -142,7 +142,7 @@ func (n *notepad) replaceAll() {
 // applyText 用新文本替换编辑区内容（进撤销栈，与普通编辑同一条路径）。
 func (n *notepad) applyText(text string) {
 	n.applying = true
-	engine.SetValue(n.editor, text)
+	n.editor.SetValue(text)
 	n.applying = false
 	n.cur = text
 	n.dirty = true
@@ -155,7 +155,7 @@ func (n *notepad) caretOffset() int {
 	if n.editor == nil {
 		return 0
 	}
-	line, col, ok := engine.CaretPosition(n.editor)
+	line, col, ok := engine.CaretPosition(n.editorEl())
 	if !ok {
 		return 0
 	}

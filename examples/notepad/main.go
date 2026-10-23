@@ -14,6 +14,9 @@
 //
 // 实现要点：
 //   - 菜单、工具栏、快捷键统一由 ui.Spec 声明，不再手写浮层和按钮绑定；
+//   - 查找栏与编辑区由 ui 控件拼装（NewBar + NewTextInput/NewButton +
+//     NewTextArea）：类名、取值/设值、点击绑定归控件，条内排布与配色归主题
+//     （.system-ui-bar / .system-ui-textarea），页面不再写逐个控件的绝对坐标；
 //   - 编辑区几何（left/top/width/height）由程序按窗口尺寸计算：引擎的
 //     CSS 没有 calc，"视口高度 - 固定栏高" 这类尺寸只能由应用层算；
 //     固定栏高度直接取 ui.Theme，和 ui.Install 插入的占位块一致；
@@ -43,14 +46,15 @@ const (
 	winW = 900
 	winH = 620
 
-	findH = 32 // 查找替换栏高（菜单/工具栏/状态栏高度由 ui.Theme 提供）
-
 	baseFont = 14 // 编辑区默认字号
 	minFont  = 8
 	maxFont  = 32
 	maxUndo  = 200 // 撤销栈深度
 	appName  = "记事本"
 	untitled = "未命名"
+
+	// 编辑区的等宽字体；正文态直接用主题的 Font。
+	monoFont = `Consolas, 'Courier New', monospace`
 )
 
 func main() {
@@ -122,10 +126,10 @@ type notepad struct {
 	shell *ui.Shell
 	theme ui.Theme
 
-	editor    engine.HTMLElement // 编辑区（textarea）
-	findBar   engine.HTMLElement // 查找替换栏
-	findIn    engine.HTMLElement // 查找内容输入框
-	replaceIn engine.HTMLElement // 替换内容输入框
+	editor    *ui.TextAreaView  // 编辑区（纸面）
+	findBar   *ui.BarView       // 查找替换栏（控件条）
+	findIn    *ui.TextInputView // 查找内容输入框
+	replaceIn *ui.TextInputView // 替换内容输入框
 
 	path         string // 当前文件路径（空 = 未命名）
 	cur          string // 编辑区最近一次的文本（撤销快照与状态栏都用它）
@@ -142,15 +146,19 @@ type notepad struct {
 	lastTitle    string // 上次写入窗口的标题（避免每次按键都调平台接口）
 }
 
-// bind 在空文档上搭页面、取出元素、安装 ui 外壳并接上事件。
+// bind 装配页面控件、安装 ui 外壳并接上事件。
+//
+// 控件视图由 buildPage 一次性给出：按钮的动作在构造时就绑好（NewButton 收
+// 回调），所以这里不再按 id 反查元素，也没有单独的「找按钮、接点击」步骤。
 func (n *notepad) bind() {
-	if n.doc.QuerySelector("#editor") == nil {
-		buildPage(n.doc)
+	if n.theme.MenuHeight == 0 {
+		n.theme = ui.Light()
 	}
-	n.editor = n.doc.QuerySelector("#editor")
-	n.findBar = n.doc.QuerySelector("#findbar")
-	n.findIn = n.doc.QuerySelector("#find-text")
-	n.replaceIn = n.doc.QuerySelector("#replace-text")
+	p := buildPage(n.doc, n.theme, n.findBarActions())
+	n.editor = p.editor
+	n.findBar = p.findBar
+	n.findIn = p.findIn
+	n.replaceIn = p.replaceIn
 	if n.editor == nil {
 		return
 	}
@@ -158,40 +166,36 @@ func (n *notepad) bind() {
 	n.font = baseFont
 	n.showStatus = true
 	n.matchAt = -1
-	if n.theme.MenuHeight == 0 {
-		n.theme = ui.Light()
-	}
 
 	n.shell = ui.Install(n.doc, n.buildSpec())
 	if n.win != nil {
 		n.win.SetKeyHandler(n.handleKey)
 	}
-	n.bindFindBar()
 	n.doc.SetOnChanged(n.onChanged)
 	n.syncLayout()
 	n.updateStatus()
 	n.message("就绪")
 }
 
-// bindFindBar 把查找替换栏的按钮接到具体动作上。
-func (n *notepad) bindFindBar() {
-	buttons := []struct {
-		id  string
-		run func()
-	}{
-		{"#btn-find-next", n.findNext},
-		{"#btn-replace", n.replaceCurrent},
-		{"#btn-replace-all", n.replaceAll},
-		{"#btn-find-close", n.hideFindBar},
+// findBarActions 把查找替换栏上的按钮接到具体动作上。
+func (n *notepad) findBarActions() findBarActions {
+	return findBarActions{
+		findNext:   n.findNext,
+		replace:    n.replaceCurrent,
+		replaceAll: n.replaceAll,
+		hide:       n.hideFindBar,
 	}
-	for _, b := range buttons {
-		el := n.doc.QuerySelector(b.id)
-		if el == nil {
-			continue
-		}
-		run := b.run
-		el.OnClick(func(*engine.MouseEvent) { run() })
+}
+
+// editorEl 返回编辑区的底层元素。
+//
+// 焦点、光标位置、几何这几件事引擎只认元素，不认控件视图；值与可用态请
+// 直接用 n.editor 的 Value/SetValue。
+func (n *notepad) editorEl() engine.HTMLElement {
+	if n.editor == nil {
+		return nil
 	}
+	return n.editor.Element()
 }
 
 // handleKey 把应用快捷键接到 ui.Shell。
@@ -199,7 +203,7 @@ func (n *notepad) bindFindBar() {
 // 查找/替换输入框聚焦时，Ctrl+C/V/X/A/Z 这类编辑快捷键应该留给输入框
 // 自己，只放行保存/打开/查找/退出这类全局命令；否则会去操作背后的编辑区。
 func (n *notepad) handleKey(key int, mods uint16) bool {
-	if focus := engine.FocusedElement(n.doc); focus != nil && focus != n.editor && !isGlobalShortcut(key, mods) {
+	if focus := engine.FocusedElement(n.doc); focus != nil && focus != n.editorEl() && !isGlobalShortcut(key, mods) {
 		return false
 	}
 	return n.shell != nil && n.shell.HandleKey(key, mods)
@@ -264,33 +268,32 @@ func (n *notepad) syncLayout() {
 	}
 	n.lastW, n.lastH = w, h
 
-	// 查找替换栏展开时把编辑区往下挤一行；状态栏隐藏时编辑区多占一行。
-	// 菜单/工具栏/状态栏的高度来自 ui 主题，和 ui.Install 插入的占位块一致。
+	// 查找替换栏展开时把编辑区往下挤一条栏高；状态栏隐藏时编辑区多占一行。
+	// 菜单/工具栏/状态栏/控件条的高度都来自 ui 主题，和 ui.Install 插入的
+	// 占位块一致——栏的可见性与定位分开写：SetInline 声明贴在哪儿，
+	// SetVisible 只在其上补 display，两者不会互相冲掉。
 	barTop := n.theme.MenuHeight + n.theme.ToolHeight
 	editorTop := barTop
 	if n.findOpen {
-		editorTop += findH
+		editorTop += n.theme.BarHeight
+	}
+	if n.findBar != nil {
+		n.findBar.SetInline(fmt.Sprintf("position:absolute;left:0;top:%dpx", barTop))
+		n.findBar.SetVisible(n.findOpen)
 	}
 	barH := n.theme.StatusHeight
 	if !n.showStatus {
 		barH = 0
 	}
-	if n.findBar != nil {
-		display := "none"
-		if n.findOpen {
-			display = "block"
-		}
-		n.findBar.SetAttribute("style", fmt.Sprintf("top:%dpx;display:%s", barTop, display))
-	}
 	eh := h - editorTop - barH
 	if eh < 40 {
 		eh = 40
 	}
-	family := "Consolas, 'Courier New', monospace"
+	family := monoFont
 	if !n.mono {
-		family = "'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif"
+		family = n.theme.Font
 	}
-	n.editor.SetAttribute("style", fmt.Sprintf(
+	n.editorEl().SetAttribute("style", fmt.Sprintf(
 		"position:absolute;left:0;top:%dpx;width:%dpx;height:%dpx;font-size:%dpx;font-family:%s;",
 		editorTop, w, eh, n.font, family))
 }
@@ -300,7 +303,7 @@ func (n *notepad) editorValue() string {
 	if n.editor == nil {
 		return ""
 	}
-	return n.editor.GetAttribute("value")
+	return n.editor.Value()
 }
 
 // updateStatus 刷新状态栏：文件名（带未保存标记）、光标位置、字符数。
@@ -316,7 +319,7 @@ func (n *notepad) updateStatus() {
 		name += " *"
 	}
 	pos := ""
-	if line, col, ok := engine.CaretPosition(n.editor); ok {
+	if line, col, ok := engine.CaretPosition(n.editorEl()); ok {
 		pos = fmt.Sprintf("行 %d，列 %d", line, col)
 	}
 	if n.shell != nil {
@@ -371,12 +374,12 @@ func (n *notepad) focusEditor() {
 	if n.editor == nil {
 		return
 	}
-	engine.SetFocusedElement(n.doc, n.editor)
+	engine.SetFocusedElement(n.doc, n.editorEl())
 }
 
 // newFile 清空编辑区。
 func (n *notepad) newFile() {
-	engine.SetValue(n.editor, "")
+	n.editor.SetValue("")
 	n.undo = nil
 	n.redo = nil
 	n.path = ""
@@ -490,7 +493,7 @@ func (n *notepad) loadFile(path string) {
 		n.message("打开失败：" + err.Error())
 		return
 	}
-	engine.SetValue(n.editor, string(data))
+	n.editor.SetValue(string(data))
 	n.undo = nil
 	n.redo = nil
 	n.path = path
@@ -559,7 +562,7 @@ func (n *notepad) undoEdit() {
 	n.undo = n.undo[:len(n.undo)-1]
 	n.redo = append(n.redo, n.cur) // 当前内容进重做栈，重做时再弹回来
 	n.applying = true
-	engine.SetValue(n.editor, prev)
+	n.editor.SetValue(prev)
 	n.applying = false
 	if n.shell != nil {
 		n.shell.Refresh()
