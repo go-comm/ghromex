@@ -34,18 +34,15 @@
 ## 快速开始
 
 示例按目录存放在 `examples/` 下。每个目录都是一个**可独立运行**的小程序
-（`main.go` + `index.html`，页面用 `go:embed` 打进二进制，从任意工作目录
-运行都不依赖当前路径）：
+（页面可能是内嵌 HTML、HTML 资产或由 Go 构造，从任意工作目录运行都不
+依赖当前路径）：
 
 | 目录 | 运行 | 内容 |
 | --- | --- | --- |
-| `examples/login` | `go run ./examples/login` | 登录页：登录/重置按钮交互、状态文本更新 |
-| `examples/form` | `go run ./examples/form` | 常规表单（员工登记表）：定位/层叠/盒模型/可输入控件 |
 | `examples/ua` | `go run ./examples/ua` | 原生 UA 表单 + 常用标签：零作者 CSS，可与 Chrome/Edge 直接对照 |
-| `examples/scroll` | `go run ./examples/scroll` | 滚动/裁剪：文档级滚动、overflow 容器、textarea 滚轮、`OnWheel` 回显 |
 | `examples/browser` | `go run ./examples/browser` | 迷你本地浏览器：顶部常驻地址栏与后退/前进/刷新/首页按钮、底部常驻状态栏（页标题 + 说明，换页后仍在），地址栏可打开本地路径（相对路径/`file://`），支持 `about:home`/`about:back`/`about:forward`，外部链接与缺失文件显示提示页；需在仓库内运行 |
 | `examples/portal` | `go run ./examples/portal` | 购物门户：fixed 工具条/品牌头/导航、层叠上下文、分类栏、秒杀与商品网格、搜索提示和购物车计数交互 |
-| `examples/notepad` | `go run ./examples/notepad` | 仿 Windows 记事本：真菜单（文件/编辑/格式/视图/帮助，点标签弹出浮层菜单）、工具栏（新建/打开/保存/另存为/撤销/重做）、原生「打开/另存为/选择文件夹」对话框、查找替换栏、铺满窗口的多行编辑区、状态栏（文件名/行列/字符数）；`-file` 启动时打开文件 |
+| `examples/notepad` | `go run ./examples/notepad` | 仿 Windows 记事本：页面由 Go 构造 DOM，无 `index.html`；`ui` 菜单（菜单项带图标）/纯图标工具栏/状态栏（文件/编辑/格式/视图/帮助，新建/打开/保存/另存为/撤销/重做）、原生「打开/另存为/选择文件夹」对话框、查找替换栏、铺满窗口的多行编辑区、状态栏（文件名/行列/字符数）；`-file` 启动时打开文件 |
 | `examples/snip` | `go run ./examples/snip` | 截图工具：冻结主屏拖选，松开后同一窗口原地缩成置顶无边框的悬浮预览（图片区即选区大小），拖动图片移动窗口，Ctrl+S 保存 PNG，Esc/关闭退出；`-delay` 留时间整理窗口 |
 
 每个示例都支持同一组调试参数：
@@ -61,9 +58,9 @@ go run ./examples/ua -dump-svg out.svg  # 无头导出 SVG（不需要显示器�
 go run ./examples/snip -source examples/kit/screenshot.png -shot-overlay overlay.png -shot-preview preview.png
 ```
 
-窗口交互示例：`examples/login` 中的登录/重置按钮通过 `OnClick` 更新状态文本，引擎检测到文档变化后自动重排重绘；`examples/form` 覆盖 11 项布局特性（负 inset 角标、fixed 底条、水印、包含块链锚定、z-index 层序、box-sizing 跨内核一致等），可点击输入框直接键入文字；`examples/scroll` 演示滚轮滚动（文档级长页、overflow 容器横/纵滚动、overflow:hidden 裁剪、textarea 滚轮、`OnWheel` 事件位移回显）；`examples/browser` 用 `SetOnNavigate` 接管链接点击：读取目标 HTML 并在同一窗口重新 `OpenDocument`，每次换页后把 `position:fixed` 的地址栏、导航按钮与底部状态栏重新注入文档（引擎没有独立的窗口 chrome 层；让位用插在页面内容之前的占位块，既不改页面自己的 padding，也不动 body 的 margin——后者会让固定工具条掉出 body 的命中区），浏览历史支持后退/前进/刷新/首页（没有可后退的页面时按钮置灰），地址栏里按回车直接打开当前输入的地址，未知协议与读取失败会生成带返回链接的提示页；`examples/portal` 用固定顶栏 + 绝对定位侧栏组成购物门户，搜索框聚焦后显示热门提示，所有「加入购物车」按钮共享一个计数徽标。
+交互示例：`examples/browser` 用 `SetOnNavigate` 接管链接点击：读取目标 HTML 并在同一窗口重新 `OpenDocument`，每次换页后把 `position:fixed` 的地址栏、导航按钮与底部状态栏重新注入文档（引擎没有独立的窗口 chrome 层；让位用插在页面内容之前的占位块，既不改页面自己的 padding，也不动 body 的 margin——后者会让固定工具条掉出 body 的命中区），浏览历史支持后退/前进/刷新/首页（没有可后退的页面时按钮置灰），地址栏里按回车直接打开当前输入的地址，未知协议与读取失败会生成带返回链接的提示页；`examples/portal` 用固定顶栏 + 绝对定位侧栏组成购物门户，搜索框聚焦后显示热门提示，所有「加入购物车」按钮共享一个计数徽标。
 
-`examples/notepad` 是最"应用"的一个：它把引擎当桌面 UI 框架用——菜单用「菜单栏标签 + 绝对定位的浮层面板」实现（引擎没有通用弹层；浮层要放在 body 最后，命中测试按 DOM 顺序后者胜出，排前面会被同名按钮截胡），编辑区几何由程序按窗口尺寸算出（CSS 没有 `calc`），撤销/重做栈由应用层在变更回调里维护（引擎不内置撤销），文件读写与剪贴板走平台能力（`runtime/dialog` 的原生文件对话框 / `runtime/clipboard` 的系统剪贴板）。
+`examples/notepad` 是最"应用"的一个：菜单、工具栏、快捷键和状态栏交给 `ui`（`ui.Install` 生成外壳，`ui.Spec` 声明命令），示例只保留记事本自己的部分——编辑区几何由程序按窗口尺寸算出（CSS 没有 `calc`，固定栏高度取 `ui.Theme`），查找替换栏与撤销/重做栈由应用层维护（引擎不内置撤销），文件读写与剪贴板走平台能力（`runtime/dialog` 的原生文件对话框 / `runtime/clipboard` 的系统剪贴板）。`ui.Shell.SetStatusVisible` 支撑「视图 → 显示状态栏」，快捷键由 `Shell.HandleKey` 接到窗口。
 
 ## 代码示例
 
@@ -175,7 +172,11 @@ Win32 COM 调用，无 CGO），消息框走 user32 的 `MessageBoxW`（不需�
 ```go
 spec := ui.Spec{
 	Title: "我的应用", Width: 900, Height: 700,
-	Status: "就绪", StatusRight: "Ctrl+S 保存",
+	StatusSegments: []ui.StatusSegment{
+		{Key: "file", Text: "就绪", Width: 220},
+		{Key: "pos", Text: "行 1，列 1", Width: 140},
+	},
+	StatusRight: "Ctrl+S 保存",
 	Menus: []ui.Menu{{Title: "文件", Items: []ui.Action{
 		ui.Item("保存", "Ctrl+S", save).WithIcon("save").When(editor.Dirty),
 		ui.Sep(),
@@ -199,6 +200,20 @@ if _, err := app.LoadHTML(page); err != nil {
 return app.Run()
 ```
 
+状态栏左侧可以分段：`StatusSegment.Width` 固定列宽（0 为按内容自适应），
+`Align` 控制段内对齐，`Hidden` 可临时隐藏；段与段之间自动生成 1px 分隔线。
+高频更新只改文字，不重建 DOM：
+
+```go
+sh.SetStatusSegment("file", "README.md *")
+sh.SetStatusSegment("pos", "行 12，列 4")
+sh.SetStatusSegment("chars", "1,024 个字符")
+```
+
+右侧消息独立更新（`SetStatusRight`），非空时按 `Theme.StatusRightWidth`
+预留宽度；旧写法 `Spec.Status` / `SetStatus` 仍可用，等价于一个
+`Key: "status"` 的段。
+
 内置浅色与深色两套主题，`Spec.Theme` 留空时用浅色；换深色只需：
 
 ```go
@@ -209,27 +224,63 @@ spec.Theme = &dark
 页面内容只写类名，样式全部来自注入的主题样式表：
 
 ```html
-<div class="ui-page">
-	<span class="ui-badge">新</span>
-	<div class="ui-title">文件管理器</div>
-	<div class="ui-subtitle">一行说明</div>
-	<div class="ui-card">
-		<div class="ui-h2">快捷操作</div>
-		<div class="ui-text">正文</div>
-		<span class="ui-label">名称</span>
-		<input class="ui-input" type="text">
-		<div class="ui-actions">
-			<div class="ui-btn is-primary">保存</div>
-			<div class="ui-btn">预览</div>
+<div class="system-ui-page">
+	<span class="system-ui-badge">新</span>
+	<div class="system-ui-title">文件管理器</div>
+	<div class="system-ui-subtitle">一行说明</div>
+	<div class="system-ui-card">
+		<div class="system-ui-h2">快捷操作</div>
+		<div class="system-ui-text">正文</div>
+		<span class="system-ui-label">名称</span>
+		<input class="system-ui-input" type="text">
+		<div class="system-ui-actions">
+			<div class="system-ui-btn is-primary">保存</div>
+			<div class="system-ui-btn">预览</div>
 		</div>
 	</div>
 </div>
 ```
 
-可用组件类：`ui-page`/`ui-title`/`ui-subtitle`/`ui-badge`/`ui-alert`/`ui-card`/
-`ui-h2`/`ui-text`/`ui-label`/`ui-input`/`ui-btn`/`ui-actions`/`ui-list`/`ui-muted`。
+控件也可以由 Go 侧构造，省去类名和取值/禁用态的样板；返回的 `*XxxView`
+都实现了 `Element()`，可以放进任意页面容器：
 
-主题内置六组语义色，按钮、徽标、提示条用 `is-*` 后缀，文字色用 `ui-text-*`：
+```go
+name := ui.NewTextInput(doc, "未命名.txt")
+field := ui.NewField(doc, "文件名称", name)
+field.SetHint("最多 255 个字符")
+page.AppendChild(field.Element())
+
+auto := ui.NewCheckbox(doc, "保存时自动备份", true)
+auto.OnChange(func(on bool) { /* ... */ })
+page.AppendChild(auto.Element())
+
+enc := ui.NewSelect(doc, []ui.SelectOption{
+	{Value: "utf-8", Label: "UTF-8"},
+	{Value: "gbk", Label: "GBK"},
+})
+enc.OnChange(func(value string) { /* ... */ })
+page.AppendChild(enc.Element())
+
+preview := ui.NewTextView(doc, "只读多行文本；换行会保留。")
+page.AppendChild(preview.Element())
+```
+
+`ui.NewButton` 是内容区按钮（底层 `<button type="button">`），与工具栏的
+`ui.Button`（构造 `Action`）区分。`TextInput`/`TextArea` 目前没有实时的
+`input`/`change` 事件，实时联动请用 `OnKeyDown`，或在命令执行时读取
+`Value`。`TextView` 是只读多行视图，`TextAreaView` 才是可编辑输入。
+
+可用组件类：`system-ui-page`/`system-ui-title`/`system-ui-subtitle`/`system-ui-badge`/`system-ui-alert`/`system-ui-card`/
+`system-ui-h2`/`system-ui-text`/`system-ui-label`/`system-ui-input`/`system-ui-select`/`system-ui-textarea`/
+`system-ui-textview`/`system-ui-check`/`system-ui-field`/`system-ui-field-hint`/`system-ui-field-error`/
+`system-ui-btn`/`system-ui-actions`/`system-ui-list`/`system-ui-muted`。
+
+所有组件类都带 `system-ui-` 前缀，并且只在 `Install` 加到 `<html>` 上的
+`system-ui` 根作用域下生效；根作用域把组件规则的特异度抬高一档，第三方
+`.panel div` 之类的后代选择器压不过。前缀本身不保证唯一，避免重名仍以
+根作用域为主。
+
+主题内置六组语义色，按钮、徽标、提示条用 `is-*` 后缀，文字色用 `system-ui-text-*`：
 
 | 语义 | 后缀 | 浅色实底 / On | 深色实底 / On | 用途 |
 | --- | --- | --- | --- | --- |
@@ -241,13 +292,13 @@ spec.Theme = &dark
 | 信息 Info | `is-info` | `#0E7490` / `#FFFFFF` | `#22D3EE` / `#083344` | 说明、辅助 |
 
 ```html
-<div class="ui-actions">
-	<div class="ui-btn is-success">通过</div>
-	<div class="ui-btn is-danger">删除</div>
+<div class="system-ui-actions">
+	<div class="system-ui-btn is-success">通过</div>
+	<div class="system-ui-btn is-danger">删除</div>
 </div>
-<span class="ui-badge is-warning">待处理</span>
-<div class="ui-alert is-info">共 12 项，已全部同步。</div>
-<span class="ui-text-danger">保存失败</span>
+<span class="system-ui-badge is-warning">待处理</span>
+<div class="system-ui-alert is-info">共 12 项，已全部同步。</div>
+<span class="system-ui-text-danger">保存失败</span>
 ```
 
 按钮用实底/`On*`；徽标与提示条用 `*Soft` 淡底、`*Border` 描边和 `*Text`
@@ -302,6 +353,14 @@ spec.Theme = &dark
 别名：`arrow-up`/`arrow-down`/`arrow-left`/`arrow-right`、`open-file`、`trash`、
 `reload`、`printer`、`plus`、`minus`。
 
+想看全部图标和实际字形，运行 `go run ./examples/iconsheet`；启动后可用工具栏
+「切换主题」或「视图」菜单在浅色/深色之间切换，`-dark` 可直接以深色启动。
+图标来自 `ui.Icons()`。顶部搜索框按名称实时过滤（多个关键词用空格分开），
+也可以用 `-search align` 启动时预填；单击卡片会把名称复制到剪贴板。
+
+![图标表](examples/iconsheet/screenshot.png)
+![按名称搜索 align](examples/iconsheet/screenshot-search.png)
+
 限制：`ui` 不接管原生窗口菜单；菜单只支持鼠标操作（`Esc` 收起，没有方向键/
 回车导航）；页面里 `z-index` 高于外壳（1100）的元素会盖住菜单栏；窗口很窄时
 靠右的菜单浮层可能超出右边缘（浮层左对齐菜单标签，不做翻转）；内置主题只有
@@ -313,6 +372,8 @@ spec.Theme = &dark
 go run ./examples/kit
 go run ./examples/kit -dark
 go run ./examples/kit -shot kit.png -shot-menu 文件
+go run ./examples/iconsheet
+go run ./examples/iconsheet -dark
 ```
 
 ## 项目结构
@@ -358,16 +419,14 @@ backend/clipboard/   剪贴板的平台实现（复用 SDL2 的剪贴板接口�
 ui/                应用外壳组件库（在 browser 之上）：菜单栏/工具栏/状态栏、
                    下拉浮层、快捷键分发、主题令牌与页面组件样式；
                    `ui.App` 把「建窗 + 装外壳 + 换页重装」封装成十来行
-examples/          可独立运行的示例（每个目录 main.go + index.html）：
-  login/             登录页（按钮交互、状态文本）
-  form/              常规表单（员工登记表：布局特性 + 可输入控件）
+examples/          可独立运行的示例（页面源码可能是内嵌 HTML、HTML 资产或由 Go 构造）：
   ua/                原生 UA 表单 + 常用标签（零作者 CSS，与 Chrome 对照）
-  scroll/            滚动/裁剪（文档级滚动、overflow、textarea、wheel 事件）
   kit/               组件库演示（菜单/工具栏/状态栏 + 卡片式页面，零作者 CSS）
+  iconsheet/         内置图标表（全部名称/字形/码位，单击复制名称）
   browser/           迷你本地浏览器（常驻工具条 + 状态栏、历史/刷新、链接导航、错误提示页、
                      外部样式表加载：examples/browser/assets.go）
   portal/            购物门户（fixed 顶栏、层叠上下文、商品网格、秒杀、购物车交互）
-  notepad/           仿 Windows 记事本（菜单栏+浮层菜单/工具栏/查找替换栏/
+  notepad/           仿 Windows 记事本（page.go 构造 DOM、菜单栏+浮层菜单/工具栏/查找替换栏/
                      编辑区/状态栏、文件读写、撤销重做栈、剪贴板）
 libs/              SDL2 运行库（SDL2.dll / SDL2_ttf.dll / zlib1.dll，见 libs/README.md）
 ```
@@ -727,7 +786,7 @@ go test ./...
 
 - `engine` 包测试全为纯 Go（FakeGraphics / BufferGraphics / SVG 断言），无显示器即可跑
 - `backend/sdl2` 的事件解码回归测试不加载 DLL；事件字段偏移以真实 SDL 产生的事件实测为准（见 `decodeEvent` 注释）
-- 示例退出约定：`go run ./examples/login -exit-after 3s` 可用于冒烟验证
+- 示例退出约定：`go run ./examples/ua -exit-after 3s` 可用于冒烟验证
 - 灰度文字保真度探针：`go test ./backend/sdl2 -run TestGrayscalePipelineFidelity`（默认 dummy 驱动软件渲染器，
   `GHROMEX_REAL=1` 走真机 GPU）——同源直出面与落屏截图逐像素比对，供回归「灰度管线忠实」结论
 - 文字锐度/字体对比条：`GHROMEX_CMP=1 go test ./backend/sdl2 -run 'TestFontCompareStrip|TestHintingValueScan'`

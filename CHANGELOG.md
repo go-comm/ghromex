@@ -3,6 +3,38 @@
 版本号即 git tag（Go module 语义：`v0.2.0` 可从
 `github.com/go-comm/ghromex@v0.2.0` 直接取用）。
 
+## 未发布
+
+- **ui**：组件类名由 `ui-*` 统一改为 `system-ui-*`，样式自动挂到
+  `html.system-ui` 根作用域下；升级时页面里的旧类名需要同步替换。
+- **ui**：新增 `App.SetTheme` / `Shell.SetTheme`，可在运行时切换主题，
+  不用重建菜单、工具栏或页面。
+- **ui**：新增 `Shell.SetStatusVisible`；菜单栏改在工具栏/状态栏之后插入，
+  修复菜单浮层与工具栏重叠时点击被工具栏截胡的问题。
+- **ui**：状态栏支持左侧分段（`StatusSegment` / `Spec.StatusSegments` /
+  `SetStatusSegment`），固定或自适应宽度、段内对齐、隐藏与自动分隔线；
+  右侧消息独立更新并按 `Theme.StatusRightWidth` 预留宽度。`Spec.Status` /
+  `SetStatus` 保留为单段兼容写法。
+- **ui**：新增页面控件 `NewLabel` / `NewTextView` / `NewButton` /
+  `NewCheckbox` / `NewSelect` / `NewTextInput` / `NewTextArea` / `NewField`，
+  统一处理类名、取值/设值、禁用态与事件适配；`NewButton` 与工具栏的
+  `ui.Button` 区分，后者仍构造 `Action`。
+- **engine**：新增 `RemoveAttribute`，用于真正移除 `disabled` 等布尔属性
+  （只把值改成空串仍然表示属性存在）。
+- **examples/kit**：新增「基础控件」卡片，演示 Go 侧构造表单控件。
+- **examples/notepad**：状态栏改为文件名/行列/字符数三段独立更新。
+- **examples/iconsheet**：工具栏「切换主题」与「视图」菜单支持浅色/深色
+  实时切换。
+- **examples/notepad**：菜单、工具栏、快捷键和状态栏改用 `ui` 生成，
+  删除自绘菜单/按钮/状态栏；编辑、查找替换、撤销和文件逻辑保持不变。
+- **examples/notepad**：页面不再依赖 HTML：删除 `index.html` 与 `go:embed`，
+  查找栏和编辑区改由 `page.go` 用 DOM API 构造（`CreateElement` +
+  `AddStylesheetText`）。
+- **examples/notepad**：全部命令配图标——菜单项显示图标列，工具栏退化为
+  纯图标按钮。
+- **examples**：删除 `examples/form`、`examples/login`、`examples/scroll`；
+  对应的滚轮回归测试改用内联长页夹具，不再依赖示例文件。
+
 ## v0.2.0 — 2026-10-22
 
 仓库首个正式版本。
