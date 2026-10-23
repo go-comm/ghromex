@@ -55,3 +55,40 @@ func TestDisplayNoneElementNotHit(t *testing.T) {
 		t.Fatalf("命中 = %v, want 前一个 div", hit)
 	}
 }
+
+// display:none 的元素矩形要彻底空掉。
+//
+// GetBoundingClientRect 返回的是边框盒（内容盒 + padding + border），布局期
+// 解析出的边长另有缓存；只清内容盒而留着边长，隐藏后的元素仍会报出一个
+// padding 撑出来的空壳尺寸（记事本的查找栏就是这样：明明 display:none，
+// 矩形还有 16x15），应用层按矩形判断「有没有占地方」就读到假数据。
+func TestDisplayNonePaddedBoxReportsEmptyRect(t *testing.T) {
+	vp := engine.NewHeadlessViewport(400, 300)
+	doc, err := engine.OpenDocument(vp, `<!doctype html><html><head><style>
+		body { margin: 0; height: 300px; }
+	</style></head><body>
+		<div id="pad" style="position:absolute;left:20px;top:30px;width:0px;height:1px;
+			padding:7px 8px;border:1px solid #333333"></div>
+	</body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pad := doc.QuerySelector("#pad")
+	if pad == nil {
+		t.Fatal("元素缺失")
+	}
+	doc.Refresh()
+
+	// 可见时：边框盒把 padding 与 border 都算进来。
+	r := pad.GetBoundingClientRect()
+	if w, h := r.Right().Pixel()-r.Left().Pixel(), r.Bottom().Pixel()-r.Top().Pixel(); w != 18 || h != 17 {
+		t.Fatalf("可见时边框盒 = %dx%d, want 18x17（内容 0x1 + padding 8+8/7+7 + border 1x4）", w, h)
+	}
+
+	pad.SetAttribute("style", "position:absolute;left:20px;top:30px;display:none")
+	doc.Refresh()
+	r = pad.GetBoundingClientRect()
+	if w, h := r.Right().Pixel()-r.Left().Pixel(), r.Bottom().Pixel()-r.Top().Pixel(); w != 0 || h != 0 {
+		t.Fatalf("隐藏后边框盒 = %dx%d, want 0x0", w, h)
+	}
+}

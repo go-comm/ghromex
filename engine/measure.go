@@ -562,6 +562,12 @@ func hideBox(el *htmlElement) {
 	el.setHeight(0)
 	el.layoutH = 0
 	el.contentW, el.contentH = 0, 0
+	// 边长缓存也得一起清：GetBoundingClientRect 返回的是边框盒（内容盒 +
+	// padding + border），留着上一次布局解析出的边长，隐藏后的元素仍会报出
+	// 一个 16x15 之类的空壳盒——应用层按矩形判断「有没有占地方」时会读到假
+	// 尺寸。置零并把 hasRsv 留 true，否则 resolvedEdges 会拿 computed 现算，
+	// 又把那圈 padding/border 加回来。元素重新可见时布局会重解析这组值。
+	el.rsvPD, el.rsvBD, el.hasRsv = edges{}, edges{}, true
 }
 
 // ---------------------------------------------------------------------------
