@@ -230,6 +230,23 @@ func (element *htmlElement) SetAttribute(key string, value string) {
 	element.onChanged()
 }
 
+func (element *htmlElement) RemoveAttribute(key string) {
+	if element.attrs == nil {
+		return
+	}
+	if _, ok := element.attrs[key]; !ok {
+		return
+	}
+	delete(element.attrs, key)
+	switch key {
+	case "id":
+		element.id = ""
+	case "style":
+		element.inline = nil
+	}
+	element.onChanged()
+}
+
 func (element *htmlElement) GetAttribute(key string) string {
 	return element.attrs[key]
 }
