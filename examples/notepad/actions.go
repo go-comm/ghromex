@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-comm/ghromex/engine"
 )
@@ -162,7 +163,10 @@ func (n *notepad) caretOffset() int {
 	return offsetOfLineCol(n.cur, line, col)
 }
 
-// offsetOfLineCol 把（行，列）换算成文本里的 rune 下标。
+// offsetOfLineCol 把（行，列）换算成文本里的字节下标。
+//
+// 行列按 rune 计（与 engine.CaretPosition 同口径：一个汉字算一列），而
+// 查找替换用的是 string 的字节下标，所以这里得先把列换算成字节。
 func offsetOfLineCol(text string, line, col int) int {
 	if line < 1 {
 		line = 1
@@ -170,32 +174,34 @@ func offsetOfLineCol(text string, line, col int) int {
 	if col < 1 {
 		col = 1
 	}
-	offset := 0
-	cur := 1
-	for cur < line {
-		i := strings.IndexByte(text[offset:], '\n')
+	start := 0 // 第 line 行行首的字节下标
+	for cur := 1; cur < line; cur++ {
+		i := strings.IndexByte(text[start:], '\n')
 		if i < 0 {
-			return len([]rune(text))
+			return len(text)
 		}
-		offset += i + 1
-		cur++
+		start += i + 1
 	}
-	rest := []rune(text[offset:])
+	rest := []rune(text[start:])
 	if col-1 > len(rest) {
 		col = len(rest) + 1
 	}
-	return offset + len(rest[:col-1])
+	return start + len(string(rest[:col-1]))
 }
 
-// offsetToLineCol 把 rune 下标换算成（行，列），供状态栏显示。
+// offsetToLineCol 把字节下标换算成（行，列），供状态栏显示。
+//
+// 行列按 rune 计，一个汉字算一列（与 engine.CaretPosition 一致），所以逐字
+// 解码而不是逐字节走：按字节数会在中文文本上报出错位的行列。
 func offsetToLineCol(text string, offset int) (int, int) {
-	runes := []rune(text)
-	if offset > len(runes) {
-		offset = len(runes)
+	if offset > len(text) {
+		offset = len(text)
 	}
 	line, col := 1, 1
-	for i := 0; i < offset; i++ {
-		if runes[i] == '\n' {
+	for i := 0; i < offset; {
+		r, size := utf8.DecodeRuneInString(text[i:])
+		i += size
+		if r == '\n' {
 			line++
 			col = 1
 			continue

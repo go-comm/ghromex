@@ -494,6 +494,54 @@ func TestFormatZoomChangesFontSize(t *testing.T) {
 	}
 }
 
+// 行列 ↔ 字节下标要互相对得上：引擎的行列按 rune 计（一个汉字算一列），
+// 查找用的却是字节下标，两边混用会让中文文本找错位置、状态栏报错行列。
+func TestLineColOffsetRoundTrip(t *testing.T) {
+	const text = "一二三四五\nghromex 你好世界 abc\n最后"
+	for _, tc := range []struct {
+		desc      string
+		line, col int
+		byteIdx   int
+	}{
+		{"首行行首", 1, 1, 0},
+		{"首行第 4 列", 1, 4, len("一二三")},
+		{"次行行首", 2, 1, len("一二三四五\n")},
+		{"次行的「你」", 2, 9, len("一二三四五\nghromex ")},
+		{"末行行首", 3, 1, len("一二三四五\nghromex 你好世界 abc\n")},
+		{"文本末尾（末行第 3 列）", 3, 3, len(text)},
+	} {
+		if got := offsetOfLineCol(text, tc.line, tc.col); got != tc.byteIdx {
+			t.Errorf("%s：offsetOfLineCol(%d,%d) = %d, want %d",
+				tc.desc, tc.line, tc.col, got, tc.byteIdx)
+		}
+		if line, col := offsetToLineCol(text, tc.byteIdx); line != tc.line || col != tc.col {
+			t.Errorf("%s：offsetToLineCol(%d) = %d,%d, want %d,%d",
+				tc.desc, tc.byteIdx, line, col, tc.line, tc.col)
+		}
+	}
+}
+
+// 中文文本里查找替换：位置按字节报出、行列按 rune 计，两边都得对。
+func TestFindAndReplaceInChineseText(t *testing.T) {
+	np := newTestNotepad(t)
+	np.editor.SetValue("一二三四五\nghromex 你好世界 abc")
+
+	np.findIn.SetValue("你好")
+	np.findNext()
+	if want := len("一二三四五\nghromex "); np.matchAt != want {
+		t.Fatalf("匹配位置 = %d, want %d（字节下标）", np.matchAt, want)
+	}
+	if msg := statusRight(np); !strings.Contains(msg, "行 2，列 9") {
+		t.Fatalf("状态栏提示 = %q, want 含「行 2，列 9」", msg)
+	}
+
+	np.replaceIn.SetValue("HI")
+	np.replaceCurrent()
+	if got, want := np.editor.Value(), "一二三四五\nghromex HI世界 abc"; got != want {
+		t.Fatalf("替换中文后 = %q, want %q", got, want)
+	}
+}
+
 // 查找/替换：查找报出位置，替换改文本，全部替换改所有匹配。
 func TestFindAndReplace(t *testing.T) {
 	np := newTestNotepad(t)

@@ -51,6 +51,9 @@
   取 `ui.Theme` 令牌，不再逐控件写绝对坐标与颜色。
 - **examples/notepad**：全部命令配图标——菜单项显示图标列，工具栏退化为
   纯图标按钮。
+- **examples/notepad**：查找替换的行列换算按 rune 计列（与
+  `engine.CaretPosition` 同口径）：此前字节下标与 rune 列数混加，中文文本里
+  状态栏报错列、替换位置也跟着偏。
 - **examples**：删除 `examples/form`、`examples/login`、`examples/scroll`；
   对应的滚轮回归测试改用内联长页夹具，不再依赖示例文件。
 
