@@ -26,10 +26,23 @@ func toolClass(a Action) string {
 	return class
 }
 
+// toolTip 组合按钮的悬停提示文案：标签加快捷键（"保存  Ctrl+S"，浏览器
+// 工具栏同款）——图标按钮丢掉的文字在这里还给用户。
+func toolTip(a Action) string {
+	switch {
+	case a.Label == "":
+		return a.Shortcut
+	case a.Shortcut == "":
+		return a.Label
+	}
+	return a.Label + "  " + a.Shortcut
+}
+
 // buildToolbar 生成工具栏。
 //
-// 图标按钮只画图标（文字留在 Action.Label 里，给无图标兜底与读屏/文档用）。
-// 横向排列靠 inline-block（引擎没有 flex）；分组用 1px 的竖线。
+// 图标按钮只画图标，文字进原生 title 提示（悬停气泡由引擎绘制）；没有
+// 图标时退回文字按钮。横向排列靠 inline-block（引擎没有 flex）；分组用
+// 1px 的竖线。
 func (s *Shell) buildToolbar() {
 	s.toolbar = newEl(s.doc, "div", "system-ui-toolbar", "")
 	for _, a := range s.spec.Tools {
@@ -38,6 +51,11 @@ func (s *Shell) buildToolbar() {
 			continue
 		}
 		tv := &toolView{act: a, el: newEl(s.doc, "div", toolClass(a), "")}
+		if tip := toolTip(a); tip != "" {
+			// 悬停提示走原生 title 属性：引擎的提示气泡负责显示
+			// （图标按钮的文字只在提示里出现）。
+			tv.el.SetAttribute("title", tip)
+		}
 		if ic := newIcon(s.doc, a.Icon); ic != nil {
 			tv.el.AppendChild(ic)
 		} else {

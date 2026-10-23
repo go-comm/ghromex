@@ -474,6 +474,29 @@ func TestToolbarIcons(t *testing.T) {
 	}
 }
 
+// 工具栏按钮带原生 title 提示（标签 + 快捷键），悬停气泡由引擎绘制——
+// 图标按钮丢掉的文字靠它还给用户。
+func TestToolbarTitleTips(t *testing.T) {
+	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
+	Install(doc, Spec{Tools: []Action{
+		Item("保存", "Ctrl+S", nil).WithIcon("save"),
+		Item("重命名", "F2", nil),      // 纯快捷键也有提示
+		Button("无快捷键", nil),         // 只有标签
+		{Label: "", Shortcut: "F1"}, // 只有快捷键
+	}})
+
+	tools := doc.QuerySelectorAll(".system-ui-tool")
+	if len(tools) != 4 {
+		t.Fatalf("工具按钮数 = %d，期望 4", len(tools))
+	}
+	want := []string{"保存  Ctrl+S", "重命名  F2", "无快捷键", "F1"}
+	for i, w := range want {
+		if got := tools[i].GetAttribute("title"); got != w {
+			t.Errorf("按钮 %d 的提示 = %q，期望 %q", i, got, w)
+		}
+	}
+}
+
 // 菜单：任意一项有图标就整张菜单预留图标列，浮层相应加宽。
 func TestMenuIcons(t *testing.T) {
 	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)

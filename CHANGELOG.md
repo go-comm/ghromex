@@ -5,6 +5,13 @@
 
 ## 未发布
 
+- **engine**：新增原生 `title` 提示气泡：鼠标停在带非空 `title` 的元素（含
+  其子孙）上超过 600ms，在鼠标右下弹出系统气泡（深底浅字、豁免裁剪、画在
+  最顶层），离开/按下/点击/实际滚动收起，换目标重新计时。每帧推进挂在
+  `TickTooltip`（与 `TickScroll` 并排），弹出与收起只重绘、不重排；
+  `TooltipText` / `TooltipPending` 供外部读取状态。
+- **ui**：工具栏按钮自动带上 `title` 提示（`Label` + `Shortcut` 组合），
+  图标按钮悬停即可看到命令文字；页面元素要提示直接写 `title` 属性即可。
 - **ui**：组件类名由 `ui-*` 统一改为 `system-ui-*`，样式自动挂到
   `html.system-ui` 根作用域下；升级时页面里的旧类名需要同步替换。
 - **ui**：新增 `App.SetTheme` / `Shell.SetTheme`，可在运行时切换主题，
