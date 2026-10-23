@@ -31,17 +31,9 @@ func TestStrokeRoundedRectMatchesPixelPath(t *testing.T) {
 		li, rt, tp, bt := maxZero(cs.bd[eLeft]), maxZero(cs.bd[eRight]),
 			maxZero(cs.bd[eTop]), maxZero(cs.bd[eBottom])
 		iw, ih := cs.bw-li-rt, cs.bh-tp-bt
-		ir := cs.r - minInt(minInt(minInt(li, rt), tp), bt)
-		if ir < 0 {
-			ir = 0
-		}
-		if iw > 0 && ih > 0 {
-			if c := minInt(iw, ih) / 2; ir > c {
-				ir = c
-			}
-		}
+		irs := innerCornerRadii(cs.r, li, rt, tp, bt, iw, ih)
 		strokeRoundedRectPixels(want, cs.bx, cs.by, cs.bw, cs.bh, cs.r, li, rt, tp, bt,
-			iw, ih, ir, blue)
+			iw, ih, irs, blue)
 		for y := 0; y < h; y++ {
 			for x := 0; x < w; x++ {
 				ar, ag, ab, aa, aok := got.ColorAt(x, y)
@@ -52,6 +44,33 @@ func TestStrokeRoundedRectMatchesPixelPath(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// 底边宽度为 0 时，内圆角必须是与外圆同心的椭圆（纵向半轴仍为 r）：
+// 旧实现用单一半径 ir = r - min(四侧宽) 的内圆，在底边角块的最后一列
+// 会留下实色条带（视觉上像多了一条底边）。这里断言该列是渐隐的，
+// 而角块内部仍有左边色。
+func TestRoundedRingTapersOnZeroWidthBottom(t *testing.T) {
+	g := NewBufferGraphics(100, 80)
+	colors := [4]Color{
+		NewColor(255, 0, 0, 255), // top
+		NewColor(0, 255, 0, 255), // right
+		nil,                      // bottom：宽度 0
+		NewColor(0, 0, 255, 255), // left
+	}
+	// 盒 10,10 60×40，r=12；top/right/left 6px，bottom 0。
+	strokeRoundedRectSides(g, 10, 10, 60, 40, 12, edges{6, 6, 0, 6}, colors)
+
+	// 左下角块最后一列（x=21, y=49）：只应剩左边色向底边相切的渐隐。
+	if _, _, _, a, ok := g.ColorAt(10+12-1, 10+40-1); !ok {
+		t.Fatal("角块像素越界")
+	} else if a >= 250 {
+		t.Fatalf("底边为空时仍画出实色条带，alpha=%d", a)
+	}
+	// 角块内部（x=15, y=46）仍应有实心的左边色。
+	if _, _, b, a, _ := g.ColorAt(10+5, 10+40-4); b < 200 || a < 200 {
+		t.Fatalf("角块内部缺少左边色：b=%d a=%d", b, a)
 	}
 }
 

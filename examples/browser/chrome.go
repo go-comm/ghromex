@@ -5,10 +5,9 @@
 // 避免与页面作者自己的类名冲突。
 //
 // 用到的引擎 CSS 子集要点：
-//   - 不支持单边 border（border-bottom 之类），分隔线用整圈 border 或
-//     单独的细条元素；
+//   - 单边 border 与 box-shadow 已支持，但外壳仍保持扁平：分隔线用单独的
+//     细条元素，层次靠纯色与 border-radius 拉开；
 //   - 不支持 flex/grid，工具条里的控件一律绝对定位；
-//   - 不支持 box-shadow，层次靠纯色与 border-radius 拉开；
 //   - 按钮文字按内容顶部排（此前有垂直居中的问题，已在引擎侧修过），
 //     这里用固定高度 + text-align 让它居中。
 package main

@@ -7,6 +7,34 @@ const (
 	BorderStyleSolid
 )
 
+// BorderSide 是边框四边的下标。顺序与渲染内部的 eTop/eRight/eBottom/eLeft
+// 一致：这样样式层、解析层与绘制层可以共用一份 [4] 数组，不必在中间反复
+// 做名字到索引的映射。
+type BorderSide uint8
+
+const (
+	BorderSideTop BorderSide = iota
+	BorderSideRight
+	BorderSideBottom
+	BorderSideLeft
+)
+
+// Shadow 是一个 box-shadow 值。
+//
+// 长度在解析期就落成像素（box-shadow 的模糊/扩散半径不接受百分比；偏移
+// 虽允许百分比，但 UI 与对照页只用 px，本轮不引入带单位的 Shadow，避免
+// 在绘制期还要拿元素盒宽度做二次解析）。Color 为 nil 表示 currentColor：
+// 级联期不知道元素最终文字色，留到绘制期回退。
+type Shadow struct {
+	X, Y   int // 偏移
+	Blur   int // 模糊半径
+	Spread int // 扩散半径（可为负）
+	Color  Color
+	// Inset 只解析、暂不绘制：外阴影覆盖卡片/弹层等主场景，内阴影需要在
+	// 边框盒内单独做遮罩（并叠在背景之上），留待需要时再补。
+	Inset bool
+}
+
 type Display uint8
 
 const (
@@ -191,12 +219,22 @@ type CSSStyleDeclaration interface {
 	SetMargin(r Rect) CSSStyleDeclaration
 	BorderStyleWidth() Rect
 	SetBorderStyleWidth(r Rect) CSSStyleDeclaration
+	// BorderColor/SetBorderColor 是四边同色的兼容入口（读顶边、写四边）；
+	// 单边颜色用 BorderColorFor/SetBorderColorFor。
 	BorderColor() Color
 	SetBorderColor(color Color) CSSStyleDeclaration
+	BorderColorFor(side BorderSide) Color
+	SetBorderColorFor(side BorderSide, color Color) CSSStyleDeclaration
 	BorderImage() Image
 	SetBorderImage(image Image) CSSStyleDeclaration
+	// BorderStyle/SetBorderStyle 同样保留「读顶边、写四边」的旧语义。
 	BorderStyle() BorderStyle
 	SetBorderStyle(style BorderStyle) CSSStyleDeclaration
+	BorderStyleFor(side BorderSide) BorderStyle
+	SetBorderStyleFor(side BorderSide, style BorderStyle) CSSStyleDeclaration
+	// BoxShadow 是 box-shadow 声明（逗号分隔的多条阴影），默认 nil。
+	BoxShadow() []Shadow
+	SetBoxShadow(shadows []Shadow) CSSStyleDeclaration
 	Color() Color
 	SetColor(color Color) CSSStyleDeclaration
 	FontSize() Size
@@ -258,7 +296,11 @@ func newStyle() CSSStyleDeclaration {
 	style.margin = NewZeroRect()
 	style.padding = NewZeroRect()
 	style.borderW = NewZeroRect()
-	style.borderStyle = BorderStyleSolid
+	// 四边默认 solid（宽度为 0 时不画）：与旧版单一 borderStyle 的默认值
+	// 一致，作者只写 border-width 时仍能看到边框。
+	for i := range style.borderStyles {
+		style.borderStyles[i] = BorderStyleSolid
+	}
 	style.borderRadius = NewZeroSize()
 	style.inset = newAutoRect()
 	return style
@@ -279,8 +321,9 @@ type cssStyleDeclaration struct {
 	margin          Rect
 	padding         Rect
 	borderW         Rect
-	borderStyle     BorderStyle
-	borderColor     Color
+	borderStyles    [4]BorderStyle
+	borderColors    [4]Color
+	boxShadow       []Shadow
 	backgroundColor Color
 	backgroundImage Image
 	color           Color
@@ -316,8 +359,11 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetMargin(s.Margin())
 	c.SetPadding(s.Padding())
 	c.SetBorderStyleWidth(s.BorderStyleWidth())
-	c.SetBorderColor(s.BorderColor())
-	c.SetBorderStyle(s.BorderStyle())
+	for side := BorderSideTop; side <= BorderSideLeft; side++ {
+		c.SetBorderColorFor(side, s.BorderColorFor(side))
+		c.SetBorderStyleFor(side, s.BorderStyleFor(side))
+	}
+	c.SetBoxShadow(s.BoxShadow())
 	c.SetBackgroundColor(s.BackgroundColor())
 	c.SetBackgroundImage(s.BackgroundImage())
 	c.SetColor(s.Color())
@@ -411,11 +457,28 @@ func (style *cssStyleDeclaration) SetBorderStyleWidth(r Rect) CSSStyleDeclaratio
 }
 
 func (style *cssStyleDeclaration) BorderColor() Color {
-	return style.borderColor
+	return style.borderColors[BorderSideTop]
 }
 
 func (style *cssStyleDeclaration) SetBorderColor(color Color) CSSStyleDeclaration {
-	style.borderColor = color
+	for side := BorderSideTop; side <= BorderSideLeft; side++ {
+		style.SetBorderColorFor(side, color)
+	}
+	return style
+}
+
+func (style *cssStyleDeclaration) BorderColorFor(side BorderSide) Color {
+	if side > BorderSideLeft {
+		return nil
+	}
+	return style.borderColors[side]
+}
+
+func (style *cssStyleDeclaration) SetBorderColorFor(side BorderSide, color Color) CSSStyleDeclaration {
+	if side > BorderSideLeft {
+		return style
+	}
+	style.borderColors[side] = color
 	return style
 }
 
@@ -428,11 +491,39 @@ func (style *cssStyleDeclaration) SetBorderImage(image Image) CSSStyleDeclaratio
 }
 
 func (style *cssStyleDeclaration) BorderStyle() BorderStyle {
-	return style.borderStyle
+	return style.borderStyles[BorderSideTop]
 }
 
 func (style *cssStyleDeclaration) SetBorderStyle(s BorderStyle) CSSStyleDeclaration {
-	style.borderStyle = s
+	for side := BorderSideTop; side <= BorderSideLeft; side++ {
+		style.SetBorderStyleFor(side, s)
+	}
+	return style
+}
+
+func (style *cssStyleDeclaration) BorderStyleFor(side BorderSide) BorderStyle {
+	if side > BorderSideLeft {
+		return BorderStyleNone
+	}
+	return style.borderStyles[side]
+}
+
+func (style *cssStyleDeclaration) SetBorderStyleFor(side BorderSide, s BorderStyle) CSSStyleDeclaration {
+	if side > BorderSideLeft {
+		return style
+	}
+	style.borderStyles[side] = s
+	return style
+}
+
+func (style *cssStyleDeclaration) BoxShadow() []Shadow {
+	// 返回副本：调用方拿到切片后可能排序/修改，不应反向污染计算样式
+	// （同一份 computed 会被绘制、SVG 导出和命中测试共享）。
+	return append([]Shadow(nil), style.boxShadow...)
+}
+
+func (style *cssStyleDeclaration) SetBoxShadow(shadows []Shadow) CSSStyleDeclaration {
+	style.boxShadow = append([]Shadow(nil), shadows...)
 	return style
 }
 

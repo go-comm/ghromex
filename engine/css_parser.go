@@ -183,9 +183,79 @@ func ParseInlineStyle(text string) []simpleDecl {
 	return parseDeclarations(text)
 }
 
+// splitTopLevel 按分隔符切分，但忽略括号内的分隔符。
+//
+// box-shadow 的 rgba(0, 0, 0, .2) 是最典型的例子：里面的逗号属于颜色函数，
+// 不是多条阴影的分隔符。按 strings.Split 切会把一条阴影切成四段，整条声明
+// 直接失效。
+func splitTopLevel(s string, sep byte) []string {
+	var out []string
+	depth := 0
+	start := 0
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"':
+			quote = c
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if c == sep && depth == 0 {
+				out = append(out, strings.TrimSpace(s[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	return append(out, strings.TrimSpace(s[start:]))
+}
+
+// splitValueTokens 按空白切分，但不切括号内的空白。
+// 用于 border 简写与 box-shadow：rgb(1, 2, 3) 必须保持为一个 token。
+func splitValueTokens(s string) []string {
+	var out []string
+	depth := 0
+	start := -1
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+		if (c == ' ' || c == '\t' || c == '\n' || c == '\r') && depth == 0 {
+			if start >= 0 {
+				out = append(out, s[start:i])
+				start = -1
+			}
+			continue
+		}
+		if start < 0 {
+			start = i
+		}
+	}
+	if start >= 0 {
+		out = append(out, s[start:])
+	}
+	return out
+}
+
 // expandBoxValues 按 CSS 简写规则将 1~4 个值映射为 top right bottom left。
 func expandBoxValues(value string) (top, right, bottom, left string) {
-	parts := strings.Fields(value)
+	parts := splitValueTokens(value)
 	switch len(parts) {
 	case 0:
 		return "0px", "0px", "0px", "0px"
@@ -571,17 +641,47 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 			comp.SetBorderStyleWidth(rect)
 		}
 	case "border-color":
-		if c := parseColor(v); c != nil {
-			comp.SetBorderColor(c)
-		}
+		applyBorderColorShorthand(comp, v)
 	case "border-style":
-		if v == "none" {
-			comp.SetBorderStyle(BorderStyleNone)
-		} else {
-			comp.SetBorderStyle(BorderStyleSolid)
-		}
+		applyBorderStyleShorthand(comp, v)
 	case "border":
 		applyBorderShorthand(comp, value)
+	case "border-top":
+		applyBorderSideShorthand(comp, BorderSideTop, value)
+	case "border-right":
+		applyBorderSideShorthand(comp, BorderSideRight, value)
+	case "border-bottom":
+		applyBorderSideShorthand(comp, BorderSideBottom, value)
+	case "border-left":
+		applyBorderSideShorthand(comp, BorderSideLeft, value)
+	case "border-top-width":
+		setBorderWidthEdge(comp, edgeTop, v)
+	case "border-right-width":
+		setBorderWidthEdge(comp, edgeRight, v)
+	case "border-bottom-width":
+		setBorderWidthEdge(comp, edgeBottom, v)
+	case "border-left-width":
+		setBorderWidthEdge(comp, edgeLeft, v)
+	case "border-top-color":
+		setBorderColorEdge(comp, BorderSideTop, v)
+	case "border-right-color":
+		setBorderColorEdge(comp, BorderSideRight, v)
+	case "border-bottom-color":
+		setBorderColorEdge(comp, BorderSideBottom, v)
+	case "border-left-color":
+		setBorderColorEdge(comp, BorderSideLeft, v)
+	case "border-top-style":
+		setBorderStyleEdge(comp, BorderSideTop, v)
+	case "border-right-style":
+		setBorderStyleEdge(comp, BorderSideRight, v)
+	case "border-bottom-style":
+		setBorderStyleEdge(comp, BorderSideBottom, v)
+	case "border-left-style":
+		setBorderStyleEdge(comp, BorderSideLeft, v)
+	case "box-shadow":
+		if shadows, ok := parseBoxShadow(v); ok {
+			comp.SetBoxShadow(shadows)
+		}
 	case "background-color":
 		if v == "transparent" || v == "none" {
 			comp.SetBackgroundColor(nil)
@@ -670,24 +770,203 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 	}
 }
 
+// applyBorderShorthand 处理 border：宽度/样式/颜色同时写四边。
+// 没出现的分量保持原值——CSS 的 initial 值会让「border:1px solid」把颜色
+// 重置成 currentColor，但引擎的 UA 表单控件依赖原有颜色；保留原值更接近
+// 此前的视觉，也让 author 能只覆盖宽度。
 func applyBorderShorthand(comp CSSStyleDeclaration, value string) {
-	for _, part := range strings.Fields(value) {
+	for side := BorderSideTop; side <= BorderSideLeft; side++ {
+		applyBorderSideShorthand(comp, side, value)
+	}
+}
+
+// applyBorderSideShorthand 处理 border-top/right/bottom/left。
+// 与 border 同一套 token 规则，只是作用域收窄到一条边。
+func applyBorderSideShorthand(comp CSSStyleDeclaration, side BorderSide, value string) {
+	for _, part := range splitValueTokens(value) {
 		lower := strings.ToLower(part)
 		switch lower {
 		case "none", "hidden":
-			comp.SetBorderStyle(BorderStyleNone)
+			comp.SetBorderStyleFor(side, BorderStyleNone)
 		case "solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset":
-			comp.SetBorderStyle(BorderStyleSolid)
+			// 引擎目前只画实线：其余线型按 solid 处理（与旧版 border 简写
+			// 一致），至少宽度/颜色/单边语义是对的。
+			comp.SetBorderStyleFor(side, BorderStyleSolid)
+		case "currentcolor":
+			// 显式 currentColor 存 nil，绘制期回退到元素文字色。
+			comp.SetBorderColorFor(side, nil)
 		default:
 			if s := parseLength(lower); s != nil && s.Type() != SIZE_AUTO {
-				comp.SetBorderStyleWidth(NewRect(s, s, s, s))
+				comp.SetBorderStyleWidth(edgeRect(comp.BorderStyleWidth(),
+					borderSideEdge(side), s))
 				continue
 			}
-			if c := parseColor(lower); c != nil {
-				comp.SetBorderColor(c)
+			if c, ok := parseBorderColorToken(lower); ok {
+				comp.SetBorderColorFor(side, c)
 			}
 		}
 	}
+}
+
+// parseBorderColorToken 解析边框颜色；currentColor 合法但值是 nil，
+// 由绘制层按元素文字色回退。第二个返回值区分「合法 currentColor」与
+// 「非法 token」，避免把 currentColor 当成解析失败而丢掉整条声明。
+func parseBorderColorToken(v string) (Color, bool) {
+	if strings.EqualFold(strings.TrimSpace(v), "currentcolor") {
+		return nil, true
+	}
+	c := parseColor(v)
+	return c, c != nil
+}
+
+// applyBorderColorShorthand 处理 border-color 的 1~4 值展开。
+// 任一分量非法时整条声明忽略（CSS 语义），避免只改一半边。
+func applyBorderColorShorthand(comp CSSStyleDeclaration, value string) {
+	t, r, b, l := expandBoxValues(value)
+	var colors [4]Color
+	for i, part := range []string{t, r, b, l} {
+		c, ok := parseBorderColorToken(part)
+		if !ok {
+			return
+		}
+		colors[i] = c
+	}
+	comp.SetBorderColorFor(BorderSideTop, colors[0])
+	comp.SetBorderColorFor(BorderSideRight, colors[1])
+	comp.SetBorderColorFor(BorderSideBottom, colors[2])
+	comp.SetBorderColorFor(BorderSideLeft, colors[3])
+}
+
+// applyBorderStyleShorthand 处理 border-style 的 1~4 值展开。
+func applyBorderStyleShorthand(comp CSSStyleDeclaration, value string) {
+	t, r, b, l := expandBoxValues(value)
+	var styles [4]BorderStyle
+	for i, part := range []string{t, r, b, l} {
+		s, ok := parseBorderStyleKeyword(part)
+		if !ok {
+			return
+		}
+		styles[i] = s
+	}
+	comp.SetBorderStyleFor(BorderSideTop, styles[0])
+	comp.SetBorderStyleFor(BorderSideRight, styles[1])
+	comp.SetBorderStyleFor(BorderSideBottom, styles[2])
+	comp.SetBorderStyleFor(BorderSideLeft, styles[3])
+}
+
+func parseBorderStyleKeyword(v string) (BorderStyle, bool) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "none", "hidden":
+		return BorderStyleNone, true
+	case "solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset":
+		return BorderStyleSolid, true
+	}
+	return BorderStyleNone, false
+}
+
+// borderSideEdge 把公开的边序号映射到内部盒模型下标。
+// 两者顺序刻意保持一致（见 BorderSide 的注释），这里只做类型转换。
+func borderSideEdge(side BorderSide) boxEdge {
+	return boxEdge(side)
+}
+
+func setBorderWidthEdge(comp CSSStyleDeclaration, edge boxEdge, value string) {
+	if s := parseLength(value); s != nil {
+		comp.SetBorderStyleWidth(edgeRect(comp.BorderStyleWidth(), edge, s))
+	}
+}
+
+func setBorderColorEdge(comp CSSStyleDeclaration, side BorderSide, value string) {
+	if c, ok := parseBorderColorToken(value); ok {
+		comp.SetBorderColorFor(side, c)
+	}
+}
+
+func setBorderStyleEdge(comp CSSStyleDeclaration, side BorderSide, value string) {
+	if s, ok := parseBorderStyleKeyword(value); ok {
+		comp.SetBorderStyleFor(side, s)
+	}
+}
+
+// parseShadowLength 只接受绝对长度（px/pt/dp）与 0；box-shadow 的模糊/扩散
+// 半径不接受百分比，偏移百分比在引擎里也没有可用的解析基数，故整体拒绝。
+func parseShadowLength(v string) (int, bool) {
+	s := parseLength(v)
+	if s == nil {
+		return 0, false
+	}
+	switch s.Type() {
+	case SIZE_PIXEL:
+		return s.Pixel(), true
+	case SIZE_POINT:
+		return s.Point() * 96 / 72, true
+	case SIZE_DISPLAYPORT:
+		return s.Displayport() * 16, true
+	}
+	return 0, false
+}
+
+// parseBoxShadow 解析 box-shadow: none | <shadow>#。
+//
+// 每条阴影的 token 可以是：inset、2~4 个长度（x y [blur [spread]]）和一个
+// 颜色（位置不限）。颜色里的逗号由 splitTopLevel 保护。返回 ok=false 时
+// 整条声明忽略，保留级联中上一条合法值。
+func parseBoxShadow(value string) ([]Shadow, bool) {
+	v := strings.TrimSpace(strings.ToLower(value))
+	if v == "none" {
+		return nil, true
+	}
+	segs := splitTopLevel(v, ',')
+	shadows := make([]Shadow, 0, len(segs))
+	for _, seg := range segs {
+		if seg == "" {
+			return nil, false
+		}
+		tokens := splitValueTokens(seg)
+		var sh Shadow
+		var lens []int
+		colorSet := false
+		for _, tok := range tokens {
+			switch tok {
+			case "inset":
+				sh.Inset = true
+				continue
+			}
+			if n, ok := parseShadowLength(tok); ok {
+				lens = append(lens, n)
+				continue
+			}
+			if tok == "currentcolor" {
+				if colorSet {
+					return nil, false
+				}
+				// nil 即 currentColor：绘制期用元素文字色。
+				colorSet = true
+				continue
+			}
+			if c := parseColor(tok); c != nil && !colorSet {
+				sh.Color = c
+				colorSet = true
+				continue
+			}
+			return nil, false
+		}
+		if len(lens) < 2 || len(lens) > 4 {
+			return nil, false
+		}
+		sh.X, sh.Y = lens[0], lens[1]
+		if len(lens) >= 3 {
+			if lens[2] < 0 {
+				return nil, false // 模糊半径不能为负
+			}
+			sh.Blur = lens[2]
+		}
+		if len(lens) == 4 {
+			sh.Spread = lens[3]
+		}
+		shadows = append(shadows, sh)
+	}
+	return shadows, true
 }
 
 type boxEdge int

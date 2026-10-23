@@ -124,8 +124,17 @@ func collapsedOuterBorder(rows []*htmlElement) (int, Color) {
 				continue
 			}
 			bd := resolveEdgeRect(cell.computed.BorderStyleWidth(), cell.width)
-			if bd[eTop] > 0 {
-				return bd[eTop], cell.computed.BorderColor()
+			// collapse 后只剩上/左两条；逐边找第一条非零边框，颜色也取
+			// 对应边（单边边框时不能再一律读顶边颜色）。
+			for _, edge := range []boxEdge{eTop, eLeft, eBottom, eRight} {
+				if bd[edge] <= 0 {
+					continue
+				}
+				c := cell.computed.BorderColorFor(BorderSide(edge))
+				if c == nil {
+					c = cell.computed.BorderColor()
+				}
+				return bd[edge], c
 			}
 		}
 	}

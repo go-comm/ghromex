@@ -394,12 +394,26 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		// overflow:visible 的子内容可能露在视口里，由子节点各自判断）。
 		inView := !offscreenBox(bx, by, bw, bh, vpW, vpH)
 
+		// 阴影在背景之前画：CSS 的 box-shadow 属于盒子装饰，必须压在
+		// 背景/边框下面（半透明背景才能透出阴影）。它可能延伸到盒外，
+		// 因此单独按阴影包围盒做视口裁剪——盒子本体在屏外时阴影仍可能
+		// 露在视口里。
+		shadows := comp.BoxShadow()
+		if len(shadows) > 0 {
+			if sx, sy, sw, sh, ok := shadowBounds(shadows, bx, by, bw, bh); ok &&
+				!offscreenBox(sx, sy, sw, sh, vpW, vpH) {
+				paintBoxShadows(g, bx, by, bw, bh, r, shadows, comp.Color())
+			}
+		}
+
+		paintBD, borderColors, hasBorder := borderPaintState(comp, bd)
+
 		if inView {
 			if bg := comp.BackgroundColor(); bg != nil {
 				fillRoundedRect(g, bx, by, bw, bh, r, bg)
 			}
-			if bc := comp.BorderColor(); bc != nil && comp.BorderStyle() != BorderStyleNone && bw > 0 && bh > 0 {
-				strokeRoundedRect(g, bx, by, bw, bh, r, bd, bc)
+			if hasBorder && bw > 0 && bh > 0 {
+				strokeRoundedRectSides(g, bx, by, bw, bh, r, paintBD, borderColors)
 			}
 		}
 
@@ -575,8 +589,9 @@ func clipCornerMask(g Graphics, base *htmlElement, bx, by, bw, bh, r int,
 
 	// 边框/聚焦框沿圆角形状，角上被盖掉的部分补回来。
 	if comp != nil {
-		if bc := comp.BorderColor(); bc != nil && comp.BorderStyle() != BorderStyleNone && bw > 0 && bh > 0 {
-			strokeRoundedRect(g, bx, by, bw, bh, r, bd, bc)
+		paintBD, colors, has := borderPaintState(comp, bd)
+		if has && bw > 0 && bh > 0 {
+			strokeRoundedRectSides(g, bx, by, bw, bh, r, paintBD, colors)
 		}
 	}
 	if focused && isFormControl(base) && bw > 0 && bh > 0 && checkKind(base) == "" {
@@ -805,28 +820,66 @@ func cornerCov(r, u, v int) float64 {
 	return coverageAt(float64(u)+0.5, float64(v)+0.5, 0, 0, 2*r, 2*r, r)
 }
 
+// ellipseCov 计算内圆角椭圆（半轴 rx/ry，角局部坐标）的覆盖率。
+//
+// 与 cornerCov 同一套「像素中心到边界的近似有符号距离 → 0.5px AA」口径。
+// rx == ry 时退化成圆，与 cornerCov 逐像素一致；rx != ry 时用归一化圆
+// 距离乘较小半轴近似，对圆角边框的 1px 过渡足够。
+func ellipseCov(rx, ry, u, v int) float64 {
+	if rx <= 0 || ry <= 0 {
+		return 0
+	}
+	x := (float64(u) + 0.5 - float64(rx)) / float64(rx)
+	y := (float64(v) + 0.5 - float64(ry)) / float64(ry)
+	d := (math.Hypot(x, y) - 1) * float64(minInt(rx, ry))
+	if d <= -0.5 {
+		return 1
+	}
+	if d >= 0.5 {
+		return 0
+	}
+	return 0.5 - d
+}
+
 // ---------------------------------------------------------------------------
 // 圆角角标精灵
 // ---------------------------------------------------------------------------
+
+// cornerRadii 是某个内圆角的椭圆半轴。
+//
+// 四侧边框宽不同时，内角不是圆：横向半轴 = 外半径 - 该角的左右边框宽，
+// 纵向半轴 = 外半径 - 该角的上下边框宽。内椭圆与外界圆同心，某条边
+// 宽度为 0 时该轴保持外半径，内椭圆仍与外圆在空边处相切，不会沿空边
+// 留下一段「假边框」。
+type cornerRadii struct {
+	rx, ry int
+}
 
 // spriteKey 是角标精灵的缓存键。
 //
 // 精灵只与（半径、颜色、镜像方向）有关，与盒的大小无关——同一页面上大量
 // 同样式的圆角卡片共用同一份像素。
 //
-// 边框环的精灵多几个维度：内圆角半径 ir、四侧边框宽 (li,rt,tp,bt)、内盒
+// 边框环的精灵多几个维度：内圆角椭圆 (ir)、四侧边框宽 (li,rt,tp,bt)、内盒
 // 尺寸 (iw,ih)、角序号 corner。环的内盒相对外盒是偏移的，四侧边框宽不同
 // → 四角并不互为镜像，故按角分别缓存（ring 为真时这些字段才有效）。
 type spriteKey struct {
 	r              int
-	ir             int
+	ir             cornerRadii
 	li, rt, tp, bt int
 	iw, ih         int
 	cr, cg, cb, ca uint8
-	fx, fy         bool
-	mask           bool // 补盖精灵（圆角之外的部分），与普通角标图案不同
-	ring           bool // 边框环角标
-	corner         int  // 0=左上 1=右上 2=左下 3=右下（ring 时有效）
+	// 边框环角块有两条邻边，颜色可能不同；普通角标只用第一组。
+	cr2, cg2, cb2, ca2 uint8
+	fx, fy             bool
+	mask               bool // 补盖精灵（圆角之外的部分），与普通角标图案不同
+	ring               bool // 边框环角标
+	shadow             bool // 阴影精灵（模糊后的圆角盒）
+	sblur              int  // 阴影模糊半径（shadow 为真时有效）
+	// 外阴影必须把元素自己的边框盒挖掉（CSS：外阴影只画在边框盒外）。
+	// 洞的坐标是精灵内局部坐标，随偏移/扩散/盒尺寸变化，必须进缓存键。
+	holeX, holeY, holeW, holeH, holeR int
+	corner                            int // 0=左上 1=右上 2=左下 3=右下（ring 时有效）
 }
 
 // spriteEntry 是缓存里的一条记录：精灵 + 像素字节数 + 最近使用时刻。
@@ -955,10 +1008,26 @@ func cornerMaskSprite(r int, c Color, fx, fy bool) *Sprite {
 //
 // 精灵是 r×r：alpha = 环覆盖率 × 颜色 alpha（与逐像素路径的 scaledAlpha
 // 同口径），RGB 是颜色本身——blit 后的混合结果与逐像素画完全一致。
-func ringCornerSprite(r, ir, li, rt, tp, bt, iw, ih int, c Color, corner int) *Sprite {
-	cr, cg, cb, ca := c.RGBA()
+func ringCornerSprite(r int, ir cornerRadii, li, rt, tp, bt, iw, ih int, c Color, corner int) *Sprite {
+	return ringCornerSpriteSides(r, ir, li, rt, tp, bt, iw, ih, c, c, corner)
+}
+
+func ringCornerSpriteSides(r int, ir cornerRadii, li, rt, tp, bt, iw, ih int,
+	horizontal, vertical Color, corner int) *Sprite {
+	if horizontal == nil {
+		horizontal = vertical
+	}
+	if vertical == nil {
+		vertical = horizontal
+	}
+	if horizontal == nil {
+		return &Sprite{W: 0, H: 0}
+	}
+	hr, hg, hb, ha := horizontal.RGBA()
+	vr, vg, vb, va := vertical.RGBA()
 	key := spriteKey{r: r, ir: ir, li: li, rt: rt, tp: tp, bt: bt,
-		iw: iw, ih: ih, cr: cr, cg: cg, cb: cb, ca: ca, ring: true, corner: corner}
+		iw: iw, ih: ih, cr: hr, cg: hg, cb: hb, ca: ha,
+		cr2: vr, cg2: vg, cb2: vb, ca2: va, ring: true, corner: corner}
 	if s, ok := lookupSprite(key); ok {
 		return s
 	}
@@ -969,6 +1038,18 @@ func ringCornerSprite(r, ir, li, rt, tp, bt, iw, ih int, c Color, corner int) *S
 			if cov <= 0 {
 				continue
 			}
+			du, dv := u, v
+			if corner == 1 || corner == 3 {
+				du = r - 1 - u
+			}
+			if corner >= 2 {
+				dv = r - 1 - v
+			}
+			c := vertical
+			if du > dv {
+				c = horizontal
+			}
+			cr, cg, cb, ca := c.RGBA()
 			na := uint32(float64(ca)*cov + 0.5)
 			if na == 0 {
 				continue
@@ -985,14 +1066,319 @@ func ringCornerSprite(r, ir, li, rt, tp, bt, iw, ih int, c Color, corner int) *S
 	return s
 }
 
-// ringCornerCoverage 返回"外圆角盒 - 内圆角盒"在某个角、角块局部坐标
-// (u,v) 处的环覆盖率（外覆盖 - 内覆盖，夹到 [0,1]）。
+// ---------------------------------------------------------------------------
+// box-shadow
+// ---------------------------------------------------------------------------
+
+// maxShadowSpritePixels 限制单张阴影精灵的像素数。
+//
+// 阴影精灵把整块模糊结果缓存成位图，尺寸随盒子线性增长；满屏大容器的阴影
+// 会轻松超过精灵缓存总上限（4MB），存进去立刻被 LRU 淘汰、下一帧又重建。
+// 超过这个阈值的盒子改走「多层圆角矩形」近似，避免缓存颠簸。
+const maxShadowSpritePixels = 700000
+
+// shadowBounds 返回一组外阴影的包围盒（含模糊外扩），用于视口裁剪。
+// 全是 inset 阴影时 ok=false——本轮不绘制 inset。
+func shadowBounds(shadows []Shadow, bx, by, bw, bh int) (x, y, w, h int, ok bool) {
+	if bw <= 0 || bh <= 0 {
+		return 0, 0, 0, 0, false
+	}
+	x0, y0 := 1<<30, 1<<30
+	x1, y1 := -1<<30, -1<<30
+	for _, sh := range shadows {
+		if sh.Inset {
+			continue
+		}
+		sw, shh := bw+2*sh.Spread, bh+2*sh.Spread
+		if sw <= 0 || shh <= 0 {
+			continue
+		}
+		pad := maxZero(sh.Blur)
+		ax := bx + sh.X - sh.Spread - pad
+		ay := by + sh.Y - sh.Spread - pad
+		aw := sw + 2*pad
+		ah := shh + 2*pad
+		if ax < x0 {
+			x0 = ax
+		}
+		if ay < y0 {
+			y0 = ay
+		}
+		if ax+aw > x1 {
+			x1 = ax + aw
+		}
+		if ay+ah > y1 {
+			y1 = ay + ah
+		}
+	}
+	if x1 <= x0 || y1 <= y0 {
+		return 0, 0, 0, 0, false
+	}
+	return x0, y0, x1 - x0, y1 - y0, true
+}
+
+// paintBoxShadows 在元素背景之前绘制全部外阴影。
+//
+// CSS 规定第一条阴影在最上层，所以按声明顺序**倒着画**。阴影不参与布局、
+// 也不影响命中测试，只是盒子装饰。这个函数在元素自己的 overflow 裁剪压栈
+// 之前调用，因此阴影可以伸到盒外；祖先的 overflow 裁剪仍然有效。
+func paintBoxShadows(g Graphics, bx, by, bw, bh, r int, shadows []Shadow, current Color) {
+	if bw <= 0 || bh <= 0 {
+		return
+	}
+	if current == nil {
+		current = NewColor(0, 0, 0, 255)
+	}
+	for i := len(shadows) - 1; i >= 0; i-- {
+		sh := shadows[i]
+		if sh.Inset {
+			continue
+		}
+		c := sh.Color
+		if c == nil {
+			c = current
+		}
+		if _, _, _, a := c.RGBA(); a == 0 {
+			continue
+		}
+		sw, shh := bw+2*sh.Spread, bh+2*sh.Spread
+		if sw <= 0 || shh <= 0 {
+			continue
+		}
+		sr := r + sh.Spread
+		if sr < 0 {
+			sr = 0
+		}
+		if lim := minInt(sw, shh) / 2; sr > lim {
+			sr = lim
+		}
+		sx := bx + sh.X - sh.Spread
+		sy := by + sh.Y - sh.Spread
+		// 无偏移、无正扩散的无模糊阴影完全落在边框盒内，会被洞全裁掉；
+		// 直接跳过，省一次全透明贴图。
+		if sh.Blur == 0 && sh.X == 0 && sh.Y == 0 && sh.Spread <= 0 {
+			continue
+		}
+		pad := maxZero(sh.Blur)
+		spw, sph := sw+2*pad, shh+2*pad
+		if spw <= 0 || sph <= 0 {
+			continue
+		}
+		// 精灵内局部坐标：元素边框盒（要挖掉的洞）相对精灵原点的位置。
+		// 精灵原点 = sx-pad = bx + X - spread - pad，所以洞 x = pad - X + spread。
+		holeX := pad - sh.X + sh.Spread
+		holeY := pad - sh.Y + sh.Spread
+		// 后端支持 blit 且精灵尺寸可控时走预模糊位图：一次生成、多次复用，
+		// 每帧只剩一次贴图。否则退化为圆角矩形填充（有模糊时叠多层近似软边；
+		// 不会为大阴影分配几十 MB 的临时位图）。
+		if sd, ok := g.(SpriteDrawer); ok && spw*sph <= maxShadowSpritePixels {
+			sd.DrawSprite(sx-pad, sy-pad,
+				shadowSprite(spw, sph, sr, pad, c, holeX, holeY, bw, bh, r))
+			continue
+		}
+		// 退化路径：圆角矩形填充（有模糊时多层）。若后端支持矩形裁剪，
+		// 就按元素边框盒把盒外区域切成上/下/左/右四条带分别画，等价于
+		// 把洞挖掉；不支持裁剪时只能整块画（盒内可能透出阴影，见 README
+		// 已知限制）。
+		if cl, ok := g.(Clipper); ok {
+			paintShadowLayersClipped(g, cl, sx-pad, sy-pad, sw+2*pad, shh+2*pad,
+				bx, by, bw, bh, sx, sy, sw, shh, sr, pad, c)
+			continue
+		}
+		paintShadowLayers(g, sx, sy, sw, shh, sr, pad, c)
+	}
+}
+
+// paintShadowLayers 是阴影精灵的退化路径：由外向内叠若干层圆角矩形。
+//
+// 元素背景会盖住中间区域，真正可见的是边缘一圈；层数取得少一些就能得到
+// 可接受的软边。每层 alpha 取得较小，避免叠加后比声明颜色更黑。
+func paintShadowLayers(g Graphics, x, y, w, h, r, blur int, c Color) {
+	if blur <= 0 {
+		// 无模糊就是实色圆角矩形，不需要分层（分层会把 alpha 叠成 0.9
+		// 倍左右的近似值，反而偏离声明颜色）。
+		fillRoundedRect(g, x, y, w, h, r, c)
+		return
+	}
+	const layers = 6
+	scale := 2.0 / float64(layers)
+	for i := layers; i >= 1; i-- {
+		grow := blur * i / layers
+		ec, ok := scaledAlpha(c, scale)
+		if !ok {
+			continue
+		}
+		rr := r + grow
+		if lim := minInt(w+2*grow, h+2*grow) / 2; rr > lim {
+			rr = lim
+		}
+		fillRoundedRect(g, x-grow, y-grow, w+2*grow, h+2*grow, rr, ec)
+	}
+}
+
+// paintShadowLayersClipped 是退化路径的「挖洞」版本：用四条矩形裁剪
+// 带把元素边框盒排除在外，再在每条带里画多层阴影。
+//
+// 四条带互不重叠，并完整覆盖边框盒之外：上带（y<by，全宽，含上方两个
+// 角区）、下带（y>=by+bh，全宽）、左带/右带（y 在盒高内，x 在盒外）。
+// 这样既不需要后端的「清除」混合模式，也不会在同一像素上叠两次阴影。
+func paintShadowLayersClipped(g Graphics, cl Clipper, sx, sy, sw, sh int,
+	bx, by, bw, bh, shadowX, shadowY, shadowW, shadowH, r, blur int, c Color) {
+	bands := [4][4]int{
+		{sx, sy, sw, by - sy},                  // 上
+		{sx, by + bh, sw, sy + sh - (by + bh)}, // 下
+		{sx, by, bx - sx, bh},                  // 左
+		{bx + bw, by, sx + sw - (bx + bw), bh}, // 右
+	}
+	for _, band := range bands {
+		if band[2] <= 0 || band[3] <= 0 {
+			continue
+		}
+		cl.PushClip(band[0], band[1], band[2], band[3])
+		paintShadowLayers(g, shadowX, shadowY, shadowW, shadowH, r, blur, c)
+		cl.PopClip()
+	}
+}
+
+// shadowSprite 返回预模糊的阴影位图：RGB 是阴影色，alpha 是圆角盒覆盖率
+// 经三次盒式模糊后的结果（盒式模糊叠三次已足够接近高斯，观感与浏览器
+// 的软阴影一致）。精灵四周留 blur 像素，避免模糊尾巴被裁掉。
+//
+// holeX/Y/W/H/R 是元素自身边框盒在精灵内的局部几何。CSS 外阴影只画在
+// 边框盒外侧，因此模糊完成后还要把洞挖掉——否则元素背景透明时，盒内
+// 会透出一整块阴影色。洞放在模糊之后挖，和浏览器「先模糊再按边框盒
+// 裁切」的结果一致。
+func shadowSprite(w, h, r, blur int, c Color,
+	holeX, holeY, holeW, holeH, holeR int) *Sprite {
+	cr, cg, cb, ca := c.RGBA()
+	key := spriteKey{r: r, iw: w, ih: h, sblur: blur,
+		cr: cr, cg: cg, cb: cb, ca: ca, shadow: true,
+		holeX: holeX, holeY: holeY, holeW: holeW, holeH: holeH, holeR: holeR}
+	if s, ok := lookupSprite(key); ok {
+		return s
+	}
+	sw, sh := w-2*blur, h-2*blur
+	if sw <= 0 || sh <= 0 {
+		return &Sprite{W: 0, H: 0}
+	}
+	if lim := minInt(sw, sh) / 2; r > lim {
+		r = lim
+	}
+	mask := make([]float32, w*h)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			mask[y*w+x] = float32(coverageAt(float64(x)+0.5, float64(y)+0.5,
+				blur, blur, sw, sh, r))
+		}
+	}
+	if blur > 0 {
+		radius := blur / 2
+		if radius < 1 {
+			radius = 1
+		}
+		mask = blurMask(mask, w, h, radius, 3)
+	}
+	if holeW > 0 && holeH > 0 {
+		if lim := minInt(holeW, holeH) / 2; holeR > lim {
+			holeR = lim
+		}
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				cov := coverageAt(float64(x)+0.5, float64(y)+0.5,
+					holeX, holeY, holeW, holeH, holeR)
+				if cov > 0 {
+					mask[y*w+x] *= float32(1 - cov)
+				}
+			}
+		}
+	}
+	pix := make([]byte, w*h*4)
+	for i, cov := range mask {
+		if cov <= 0 {
+			continue
+		}
+		na := uint32(float64(ca)*float64(cov) + 0.5)
+		if na == 0 {
+			continue
+		}
+		if na > 255 {
+			na = 255
+		}
+		j := i * 4
+		pix[j+0], pix[j+1], pix[j+2], pix[j+3] = cr, cg, cb, uint8(na)
+	}
+	s := &Sprite{W: w, H: h, Pix: pix}
+	storeSprite(key, s)
+	return s
+}
+
+// blurMask 对 alpha 掩码做可分离盒式模糊；passes 次叠加近似高斯。
+func blurMask(src []float32, w, h, radius, passes int) []float32 {
+	if radius <= 0 || passes <= 0 || w <= 0 || h <= 0 {
+		return src
+	}
+	cur := src
+	tmp := make([]float32, len(src))
+	for p := 0; p < passes; p++ {
+		boxBlurH(cur, tmp, w, h, radius)
+		boxBlurV(tmp, cur, w, h, radius)
+	}
+	return cur
+}
+
+func boxBlurH(src, dst []float32, w, h, r int) {
+	norm := 1.0 / float64(2*r+1)
+	for y := 0; y < h; y++ {
+		row := y * w
+		var sum float64
+		for x := -r; x <= r; x++ {
+			if x >= 0 && x < w {
+				sum += float64(src[row+x])
+			}
+		}
+		for x := 0; x < w; x++ {
+			dst[row+x] = float32(sum * norm)
+			out, in := x-r, x+r+1
+			if out >= 0 {
+				sum -= float64(src[row+out])
+			}
+			if in < w {
+				sum += float64(src[row+in])
+			}
+		}
+	}
+}
+
+func boxBlurV(src, dst []float32, w, h, r int) {
+	norm := 1.0 / float64(2*r+1)
+	for x := 0; x < w; x++ {
+		var sum float64
+		for y := -r; y <= r; y++ {
+			if y >= 0 && y < h {
+				sum += float64(src[y*w+x])
+			}
+		}
+		for y := 0; y < h; y++ {
+			dst[y*w+x] = float32(sum * norm)
+			out, in := y-r, y+r+1
+			if out >= 0 {
+				sum -= float64(src[out*w+x])
+			}
+			if in < h {
+				sum += float64(src[in*w+x])
+			}
+		}
+	}
+}
+
+// ringCornerCoverage 返回"外圆角盒 - 内圆角盒（四边宽不同时为椭圆）"在
+// 某个角、角块局部坐标 (u,v) 处的环覆盖率（外覆盖 - 内覆盖，夹到 [0,1]）。
 //
 // 环的几何按"四条直边 + 四个 r×r 角块"分解：直边是实色，角块逐像素算
 // 覆盖率。角块的外覆盖按该角的镜像取（右侧/下侧角是左/上角的镜像），
 // 内覆盖用内盒相对该角的位置算（内盒相对外盒是偏移的，四侧边框宽不同
-// → 四角的内盒位置各不相同）。
-func ringCornerCoverage(r, ir, li, rt, tp, bt, iw, ih, corner, u, v int) float64 {
+// → 四角的内盒位置与内椭圆半轴各不相同）。
+func ringCornerCoverage(r int, ir cornerRadii, li, rt, tp, bt, iw, ih, corner, u, v int) float64 {
 	ou, ov := u, v
 	if corner == 1 || corner == 3 {
 		ou = r - 1 - u
@@ -1021,19 +1407,22 @@ func ringCornerCoverage(r, ir, li, rt, tp, bt, iw, ih, corner, u, v int) float64
 //
 // 局部坐标以该角为原点；iu/iv 是像素相对**内盒最近角**向内的距离（右侧
 // 与下侧从内盒的右/下边往回数）。像素在内盒之外 → 0；在内盒的角块里 →
-// 角覆盖率；否则（直边段）→ 1。
-func ringInnerCoverage(r, ir, li, rt, tp, bt, iw, ih, corner, u, v int) float64 {
+// 内椭圆覆盖率；否则（直边段）→ 1。
+func ringInnerCoverage(r int, ir cornerRadii, li, rt, tp, bt, iw, ih, corner, u, v int) float64 {
 	iu, iv := ringInnerLocal(r, li, rt, tp, bt, corner, u, v)
 	if iu < 0 || iv < 0 {
 		return 0 // 在内盒之外（角的外侧）
 	}
 	if iu >= iw || iv >= ih {
-		return 0 // 越过内盒的对侧边
+		return 0 // 越过内盒的对边
 	}
-	if iu < ir && iv < ir {
-		return cornerCov(ir, iu, iv)
+	// 内角是椭圆：只有同时落在两个半轴内的像素才走椭圆覆盖率，
+	// 否则已经在内盒的直边段上，整片覆盖。某条边宽度为 0 时对应
+	// 半轴等于外半径，内椭圆在空边处与外圆相切，不产生残留条带。
+	if ir.rx > 0 && ir.ry > 0 && iu < ir.rx && iv < ir.ry {
+		return ellipseCov(ir.rx, ir.ry, iu, iv)
 	}
-	return 1 // 内盒的直边段：整片覆盖
+	return 1
 }
 
 // ringInnerLocal 返回像素相对内盒最近角向内的距离 (iu, iv)。
@@ -1209,90 +1598,311 @@ func fillRoundedRectSprites(g Graphics, sd SpriteDrawer, bx, by, bw, bh, r int, 
 // 覆盖划分：环 = 外圆角盒 - 内圆角盒。直边部分（左右边带 + 上下边带）
 // 是实色矩形；四个角的 r×r 块由环精灵画（外覆盖 - 内覆盖）。两者不重叠，
 // 每个像素只被画一次——混合结果与逐像素路径一致。
+// strokeRoundedRectSprites 是单色兼容入口。
 func strokeRoundedRectSprites(g Graphics, sd SpriteDrawer, bx, by, bw, bh, r,
-	li, rt, tp, bt, iw, ih, ir int, c Color) {
-	strokeRoundedRectBands(g, bx, by, bw, bh, r, li, rt, tp, bt, c)
-	// 四角：环的角标精灵
-	sd.DrawSprite(bx, by, ringCornerSprite(r, ir, li, rt, tp, bt, iw, ih, c, 0))
-	sd.DrawSprite(bx+bw-r, by, ringCornerSprite(r, ir, li, rt, tp, bt, iw, ih, c, 1))
-	sd.DrawSprite(bx, by+bh-r, ringCornerSprite(r, ir, li, rt, tp, bt, iw, ih, c, 2))
-	sd.DrawSprite(bx+bw-r, by+bh-r, ringCornerSprite(r, ir, li, rt, tp, bt, iw, ih, c, 3))
+	li, rt, tp, bt, iw, ih int, irs [4]cornerRadii, c Color) {
+	strokeRoundedRectSpritesSides(g, sd, bx, by, bw, bh, r, li, rt, tp, bt, iw, ih, irs,
+		uniformBorderColors(c))
 }
 
-// strokeRoundedRectBands 画圆角边框环的四条直边（实色部分）。
+func strokeRoundedRectSpritesSides(g Graphics, sd SpriteDrawer, bx, by, bw, bh, r,
+	li, rt, tp, bt, iw, ih int, irs [4]cornerRadii, colors [4]Color) {
+	strokeRoundedRectBandsSides(g, bx, by, bw, bh, r, li, rt, tp, bt, colors)
+	// 四角：环的角标精灵。相邻两边各取颜色，角块内部按分界线选色。
+	// 四角的内椭圆半轴各不同（左右/上下边框宽可能不等），逐个传入。
+	sd.DrawSprite(bx, by, ringCornerSpriteSides(r, irs[0], li, rt, tp, bt, iw, ih,
+		colors[eTop], colors[eLeft], 0))
+	sd.DrawSprite(bx+bw-r, by, ringCornerSpriteSides(r, irs[1], li, rt, tp, bt, iw, ih,
+		colors[eTop], colors[eRight], 1))
+	sd.DrawSprite(bx, by+bh-r, ringCornerSpriteSides(r, irs[2], li, rt, tp, bt, iw, ih,
+		colors[eBottom], colors[eLeft], 2))
+	sd.DrawSprite(bx+bw-r, by+bh-r, ringCornerSpriteSides(r, irs[3], li, rt, tp, bt, iw, ih,
+		colors[eBottom], colors[eRight], 3))
+}
+
+// strokeRoundedRectBands 是单色兼容入口。
+func strokeRoundedRectBands(g Graphics, bx, by, bw, bh, r, li, rt, tp, bt int, c Color) {
+	strokeRoundedRectBandsSides(g, bx, by, bw, bh, r, li, rt, tp, bt, uniformBorderColors(c))
+}
+
+// strokeRoundedRectBandsSides 画圆角边框环的四条直边（实色部分）。
 //
 // 上下边带左右各让出 r 像素给角块，左右边带上下各让出 r 像素给角块——
 // 与角块不重叠，每个像素只画一次。
-func strokeRoundedRectBands(g Graphics, bx, by, bw, bh, r, li, rt, tp, bt int, c Color) {
+func strokeRoundedRectBandsSides(g Graphics, bx, by, bw, bh, r, li, rt, tp, bt int, colors [4]Color) {
 	if segH := bh - 2*r; segH > 0 {
-		if li > 0 {
-			g.DrawColor(bx, by+r, li, segH, c)
+		if li > 0 && colors[eLeft] != nil {
+			g.DrawColor(bx, by+r, li, segH, colors[eLeft])
 		}
-		if rt > 0 {
-			g.DrawColor(bx+bw-rt, by+r, rt, segH, c)
+		if rt > 0 && colors[eRight] != nil {
+			g.DrawColor(bx+bw-rt, by+r, rt, segH, colors[eRight])
 		}
 	}
 	if segW := bw - 2*r; segW > 0 {
-		if tp > 0 {
-			g.DrawColor(bx+r, by, segW, tp, c)
+		if tp > 0 && colors[eTop] != nil {
+			g.DrawColor(bx+r, by, segW, tp, colors[eTop])
 		}
-		if bt > 0 {
-			g.DrawColor(bx+r, by+bh-bt, segW, bt, c)
+		if bt > 0 && colors[eBottom] != nil {
+			g.DrawColor(bx+r, by+bh-bt, segW, bt, colors[eBottom])
 		}
 	}
 }
 
-// strokeRoundedRect 绘制圆角边框环（外圆角 r、内圆角 r-边框宽，带 AA）；
-// 环覆盖率 = 外盒覆盖 - 内盒覆盖。r=0 时与原平面四矩形路径一致。
+// borderPaintState 把计算样式的四边颜色/样式摊平成绘制状态。
+//
+// 返回的 edges 会把 border-style:none（或透明色）的边宽清零：布局阶段
+// 已经按声明宽度占好了位置，绘制时若仍按原宽画环，就会在「本该空着」的
+// 边上留下同色底。声明未给颜色时按 currentColor 回退（CSS 初始值），
+// 这样 border:1px solid 不写颜色时也能看见；返回的 colors 里，宽度为 0
+// 的边保持 nil，供圆角/直角角块回退到邻边颜色。
+func borderPaintState(comp CSSStyleDeclaration, bd edges) (edges, [4]Color, bool) {
+	var colors [4]Color
+	if comp == nil {
+		return bd, colors, false
+	}
+	current := comp.Color()
+	if current == nil {
+		current = NewColor(0, 0, 0, 255)
+	}
+	has := false
+	for i := 0; i < 4; i++ {
+		side := BorderSide(i)
+		if comp.BorderStyleFor(side) == BorderStyleNone {
+			bd[i] = 0
+			continue
+		}
+		c := comp.BorderColorFor(side)
+		if c == nil {
+			c = current
+		}
+		if _, _, _, a := c.RGBA(); a == 0 {
+			bd[i] = 0
+			continue
+		}
+		if bd[i] <= 0 {
+			// 宽度为 0 的边不参与绘制，颜色也必须留 nil：圆角角块会
+			// 在相邻边之间选色，若这里填成 currentColor，`border-bottom:0`
+			// 的底角会被错画成黑色（而不是只用左/右边色）。
+			continue
+		}
+		colors[i] = c
+		has = true
+	}
+	return bd, colors, has
+}
+
+// sameColor 按 RGBA 比较颜色。Color 是接口，直接 == 比的是动态指针
+// （NewColor 每次返回新指针），值相同也会判不等。
+func sameColor(a, b Color) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	ar, ag, ab, aa := a.RGBA()
+	br, bg, bb, ba := b.RGBA()
+	return ar == br && ag == bg && ab == bb && aa == ba
+}
+
+// uniformBorderColors 把单色包成四边同色，供聚焦框/旧测试等单色调用复用
+// 多色绘制路径。
+func uniformBorderColors(c Color) [4]Color {
+	return [4]Color{c, c, c, c}
+}
+
+// strokeRoundedRect 是单色兼容入口。
 func strokeRoundedRect(g Graphics, bx, by, bw, bh, r int, bd edges, c Color) {
+	strokeRoundedRectSides(g, bx, by, bw, bh, r, bd, uniformBorderColors(c))
+}
+
+// strokeRoundedRectSides 绘制四边可独立着色的圆角边框环。
+func strokeRoundedRectSides(g Graphics, bx, by, bw, bh, r int, bd edges, colors [4]Color) {
 	if r <= 0 {
-		if bd[eLeft] > 0 {
-			g.DrawColor(bx, by, bd[eLeft], bh, c)
+		li, rt, tp, bt := maxZero(bd[eLeft]), maxZero(bd[eRight]), maxZero(bd[eTop]), maxZero(bd[eBottom])
+		// 四边同色且不透明（最常见的 1px 边框）直接让上下横带盖住左右：
+		// 没有斜接需求，也避免给每个盒子多出四次角块绘制。半透明同色
+		// 不能走这条：横带在角上叠两次会变得比声明更不透明。
+		uniform := false
+		if c := colors[eTop]; c != nil {
+			_, _, _, ca := c.RGBA()
+			uniform = ca == 255 &&
+				sameColor(c, colors[eRight]) &&
+				sameColor(c, colors[eBottom]) &&
+				sameColor(c, colors[eLeft])
 		}
-		if bd[eRight] > 0 {
-			g.DrawColor(bx+bw-bd[eRight], by, bd[eRight], bh, c)
+		if uniform {
+			if li > 0 {
+				g.DrawColor(bx, by, li, bh, colors[eLeft])
+			}
+			if rt > 0 {
+				g.DrawColor(bx+bw-rt, by, rt, bh, colors[eRight])
+			}
+			if tp > 0 {
+				g.DrawColor(bx, by, bw, tp, colors[eTop])
+			}
+			if bt > 0 {
+				g.DrawColor(bx, by+bh-bt, bw, bt, colors[eBottom])
+			}
+			return
 		}
-		if bd[eTop] > 0 {
-			g.DrawColor(bx, by, bw, bd[eTop], c)
+		// 异色：直边让出角块，角块按「外角到内角」的斜线只落一次色。
+		// 这样半透明边框在角上不会被两条带叠两次。
+		cw, ch := bw-li-rt, bh-tp-bt
+		if cw < 0 || ch < 0 {
+			// 边框比盒子还宽：退化成立即覆盖，保证至少能看见颜色。
+			if li > 0 && colors[eLeft] != nil {
+				g.DrawColor(bx, by, li, bh, colors[eLeft])
+			}
+			if rt > 0 && colors[eRight] != nil {
+				g.DrawColor(bx+bw-rt, by, rt, bh, colors[eRight])
+			}
+			if tp > 0 && colors[eTop] != nil {
+				g.DrawColor(bx, by, bw, tp, colors[eTop])
+			}
+			if bt > 0 && colors[eBottom] != nil {
+				g.DrawColor(bx, by+bh-bt, bw, bt, colors[eBottom])
+			}
+			return
 		}
-		if bd[eBottom] > 0 {
-			g.DrawColor(bx, by+bh-bd[eBottom], bw, bd[eBottom], c)
+		if li > 0 && ch > 0 && colors[eLeft] != nil {
+			g.DrawColor(bx, by+tp, li, ch, colors[eLeft])
 		}
+		if rt > 0 && ch > 0 && colors[eRight] != nil {
+			g.DrawColor(bx+bw-rt, by+tp, rt, ch, colors[eRight])
+		}
+		if tp > 0 && cw > 0 && colors[eTop] != nil {
+			g.DrawColor(bx+li, by, cw, tp, colors[eTop])
+		}
+		if bt > 0 && cw > 0 && colors[eBottom] != nil {
+			g.DrawColor(bx+li, by+bh-bt, cw, bt, colors[eBottom])
+		}
+		strokeSquareCornersSides(g, bx, by, bw, bh, li, rt, tp, bt, colors)
 		return
 	}
 	li, rt, tp, bt := maxZero(bd[eLeft]), maxZero(bd[eRight]), maxZero(bd[eTop]), maxZero(bd[eBottom])
 	iw, ih := bw-li-rt, bh-tp-bt
-	ir := r - minInt(minInt(minInt(li, rt), tp), bt)
-	if ir < 0 {
-		ir = 0
-	}
-	if iw > 0 && ih > 0 {
-		if c := minInt(iw, ih) / 2; ir > c {
-			ir = c
-		}
-	}
+	irs := innerCornerRadii(r, li, rt, tp, bt, iw, ih)
 	// 后端支持位图 blit 时：四条直边 + 四角精灵（8 次绘制），替掉逐行逐
 	// 像素画整圈环（一个盒子几十次 1×1 绘制，是绘制调用的主要来源）。
 	if sd, ok := g.(SpriteDrawer); ok {
-		strokeRoundedRectSprites(g, sd, bx, by, bw, bh, r, li, rt, tp, bt, iw, ih, ir, c)
+		strokeRoundedRectSpritesSides(g, sd, bx, by, bw, bh, r, li, rt, tp, bt, iw, ih, irs, colors)
 		return
 	}
-	strokeRoundedRectPixels(g, bx, by, bw, bh, r, li, rt, tp, bt, iw, ih, ir, c)
+	strokeRoundedRectPixelsSides(g, bx, by, bw, bh, r, li, rt, tp, bt, iw, ih, irs, colors)
 }
 
-// strokeRoundedRectPixels 逐行逐像素画圆角边框环（不支持精灵 blit 的后端
-// 走这条路径）。几何与精灵路径同构：四条直边 + 四个 r×r 角块（角块逐
-// 像素算"外覆盖 - 内覆盖"），两者不重叠——输出与精灵路径逐像素一致。
+// innerCornerRadii 返回四个内圆角的椭圆半轴（顺序同 corner：左上、右上、
+// 左下、右下）。
+//
+// 内椭圆与外圆同心：横向半轴扣掉该角左右方向的边框宽，纵向半轴扣掉上下
+// 方向的边框宽。四边等宽时两轴相等，退化成原来的内圆；某条边宽度为 0 时
+// 该轴保持外半径，内椭圆与外圆在空边处相切，因此 `border-bottom:0` 不会
+// 在底边留下一小段由左/右边色画出的「假底边」。iw/ih 是内盒尺寸，用于
+// 边框极厚、盒极窄时的夹紧。
+func innerCornerRadii(r, li, rt, tp, bt, iw, ih int) [4]cornerRadii {
+	clamp := func(v, lim int) int {
+		if v < 0 {
+			return 0
+		}
+		if lim > 0 && v > lim {
+			return lim
+		}
+		return v
+	}
+	// 左上、右上、左下、右下。
+	return [4]cornerRadii{
+		{clamp(r-li, iw), clamp(r-tp, ih)},
+		{clamp(r-rt, iw), clamp(r-tp, ih)},
+		{clamp(r-li, iw), clamp(r-bt, ih)},
+		{clamp(r-rt, iw), clamp(r-bt, ih)},
+	}
+}
+
+// strokeSquareCornersSides 给 r=0 的直角边框补斜接（miter）角。
+//
+// 直角边框的角区是「横向边 × 纵向边」的矩形，CSS 用外角到内角的斜线
+// 分成两块；两邻边宽度不同时（如 top=4、left=2）斜线按 4:2 的比例走，
+// 不是 45°。这里逐行算出斜线位置，每行最多两次 DrawColor，避免在粗
+// 边框上出现上/下边整块盖住左右边的方块角。
+func strokeSquareCornersSides(g Graphics, bx, by, bw, bh, li, rt, tp, bt int, colors [4]Color) {
+	top, right, bottom, left := colors[eTop], colors[eRight], colors[eBottom], colors[eLeft]
+	// fillOrSplit 先处理「同色/只有一边有色」的简单情形，再按斜线逐行
+	// 分色；斜线位置用外角到内角的方向向量，宽度不等时自然得到非 45°。
+	fillOrSplit := func(x, y, w, h int, horiz, vert Color, vertRight, fromBottom bool) {
+		if w <= 0 || h <= 0 {
+			return
+		}
+		switch {
+		case horiz == nil && vert == nil:
+			return
+		case vert == nil:
+			g.DrawColor(x, y, w, h, horiz)
+			return
+		case horiz == nil:
+			g.DrawColor(x, y, w, h, vert)
+			return
+		case sameColor(horiz, vert):
+			g.DrawColor(x, y, w, h, horiz)
+			return
+		}
+		// 横向边靠外角一侧，纵向边在另一侧。vertRight=true 表示纵向边
+		// 在角块右边（上右/下右），同一条斜线要镜像到右侧。
+		for v := 0; v < h; v++ {
+			u0 := (v*w + h - 1) / h
+			if u0 > w {
+				u0 = w
+			}
+			yy := y + v
+			if fromBottom {
+				yy = y + h - 1 - v // 下侧角块从外角（底行）往里扫
+			}
+			if u0 > 0 {
+				if vertRight {
+					g.DrawColor(x+w-u0, yy, u0, 1, vert)
+				} else {
+					g.DrawColor(x, yy, u0, 1, vert)
+				}
+			}
+			if u0 < w {
+				if vertRight {
+					g.DrawColor(x, yy, w-u0, 1, horiz)
+				} else {
+					g.DrawColor(x+u0, yy, w-u0, 1, horiz)
+				}
+			}
+		}
+	}
+	// 上左/下左：纵向边在左。
+	fillOrSplit(bx, by, li, tp, top, left, false, false)
+	fillOrSplit(bx, by+bh-bt, li, bt, bottom, left, false, true)
+	// 上右/下右：纵向边在右。
+	fillOrSplit(bx+bw-rt, by, rt, tp, top, right, true, false)
+	fillOrSplit(bx+bw-rt, by+bh-bt, rt, bt, bottom, right, true, true)
+}
+
+// strokeRoundedRectPixels 是单色兼容入口。
 func strokeRoundedRectPixels(g Graphics, bx, by, bw, bh, r, li, rt, tp, bt,
-	iw, ih, ir int, c Color) {
-	strokeRoundedRectBands(g, bx, by, bw, bh, r, li, rt, tp, bt, c)
-	// 四个角块：逐点算环覆盖率后按 alpha 画 1×1。
+	iw, ih int, irs [4]cornerRadii, c Color) {
+	strokeRoundedRectPixelsSides(g, bx, by, bw, bh, r, li, rt, tp, bt, iw, ih, irs,
+		uniformBorderColors(c))
+}
+
+// strokeRoundedRectPixelsSides 逐行逐像素画圆角边框环（不支持精灵 blit 的
+// 后端走这条路径）。几何与精灵路径同构：四条直边 + 四个 r×r 角块（角块
+// 逐像素算"外覆盖 - 内覆盖"），两者不重叠——输出与精灵路径逐像素一致。
+func strokeRoundedRectPixelsSides(g Graphics, bx, by, bw, bh, r, li, rt, tp, bt,
+	iw, ih int, irs [4]cornerRadii, colors [4]Color) {
+	strokeRoundedRectBandsSides(g, bx, by, bw, bh, r, li, rt, tp, bt, colors)
+	// 四个角块：逐点算环覆盖率后按 alpha 画 1×1。角上相邻两边颜色不同
+	// 时按角平分线（u/v 与各自外角的距离比较）分色。
 	corners := [4][2]int{{bx, by}, {bx + bw - r, by}, {bx, by + bh - r}, {bx + bw - r, by + bh - r}}
 	for ci, o := range corners {
 		for v := 0; v < r; v++ {
 			for u := 0; u < r; u++ {
-				cov := ringCornerCoverage(r, ir, li, rt, tp, bt, iw, ih, ci, u, v)
+				cov := ringCornerCoverage(r, irs[ci], li, rt, tp, bt, iw, ih, ci, u, v)
 				if cov <= 0 {
+					continue
+				}
+				c := cornerBandColor(colors, ci, r, u, v)
+				if c == nil {
 					continue
 				}
 				if ec, ok := scaledAlpha(c, cov); ok {
@@ -1301,4 +1911,42 @@ func strokeRoundedRectPixels(g Graphics, bx, by, bw, bh, r, li, rt, tp, bt,
 			}
 		}
 	}
+}
+
+// cornerBandColor 选择圆角角块里某个像素属于哪条邻边。
+//
+// 两条边的颜色分界是过外角与内角的 45° 线：分别量像素到外角在 x/y 方向
+// 的距离，横向边（上/下）在 du > dv 一侧，纵向边（左/右）在另一侧。
+// Chrome 在角上做的是渐变过渡，这里用硬分界近似——角只有 r×r 像素，
+// 单边边框的常见场景里看不出差别。
+func cornerBandColor(colors [4]Color, corner, r, u, v int) Color {
+	du, dv := u, v
+	if corner == 1 || corner == 3 {
+		du = r - 1 - u
+	}
+	if corner >= 2 {
+		dv = r - 1 - v
+	}
+	horizontal, vertical := colors[eTop], colors[eLeft]
+	switch corner {
+	case 1:
+		vertical = colors[eRight]
+	case 2:
+		horizontal = colors[eBottom]
+	case 3:
+		horizontal, vertical = colors[eBottom], colors[eRight]
+	}
+	// 宽度为 0 的边颜色是 nil（见 borderPaintState）：角块里属于它的
+	// 那片区域应改用邻边颜色，不能直接跳过——否则不支持精灵的后端会在
+	// 角上留下透明缺口。精灵路径的 ringCornerSpriteSides 同口径。
+	if horizontal == nil {
+		horizontal = vertical
+	}
+	if vertical == nil {
+		vertical = horizontal
+	}
+	if du > dv {
+		return horizontal
+	}
+	return vertical
 }

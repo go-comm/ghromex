@@ -199,6 +199,73 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 		if br > 0 {
 			rxAttr = fmt.Sprintf(` rx="%d"`, br)
 		}
+		// 阴影在背景之前导出：与渲染路径同序。SVG 用 feGaussianBlur 表达
+		// 模糊，标准偏差取 CSS 模糊半径的一半（CSS 规范：模糊半径 = 2σ）。
+		shadows := comp.BoxShadow()
+		for i := len(shadows) - 1; i >= 0; i-- {
+			sh := shadows[i]
+			if sh.Inset {
+				continue
+			}
+			c := sh.Color
+			if c == nil {
+				c = comp.Color()
+			}
+			if c == nil {
+				c = NewColor(0, 0, 0, 255)
+			}
+			r, g, bl, al := c.RGBA()
+			if al == 0 {
+				continue
+			}
+			sw, shh := bw+2*sh.Spread, bh+2*sh.Spread
+			if sw <= 0 || shh <= 0 {
+				continue
+			}
+			sr := br + sh.Spread
+			if sr < 0 {
+				sr = 0
+			}
+			if lim := minInt(sw, shh) / 2; sr > lim {
+				sr = lim
+			}
+			sx, sy := bx+sh.X-sh.Spread, by+sh.Y-sh.Spread
+			srx := ""
+			if sr > 0 {
+				srx = fmt.Sprintf(` rx="%d"`, sr)
+			}
+			// 外阴影只画在边框盒之外：用 mask 的白矩形表示阴影形状，
+			// 再用黑矩形（元素边框盒）挖洞。mask 加在 filter 之后，
+			// 等价于浏览器「先模糊、再按边框盒裁切」。
+			pad := maxZero(sh.Blur)
+			filterDef := ""
+			filterAttr := ""
+			if sh.Blur > 0 {
+				fid := fmt.Sprintf("bshadow%d", *ctr)
+				*ctr++
+				filterAttr = fmt.Sprintf(` filter="url(#%s)"`, fid)
+				// 用 userSpaceOnUse 把滤镜区域按 blur 扩到阴影外接盒，
+				// 不能写 -50%/200%：小盒子配大模糊时百分比区域不够，
+				// 模糊尾巴会被 SVG 裁掉。
+				filterDef = fmt.Sprintf(`<filter id="%s" filterUnits="userSpaceOnUse" x="%d" y="%d" width="%d" height="%d">`+
+					`<feGaussianBlur stdDeviation="%.1f"/></filter>`,
+					fid, sx-pad, sy-pad, sw+2*pad, shh+2*pad, float64(sh.Blur)/2)
+			}
+			mid := fmt.Sprintf("bshadowmask%d", *ctr)
+			*ctr++
+			// 白色矩形铺满整个 mask 区域（含模糊外扩），黑色矩形挖掉
+			// 元素边框盒。若白矩形只画阴影本体，模糊到本体外的尾巴会被
+			// mask 的透明区裁掉，软边变成硬边。
+			maskDef := fmt.Sprintf(`<mask id="%s" maskUnits="userSpaceOnUse" x="%d" y="%d" width="%d" height="%d">`+
+				`<rect x="%d" y="%d" width="%d" height="%d" fill="#ffffff"/>`+
+				`<rect x="%d" y="%d" width="%d" height="%d" fill="#000000"%s/></mask>`,
+				mid, sx-pad, sy-pad, sw+2*pad, shh+2*pad,
+				sx-pad, sy-pad, sw+2*pad, shh+2*pad,
+				bx, by, bw, bh, rxAttr)
+			fmt.Fprintf(b, `<defs>%s%s</defs>`+"\n", filterDef, maskDef)
+			fmt.Fprintf(b, `<g mask="url(#%s)"><rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.2f"%s%s/></g>`+"\n",
+				mid, sx, sy, sw, shh, hexColor(r, g, bl), float64(al)/255, srx, filterAttr)
+		}
 		if bg := comp.BackgroundColor(); bg != nil && bw > 0 && bh > 0 {
 			r, g, bl, al := bg.RGBA()
 			if al > 0 {
@@ -206,19 +273,49 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 					bx, by, bw, bh, hexColor(r, g, bl), float64(al)/255, rxAttr)
 			}
 		}
-		if bc := comp.BorderColor(); bc != nil && comp.BorderStyle() != BorderStyleNone && bw > 0 && bh > 0 {
-			lw := bd[eLeft]
-			if lw < bd[eTop] {
-				lw = bd[eTop]
-			}
-			if lw > 0 {
-				r, g, bl, _ := bc.RGBA()
-				srx := ""
-				if br > 0 { // 描边路径中心线内缩 lw/2，rx 相应修正
-					srx = fmt.Sprintf(` rx="%d"`, maxZero(br-lw/2))
+		if bw > 0 && bh > 0 {
+			paintBD, colors, has := borderPaintState(comp, bd)
+			if has {
+				uniform := true
+				for i := 1; i < 4; i++ {
+					if paintBD[i] != paintBD[0] || !sameColor(colors[i], colors[0]) {
+						uniform = false
+						break
+					}
 				}
-				fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="%s" stroke-width="%d"%s/>`+"\n",
-					bx+lw/2, by+lw/2, bw-lw, bh-lw, hexColor(r, g, bl), lw, srx)
+				if uniform && paintBD[0] > 0 {
+					// 四边同宽同色：沿用单个 stroke rect，圆角几何最准。
+					lw := paintBD[0]
+					r, g, bl, _ := colors[0].RGBA()
+					srx := ""
+					if br > 0 { // 描边路径中心线内缩 lw/2，rx 相应修正
+						srx = fmt.Sprintf(` rx="%d"`, maxZero(br-lw/2))
+					}
+					fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="%s" stroke-width="%d"%s/>`+"\n",
+						bx+lw/2, by+lw/2, bw-lw, bh-lw, hexColor(r, g, bl), lw, srx)
+				} else {
+					// 四边不同色/不同宽：SVG 的 stroke 只能单色，改为四块
+					// 实色矩形，并用外圆角矩形裁剪。圆角内缘是直角（调试
+					// 导出可接受的近似），但单边边框的颜色与位置能对上。
+					id := fmt.Sprintf("brd%d", *ctr)
+					*ctr++
+					fmt.Fprintf(b, `<clipPath id="%s"><rect x="%d" y="%d" width="%d" height="%d"%s/></clipPath>`+"\n",
+						id, bx, by, bw, bh, rxAttr)
+					fmt.Fprintf(b, `<g clip-path="url(#%s)">`+"\n", id)
+					emit := func(x, y, w, h int, c Color) {
+						if w <= 0 || h <= 0 || c == nil {
+							return
+						}
+						r, g, bl, _ := c.RGBA()
+						fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s"/>`+"\n",
+							x, y, w, h, hexColor(r, g, bl))
+					}
+					emit(bx, by, bw, paintBD[eTop], colors[eTop])
+					emit(bx, by+bh-paintBD[eBottom], bw, paintBD[eBottom], colors[eBottom])
+					emit(bx, by, paintBD[eLeft], bh, colors[eLeft])
+					emit(bx+bw-paintBD[eRight], by, paintBD[eRight], bh, colors[eRight])
+					b.WriteString("</g>\n")
+				}
 			}
 		}
 	}
