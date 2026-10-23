@@ -77,6 +77,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "装载文档失败:", err)
 		os.Exit(1)
 	}
+	addControls(doc, status)
 
 	if *shot != "" {
 		if *shotMenu != "" {
@@ -182,6 +183,52 @@ func buildSpec(status func(string)) ui.Spec {
 	}
 }
 
+// addControls 用 Go 侧控件填充页面里的挂载点。
+//
+// 页面只写一个 #controls-host；控件的类名、取值和事件适配由 ui 包负责。
+// dump 路径传 nil 状态回调，保证无头出图与真实窗口是同一套 DOM。
+func addControls(doc engine.HTMLDocument, status func(string)) {
+	host := doc.QuerySelector("#controls-host")
+	if host == nil {
+		return
+	}
+	say := func(text string) {
+		if status != nil {
+			status(text)
+		}
+	}
+
+	name := ui.NewTextInput(doc, "未命名.txt")
+	nameField := ui.NewField(doc, "文件名称", name)
+	nameField.SetHint("最多 255 个字符")
+	host.AppendChild(nameField.Element())
+
+	auto := ui.NewCheckbox(doc, "保存时自动备份", true)
+	auto.OnChange(func(on bool) {
+		if on {
+			say("已开启自动备份")
+			return
+		}
+		say("已关闭自动备份")
+	})
+	host.AppendChild(auto.Element())
+
+	encoding := ui.NewSelect(doc, []ui.SelectOption{
+		{Value: "utf-8", Label: "UTF-8"},
+		{Value: "gbk", Label: "GBK"},
+	})
+	encoding.SetValue("utf-8")
+	encoding.OnChange(func(value string) { say("编码：" + value) })
+	host.AppendChild(ui.NewField(doc, "编码", encoding).Element())
+
+	preview := ui.NewTextView(doc, "这是只读多行文本视图。\n换行会保留，内容超出高度时可滚动。")
+	preview.Element().SetAttribute("style", "height:80px") // 主题默认 140，示例压矮一点
+	host.AppendChild(ui.NewField(doc, "预览", preview).Element())
+
+	apply := ui.NewButton(doc, "应用设置", func() { say("已应用设置") }).SetVariant("primary")
+	host.AppendChild(apply.Element())
+}
+
 // dump 在没有窗口的情况下装好外壳并出一张图。
 //
 // 这条路径和真实窗口共用 install + 布局 + 渲染，所以 PNG 看到的就是
@@ -193,6 +240,7 @@ func dump(spec ui.Spec, pngPath, svgPath string) error {
 		return err
 	}
 	ui.Install(doc, spec)
+	addControls(doc, nil)
 	doc.Refresh()
 	engine.RenderNode(buf, doc)
 	// 两个出口可以同时要：先出 PNG，再出 SVG（同一份布局）。
