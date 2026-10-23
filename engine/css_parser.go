@@ -580,6 +580,14 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		} else {
 			comp.SetWhiteSpace(WhiteSpaceNormal)
 		}
+	case "pointer-events":
+		// 只区分 none 与其余值：SVG 那套 fill/stroke/visiblePainted 精细档
+		// 引擎用不上，非 none 一律按 CSS 默认 auto（可命中）处理。
+		if v == "none" {
+			comp.SetPointerEvents(PointerEventsNone)
+		} else {
+			comp.SetPointerEvents(PointerEventsAuto)
+		}
 	case "border-collapse":
 		// 只区分 collapse 与其余值（separate 为 CSS 默认）。语义见
 		// BorderCollapse 的注释：collapse 时每个单元格只摊到半个边框。

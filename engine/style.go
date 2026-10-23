@@ -112,6 +112,24 @@ const (
 	WhiteSpacePre
 )
 
+// PointerEvents 决定元素是否参与命中测试（pointer-events）。只实现两档：
+// auto 是 CSS 默认（正常接收点击）；none 让元素自己不再是被点中的目标。
+//
+// 为什么要有这一档：外壳与页面里存在「只为排版而存在」的盒子——ui 用来给
+// fixed 菜单栏/状态栏让位的占位块、1px 分隔线。它们按 DOM 序排在页面内容
+// 之后，于是盒子里层的内容虽然照样画得出来（渲染层按 DOM 序叠放），点击却
+// 被这些透明盒子吃掉，表现为「看得见点不到」。真实 CSS 里这类装饰元素正是
+// 用 pointer-events:none 交还交互的。
+//
+// 与 CSS 一致，该属性沿父链继承：父级 none 时子树默认也不可点，子级自己
+// 声明 auto 可以恢复。
+type PointerEvents uint8
+
+const (
+	PointerEventsAuto PointerEvents = iota
+	PointerEventsNone
+)
+
 // LineHeightKind 是 line-height 的取值形态。
 type LineHeightKind uint8
 
@@ -271,6 +289,10 @@ type CSSStyleDeclaration interface {
 	// WhiteSpace 决定空白处理（normal/pre），沿父链继承。
 	WhiteSpace() WhiteSpace
 	SetWhiteSpace(w WhiteSpace) CSSStyleDeclaration
+	// PointerEvents 决定元素是否参与命中测试（auto/none），沿父链继承；
+	// 只有命中测试读它，渲染与布局不受影响。
+	PointerEvents() PointerEvents
+	SetPointerEvents(p PointerEvents) CSSStyleDeclaration
 	// BorderCollapse 决定表格相邻单元格边框是否合并（border-collapse），
 	// 不继承、仅表格布局读取。默认 separate。
 	BorderCollapse() BorderCollapse
@@ -344,6 +366,7 @@ type cssStyleDeclaration struct {
 	overflowX        Overflow
 	overflowY        Overflow
 	whiteSpace       WhiteSpace
+	pointerEvents    PointerEvents
 	borderCollapse   BorderCollapse
 	lineHeight       LineHeight
 	verticalAlign    VerticalAlign
@@ -380,6 +403,7 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetOverflowX(s.OverflowX())
 	c.SetOverflowY(s.OverflowY())
 	c.SetWhiteSpace(s.WhiteSpace())
+	c.SetPointerEvents(s.PointerEvents())
 	c.SetBorderCollapse(s.BorderCollapse())
 	c.SetLineHeight(s.LineHeight())
 	c.SetVerticalAlign(s.VerticalAlign())
@@ -674,6 +698,15 @@ func (style *cssStyleDeclaration) WhiteSpace() WhiteSpace {
 
 func (style *cssStyleDeclaration) SetWhiteSpace(w WhiteSpace) CSSStyleDeclaration {
 	style.whiteSpace = w
+	return style
+}
+
+func (style *cssStyleDeclaration) PointerEvents() PointerEvents {
+	return style.pointerEvents
+}
+
+func (style *cssStyleDeclaration) SetPointerEvents(p PointerEvents) CSSStyleDeclaration {
+	style.pointerEvents = p
 	return style
 }
 

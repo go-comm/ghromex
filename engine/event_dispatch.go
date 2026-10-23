@@ -25,8 +25,8 @@ func ElementAt(root HTMLElement, x, y int) HTMLElement {
 			// display:none 判断），两边同口径。命中测试会下钻到子内容（子内容
 			// 可能露在父盒外），所以隐藏的容器必须在这里显式挡掉，否则它
 			// 里面的东西还会被点到。
-			if cb := inner(child); cb != nil && cb.computed != nil &&
-				cb.computed.Display() == DisplayNone {
+			cb := inner(child)
+			if cb != nil && cb.computed != nil && cb.computed.Display() == DisplayNone {
 				continue
 			}
 			if !clipsContain(clips, x, y) {
@@ -38,11 +38,16 @@ func ElementAt(root HTMLElement, x, y int) HTMLElement {
 			wd := r.Right().Pixel() - l
 			hh := r.Bottom().Pixel() - t
 			// 盒包含点击点才可能是命中目标（零尺寸盒不参与命中）。
-			if wd > 0 && hh > 0 && x >= l && x < l+wd && y >= t && y < t+hh {
+			// pointer-events:none 的元素自己不作为命中目标（占位块、分隔线
+			// 这类只为排版/装饰存在的盒子不该吃掉点击），但仍然要下钻：
+			// 该属性沿父链继承，子级自己声明 auto 时又能被点到。
+			hitSelf := cb == nil || cb.computed == nil ||
+				cb.computed.PointerEvents() != PointerEventsNone
+			if hitSelf && wd > 0 && hh > 0 && x >= l && x < l+wd && y >= t && y < t+hh {
 				hit = child
 			}
 			next := clips
-			if cb := inner(child); cb != nil && isClippingBox(cb) {
+			if cb != nil && isClippingBox(cb) {
 				pd, _ := resolvedEdges(cb, cb.computed)
 				next = append(append([]clipRect{}, clips...), clipRect{
 					x: cb.x - pd[eLeft], y: cb.y - pd[eTop],

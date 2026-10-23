@@ -52,6 +52,9 @@ func resolveStylesTreeIn(doc HTMLDocument, e HTMLElement, base *htmlElement,
 		comp.SetTextAlign(pc.TextAlign())
 		comp.SetTextDecoration(pc.TextDecoration())
 		comp.SetWhiteSpace(pc.WhiteSpace())
+		// pointer-events 是继承属性：占位块/分隔线声明 none 之后，它里面的
+		// 内容（如果有）默认也跟着不可点，子级自己声明 auto 才恢复。
+		comp.SetPointerEvents(pc.PointerEvents())
 		// line-height 继承**原始形态**（倍数/绝对长度），不是解析后的像素：
 		// 父级 line-height:1.5 + 子级 font-size:32px → 子级行高 48px，
 		// 继承成像素就锁死在父级字号上了。
