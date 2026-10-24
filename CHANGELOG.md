@@ -5,6 +5,12 @@
 
 ## 未发布
 
+- **ui**：默认主题紧凑化——`ToolHeight` 40 → 36，工具栏图标 16px → 20px
+  （`MenuHeight` 32 不变）。工具栏上下内边距不再写死 5px，改由
+  (ToolHeight − ButtonHeight)/2 推导（默认 3px），换条高不再裁按钮；
+  图标行盒补偿按 20px 字号重调（`ButtonHeight − 8`），图标与分隔线
+  墨迹中心像素实测均落在条带中线（±0.5px）。基础 `.system-ui-icon`
+  仍为 16px（菜单图标、iconsheet 共用），仅工具栏规则放大。
 - **ui**：工具栏分隔竖线随图标一起居中——竖线原先 `vertical-align:
   middle`，按「父基线 + 半 x 高」对位落在 54.5，与图标（51.5）差 3px；
   改为 `vertical-align: top` 钉行盒顶 + `margin-top: 6px` 下推
