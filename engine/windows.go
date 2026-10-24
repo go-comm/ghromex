@@ -98,7 +98,7 @@ func NewHeadlessViewport(w, h int) *HeadlessViewport {
 }
 
 // NewBufferedViewport 创建无显示视口 + 软件光栅化后端（BufferGraphics）：
-// 视口与缓冲同尺寸，绘制指令落进缓冲区，可 ColorAt 逐像素断言、SavePNG 出图。
+// 视口与缓冲同尺寸，绘制指令落进缓冲区，可 ColorAt 逐像素断言、DumpPNG 出图。
 //
 // 与 NewHeadlessViewport 只差绘制后端：两者的文本度量同口径
 // （BufferGraphics 的度量与 FakeGraphics 相同），换后端不改布局结果。

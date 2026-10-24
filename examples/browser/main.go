@@ -112,7 +112,7 @@ func dumpHeadless(start, pngPath, svgPath string) error {
 	hw.doc.Refresh()
 	if pngPath != "" {
 		engine.RenderNode(hw.buf, hw.doc)
-		if err := hw.buf.SavePNG(pngPath); err != nil {
+		if err := hw.buf.DumpPNG(pngPath); err != nil {
 			return err
 		}
 		fmt.Println("PNG 已写入:", pngPath)

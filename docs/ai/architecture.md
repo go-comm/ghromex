@@ -145,7 +145,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 
 - `-dump-svg` 导出布局结果为 SVG（无头跑通整套管线，见 `examples/ua`）。
 - `engine.NewHeadlessViewport(w, h)`：无渲染的视口，配 `engine.LayoutDocument(doc)` + `engine.RenderNode(g, doc)`。
-- `engine.NewBufferedViewport(w, h)` 返回 `(vp, buf *BufferGraphics)`：软件光栅化到 RGBA 缓冲，`buf.SavePNG(...)`，CI 里像素级断言（用例见 `ui/theme_test.go`、`examples/kit`）。
+- `engine.NewBufferedViewport(w, h)` 返回 `(vp, buf *BufferGraphics)`：软件光栅化到 RGBA 缓冲，`buf.DumpPNG(...)` 落盘仅缓冲快照（不布局不绘制），CI 里像素级断言（用例见 `ui/theme_test.go`、`examples/kit`）。
 - 测试组织：包内 `_test.go` 就近测试；架构护栏 `core/arch_test.go`；主循环端到端在 `browser/run_*_test.go`。
 - 验证改动：`go build ./...` + `go test ./...`（任意平台可跑，SDL 测试在无非 Windows 会跳过/提示）。
 

@@ -5,9 +5,14 @@
 
 ## 未发布
 
+- **engine**：`BufferGraphics.SavePNG` 更名 `DumpPNG`：它只是「把缓冲当前
+  内容编码落盘」的快照动作（不布局、不绘制，没渲染过是空图），与示例
+  `-dump-png` 的完整出图流程（装外壳 → Refresh → RenderNode → 落盘）区
+  分；词根同时对齐 `doc.DumpSVG()`。升级时替换方法名即可。
 - **出图口径**：分析用无头两路——`doc.DumpSVG()`（`-dump-svg`）导出级联+
-  布局 SVG（真实 `<text>`，核对几何/层级/配色），`BufferGraphics.SavePNG`
-  （`-dump-png`）软件光栅像素图（文字为占位方块，CI 逐像素断言）；截图用
+  布局 SVG（真实 `<text>`，核对几何/层级/配色），`-dump-png` 走完整流程
+  产软件光栅像素图（文字为占位方块，CI 逐像素断言），其最后一步
+  `BufferGraphics.DumpPNG` 仅存缓冲快照、不是出图入口；截图用
   `Window.Screenshot()` 回读真实窗口像素（应用自行编码 PNG，见
   `examples/snip`）。`browser` 包文档新增「出图口径」小节，示例 flag 帮助
   文案统一为「无头出图 / 真实窗口截图：产出 + 用途」，browser 示例补齐

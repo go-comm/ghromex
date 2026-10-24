@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-24 09:49
+> 生成时间: 2026-10-24 09:58
 
 ---
 
@@ -692,12 +692,16 @@ dialog.ErrUnsupported。
 
   - doc.DumpSVG()（-dump-svg）：级联+布局序列化成 SVG，文字是真实
     <text>、可在浏览器里看真字体；不经过光栅绘制器，反映的是「布局与 样式」，不是最终像素（圆角精灵、抗锯齿看不到）。核对几何/层级/配色。
-  - engine.NewBufferedViewport + BufferGraphics.SavePNG（-dump-png）： 无头软件光栅化到
-    RGBA 缓冲，文字是占位方块（不依赖字体后端）， 可 ColorAt 逐像素断言——CI/headless 的首选。
+  - -dump-png（示例 flag，完整流程）：装外壳 → Refresh 重排 → RenderNode 光栅化进缓冲 → 最后
+    buf.DumpPNG 落盘。产物是「当前文档 在视口的完整一帧」，软件光栅后端文字是占位方块——CI 逐像素断言的 首选。
+  - BufferGraphics.DumpPNG(path)（仅缓冲快照）：只是把缓冲里**已有**的
+    像素编码成文件，不布局、不绘制——没渲染过是空图，没重排就渲染则是 旧帧。它是上一条流程的最后一步，单独调用只适合「我刚 RenderNode
+    完，把现场存下来」这类场景，别当出图入口。
   - Window.Screenshot()：回读真实窗口渲染目标的当前内容（原生字节 + 格式 + 尺寸），是「用户实际看到的样子」；要存 PNG
     由应用自己编码 （见 examples/snip 的 saveWindowPNG）。
 
-一句话：分析用 dump-svg / dump-png，截图用 Screenshot。
+一句话：分析用 -dump-svg / -dump-png，快照存档用 DumpPNG（先自己 Refresh + RenderNode），截图用
+Screenshot。
 
 VARIABLES
 
@@ -1073,7 +1077,7 @@ Graphics 接口之外有两个**可选扩展**（后端实现了就用，没实�
 engine 的测试全是纯 Go，不需要显示器：
 
   - FakeGraphics：只计数，断言绘制指令的调用序列；
-  - BufferGraphics：软件光栅化到 RGBA，可 SavePNG 与 ColorAt 逐像素断言； NewBufferedViewport /
+  - BufferGraphics：软件光栅化到 RGBA，可 DumpPNG 与 ColorAt 逐像素断言； NewBufferedViewport /
     OpenBufferedDocument 一把建好「视口 + 缓冲」， 免得视口与缓冲的尺寸写岔；
   - HeadlessViewport：无头视口，配合 DumpSVG 断言布局几何；
   - 事件用 engine.OnDocumentClick / OnDocumentKeyDown / OnDocumentPaste
@@ -1161,7 +1165,7 @@ func MeasureNode(g Graphics, node HTMLElement, mw, mh int)
 
 func NewBufferedViewport(w, h int) (*HeadlessViewport, *BufferGraphics)
     NewBufferedViewport 创建无显示视口 + 软件光栅化后端（BufferGraphics）： 视口与缓冲同尺寸，绘制指令落进缓冲区，可
-    ColorAt 逐像素断言、SavePNG 出图。
+    ColorAt 逐像素断言、DumpPNG 出图。
 
     与 NewHeadlessViewport 只差绘制后端：两者的文本度量同口径 （BufferGraphics 的度量与 FakeGraphics
     相同），换后端不改布局结果。
@@ -1375,7 +1379,7 @@ type BufferGraphics struct {
 	// Has unexported fields.
 }
     BufferGraphics 把绘制指令落在一块二维 RGBA 缓冲区上： DrawColor 填充矩形、DrawText
-    把每个非空白字符画成一个色块（近似字形占位）、 DrawImage 填充品红占位块。它不依赖任何图形后端，适合单元测试断言像素， 也能 SavePNG
+    把每个非空白字符画成一个色块（近似字形占位）、 DrawImage 填充品红占位块。它不依赖任何图形后端，适合单元测试断言像素， 也能 DumpPNG
     出图供人工查看。缓冲区初始为全透明。
 
     混合规则做了简化：半透明填充按 src*a + dst*(255-a) 直通混合（不预乘）， 仅用于测试与可视化，不追求色彩学精确。
@@ -1398,6 +1402,12 @@ func (g *BufferGraphics) DrawSprite(x, y int, s *Sprite)
 func (g *BufferGraphics) DrawText(x, y, w, h int, paint Paint, text string)
     DrawText 实现 Graphics：整段空白只记录不绘制；其余每个字符画一个内缩 色块作为字形近似，保证"该有字的地方有颜色可断言"。
 
+func (g *BufferGraphics) DumpPNG(path string) error
+    DumpPNG 把缓冲区当前内容编码为 PNG 文件落盘。
+
+    这是「仅缓冲快照」：不布局、不绘制，缓冲里画过什么就存什么——没渲染过 是空图，没重排就渲染则是旧帧。要出「应用一帧」得先走完整流程（Refresh
+    重排 + RenderNode 光栅化，示例的 -dump-png 即此），本方法只是最后一步。
+
 func (g *BufferGraphics) FillRect(x, y, w, h int, r, gg, b, a uint8)
     FillRect 填充一个整数矩形（自动裁剪到缓冲区与当前裁剪栈）。
 
@@ -1412,9 +1422,6 @@ func (g *BufferGraphics) PopClip()
 
 func (g *BufferGraphics) PushClip(x, y, w, h int)
     PushClip 实现 Clipper：压入一个与当前栈顶求交集的裁剪矩形。
-
-func (g *BufferGraphics) SavePNG(path string) error
-    SavePNG 把缓冲区内容导出为 PNG 文件（供人工查看渲染结果）。
 
 type CSSStyleDeclaration interface {
 	Display() Display

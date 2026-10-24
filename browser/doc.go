@@ -81,12 +81,18 @@
 //   - doc.DumpSVG()（-dump-svg）：级联+布局序列化成 SVG，文字是真实
 //     <text>、可在浏览器里看真字体；不经过光栅绘制器，反映的是「布局与
 //     样式」，不是最终像素（圆角精灵、抗锯齿看不到）。核对几何/层级/配色。
-//   - engine.NewBufferedViewport + BufferGraphics.SavePNG（-dump-png）：
-//     无头软件光栅化到 RGBA 缓冲，文字是占位方块（不依赖字体后端），
-//     可 ColorAt 逐像素断言——CI/headless 的首选。
+//   - -dump-png（示例 flag，完整流程）：装外壳 → Refresh 重排 →
+//     RenderNode 光栅化进缓冲 → 最后 buf.DumpPNG 落盘。产物是「当前文档
+//     在视口的完整一帧」，软件光栅后端文字是占位方块——CI 逐像素断言的
+//     首选。
+//   - BufferGraphics.DumpPNG(path)（仅缓冲快照）：只是把缓冲里**已有**的
+//     像素编码成文件，不布局、不绘制——没渲染过是空图，没重排就渲染则是
+//     旧帧。它是上一条流程的最后一步，单独调用只适合「我刚 RenderNode
+//     完，把现场存下来」这类场景，别当出图入口。
 //   - Window.Screenshot()：回读真实窗口渲染目标的当前内容（原生字节 +
 //     格式 + 尺寸），是「用户实际看到的样子」；要存 PNG 由应用自己编码
 //     （见 examples/snip 的 saveWindowPNG）。
 //
-// 一句话：分析用 dump-svg / dump-png，截图用 Screenshot。
+// 一句话：分析用 -dump-svg / -dump-png，快照存档用 DumpPNG（先自己
+// Refresh + RenderNode），截图用 Screenshot。
 package browser

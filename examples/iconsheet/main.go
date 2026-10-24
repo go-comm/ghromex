@@ -534,7 +534,7 @@ func dump(spec ui.Spec, page, search, pngPath, svgPath string) error {
 	doc.Refresh()
 	engine.RenderNode(buf, doc)
 	if pngPath != "" {
-		if err := buf.SavePNG(pngPath); err != nil {
+		if err := buf.DumpPNG(pngPath); err != nil {
 			return err
 		}
 	}

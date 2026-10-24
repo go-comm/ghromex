@@ -206,7 +206,7 @@ func (g *FakeGraphics) PopClip()                {}
 // BufferGraphics 把绘制指令落在一块二维 RGBA 缓冲区上：
 // DrawColor 填充矩形、DrawText 把每个非空白字符画成一个色块（近似字形占位）、
 // DrawImage 填充品红占位块。它不依赖任何图形后端，适合单元测试断言像素，
-// 也能 SavePNG 出图供人工查看。缓冲区初始为全透明。
+// 也能 DumpPNG 出图供人工查看。缓冲区初始为全透明。
 //
 // 混合规则做了简化：半透明填充按 src*a + dst*(255-a) 直通混合（不预乘），
 // 仅用于测试与可视化，不追求色彩学精确。
@@ -431,8 +431,12 @@ func (g *BufferGraphics) FontMetrics(text string, fontSize int, bold bool, famil
 	return h / 2, h - h/2
 }
 
-// SavePNG 把缓冲区内容导出为 PNG 文件（供人工查看渲染结果）。
-func (g *BufferGraphics) SavePNG(path string) error {
+// DumpPNG 把缓冲区当前内容编码为 PNG 文件落盘。
+//
+// 这是「仅缓冲快照」：不布局、不绘制，缓冲里画过什么就存什么——没渲染过
+// 是空图，没重排就渲染则是旧帧。要出「应用一帧」得先走完整流程（Refresh
+// 重排 + RenderNode 光栅化，示例的 -dump-png 即此），本方法只是最后一步。
+func (g *BufferGraphics) DumpPNG(path string) error {
 	img := image.NewNRGBA(image.Rect(0, 0, g.W, g.H))
 	for y := 0; y < g.H; y++ {
 		copy(img.Pix[y*img.Stride:y*img.Stride+g.W*4], g.pix[y*g.W*4:(y+1)*g.W*4])

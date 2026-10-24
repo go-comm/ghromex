@@ -245,7 +245,7 @@ func dump(spec ui.Spec, pngPath, svgPath string) error {
 	engine.RenderNode(buf, doc)
 	// 两个出口可以同时要：先出 PNG，再出 SVG（同一份布局）。
 	if pngPath != "" {
-		if err := buf.SavePNG(pngPath); err != nil {
+		if err := buf.DumpPNG(pngPath); err != nil {
 			return err
 		}
 	}
