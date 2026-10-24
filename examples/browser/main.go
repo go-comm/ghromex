@@ -16,7 +16,7 @@
 //	go run ./examples/browser -dump-png out.png   # 无头出图：软件光栅，核对布局/配色
 //	go run ./examples/browser -dump-buffer-png out.png # 无头出图：裸页面快照（不装外壳）
 //	go run ./examples/browser -dump-svg out.svg   # 无头出图：SVG，核对布局/层级
-//	go run ./examples/browser -shot out.png       # 真实窗口出图：真实字体观感
+//	go run ./examples/browser -shot out.png       # 真实窗口截图：真实字体渲染一帧存 PNG
 package main
 
 import (
@@ -24,6 +24,8 @@ import (
 	"flag"
 	"fmt"
 	"html"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,6 +48,7 @@ func main() {
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
 	dumpBufferPNG := flag.String("dump-buffer-png", "", "无头出图：裸页面 buffer 快照 PNG（不装外壳），对照 -dump-png")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
+	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
 	flag.Parse()
 
 	if *dumpBufferPNG != "" {
@@ -86,6 +89,15 @@ func main() {
 		app.showHome()
 	}
 
+	if *shot != "" {
+		if err := saveShot(win, app.doc, *shot); err != nil {
+			fmt.Fprintln(os.Stderr, "截图失败:", err)
+			os.Exit(1)
+		}
+		fmt.Println("PNG 已写入:", *shot)
+		return
+	}
+
 	if *exitAfter > 0 {
 		win.SetAutoExit(time.Duration(*exitAfter))
 	}
@@ -93,6 +105,43 @@ func main() {
 		fmt.Fprintln(os.Stderr, "运行失败:", err)
 		os.Exit(1)
 	}
+}
+
+// saveShot 用真实字体渲染一帧并截图：Refresh 重排、RenderFrame 画一帧、
+// Window.Screenshot 回读窗口像素后本地编码 PNG。
+//
+// 与 -dump-png 的区别：那条路用软件光栅后端，文字是占位方块（用途是逐
+// 像素断言）；这条走真实字体与 SDL 渲染器，用来看最终观感。
+func saveShot(win *browser.Window, doc engine.HTMLDocument, path string) error {
+	// installChrome 刚改过 DOM，必须先重排再画：RenderFrame 只负责
+	// 「清屏 + 画当前布局」，不会自己重排（主循环里由 ChangeCount 驱动）。
+	if doc != nil {
+		doc.Refresh()
+	}
+	win.RenderFrame()
+	raw, _, w, h, err := win.Screenshot()
+	if err != nil {
+		return err
+	}
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	// 后端回读格式为 XBGR8888（小端内存序 R,G,B,X）：前三个字节就是
+	// 颜色，第 4 字节不是 alpha，统一补 255。
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := (y*w + x) * 4
+			o := y*img.Stride + x*4
+			img.Pix[o] = raw[i]
+			img.Pix[o+1] = raw[i+1]
+			img.Pix[o+2] = raw[i+2]
+			img.Pix[o+3] = 255
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return png.Encode(f, img)
 }
 
 // dumpBuffer 出「裸页面」的 buffer 快照：只开缓冲视口 + 打开文档就光栅化
@@ -189,11 +238,12 @@ func findHomeDir() string {
 
 type browserApp struct {
 	win     opener
-	homeDir string   // 起始页相对链接的基准目录
-	dir     string   // 当前页面所在目录，相对链接按它解析
-	current string   // 当前地址：homeURL 或文件路径
-	history []string // 浏览历史，元素含义同 current
-	index   int      // 当前页在 history 中的下标；初始为 -1（空历史）
+	doc     engine.HTMLDocument // 当前文档（截图前 Refresh 用），show 打开成功时更新
+	homeDir string              // 起始页相对链接的基准目录
+	dir     string              // 当前页面所在目录，相对链接按它解析
+	current string              // 当前地址：homeURL 或文件路径
+	history []string            // 浏览历史，元素含义同 current
+	index   int                 // 当前页在 history 中的下标；初始为 -1（空历史）
 }
 
 // opener 是浏览器用到的窗口能力；*browser.Window 满足它，测试可以用无头
@@ -344,6 +394,7 @@ func (b *browserApp) show(addr, dir string, data []byte, commit bool) bool {
 	}
 	doc.SetOnNavigate(b.gotoAddress)
 	b.installChrome(doc)
+	b.doc = doc
 	return true
 }
 
