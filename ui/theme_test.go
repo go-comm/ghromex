@@ -331,6 +331,66 @@ func TestSemanticButtonPaint(t *testing.T) {
 	}
 }
 
+// 禁用输入控件必须「沉」到画布档：深色主题里 SurfaceAlt 是悬浮工具栏
+// 的亮档，禁用字段若还走它，会比可用的更亮（旧 bug）。像素守卫：
+// 禁用 input 底色 = Bg，且不等于 SurfaceAlt。
+func TestDisabledFieldSinks(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		th   Theme
+	}{
+		{"light", Light()},
+		{"dark", Dark()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			th := tc.th
+			vp, buf := engine.NewBufferedViewport(200, 80)
+			doc, err := engine.OpenDocument(vp,
+				`<div style="background-color:`+th.Surface+`"><input class="system-ui-input" disabled style="width:120px"></div>`)
+			if err != nil {
+				t.Fatalf("打开文档失败: %v", err)
+			}
+			Install(doc, Spec{Theme: &th})
+			doc.Refresh()
+			engine.RenderNode(buf, doc)
+
+			el := doc.QuerySelector(".system-ui-input")
+			if el == nil {
+				t.Fatal("找不到输入框")
+			}
+			box := el.GetBoundingClientRect()
+			x := (box.Left().Pixel() + box.Right().Pixel()) / 2
+			y := (box.Top().Pixel() + box.Bottom().Pixel()) / 2
+			r, g, b, _, ok := buf.ColorAt(x, y)
+			if !ok {
+				t.Fatalf("取色失败: (%d,%d)", x, y)
+			}
+			wr, wg, wb := mustRGB(t, th.Bg)
+			if r != wr || g != wg || b != wb {
+				t.Fatalf("禁用输入底色 = #%02X%02X%02X，期望画布档 %s", r, g, b, th.Bg)
+			}
+			sr, sg, sb := mustRGB(t, th.SurfaceAlt)
+			if r == sr && g == sg && b == sb {
+				t.Fatalf("禁用输入底色撞上悬浮档 %s：禁用要沉不要浮", th.SurfaceAlt)
+			}
+			// 描边退回弱档：深色里 Field==Bg，中心点区分不了「规则没生效」，
+			// 但描边 Border(#2B3A4F) ≠ BorderStrong(#334155) 能区分。左缘
+			// 竖直中段是 1px 直边（避开圆角），扫描取第一个非底色像素。
+			br, bg2, bb := mustRGB(t, th.Border)
+			hit := false
+			for x := box.Left().Pixel(); x <= box.Left().Pixel()+4 && !hit; x++ {
+				rr, gg, bl, _, ok := buf.ColorAt(x, y)
+				if ok && rr == br && gg == bg2 && bl == bb {
+					hit = true
+				}
+			}
+			if !hit {
+				t.Fatalf("禁用输入描边不是弱档 %s：:disabled 规则可能没生效", th.Border)
+			}
+		})
+	}
+}
+
 func mustRGB(t *testing.T, s string) (uint8, uint8, uint8) {
 	t.Helper()
 	s = strings.TrimPrefix(s, "#")

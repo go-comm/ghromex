@@ -996,10 +996,14 @@ html { background-color: $bg$; }
 	font-family: $font$;
 }
 .system-ui-input:focus { border-color: $accent$; }
+/* 禁用控件要「沉」不要「浮」：底色退到画布档（浅色在白字段上发灰，
+   深色与可用态同深），描边退回弱档 Border，文字 muted。原先用
+   SurfaceAlt，深色里它已升格为「悬浮工具栏」的亮档，禁用字段反而
+   比可用的更亮，方向反了。 */
 .system-ui-input:disabled,
 .system-ui-select:disabled,
 .system-ui-textarea:disabled {
-	background-color: $surfaceAlt$; color: $muted$;
+	background-color: $bg$; border-color: $border$; color: $muted$;
 }
 
 /* 表单控件：与页面卡片同一套圆角/描边。textarea 默认给一个可用的高度，

@@ -5,6 +5,13 @@
 
 ## 未发布
 
+- **ui**：禁用输入控件退回「下沉」口径——`:disabled` 底色从 `SurfaceAlt`
+  改回画布档 `Bg`、描边退到弱档 `Border`。上一笔深色层次重排把
+  `SurfaceAlt` 升格成悬浮工具栏的亮档后，禁用字段比可用的还亮，方向
+  反了；浅色同步受益（白字段上灰一档）。新增像素守卫
+  `TestDisabledFieldSinks`：禁用底色 = Bg 且不撞悬浮档，描边 = 弱档
+  Border（深色 `Field==Bg`，中心点区分不了规则失效，靠描边色兜底）。
+
 - **ui**：深色主题空间层次重排——新增 `Field` 令牌（输入控件底色），
   input/select/textarea/中性按钮底色从 `Surface` 迁到 `Field`。深色下
   Field=#0F172A 沉到画布档（一眼看出哪里能打字）、SurfaceAlt 提到
