@@ -52,7 +52,6 @@
 go run ./examples/ua -exit-after 3s     # 指定时长后自动退出（调试/CI）
 go run ./examples/ua -dump-svg out.svg  # 级联+布局导出 SVG（真实 <text>），核对几何/层级/配色
 go run ./examples/kit -dump-png out.png # 软件光栅 PNG（文字是占位方块），断言布局/配色
-go run ./examples/kit -dump-buffer-png out.png # 裸页面 buffer 快照（不装工作台，与 -dump-png 对照）
 # 截图（真实窗口 + 真实字体；dummy 驱动可无显示器跑）
 go run ./examples/kit -shot out.png
 ```

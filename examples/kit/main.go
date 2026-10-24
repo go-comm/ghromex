@@ -6,7 +6,6 @@
 //	go run ./examples/kit
 //	go run ./examples/kit -dark                # 深色主题
 //	go run ./examples/kit -dump-png kit.png    # 无头出图：软件光栅，文字是占位方块
-//	go run ./examples/kit -dump-buffer-png kit.png # 无头出图：裸页面快照（不装工作台）
 //	go run ./examples/kit -dump-svg kit.svg    # 无头出图：SVG，核对布局/层级
 //	go run ./examples/kit -shot kit.png        # 真实窗口截图：真实字体观感
 //	go run ./examples/kit -dark -shot kit.png  # 深色主题 + 真实窗口截图
@@ -36,7 +35,6 @@ const (
 
 func main() {
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
-	dumpBufferPNG := flag.String("dump-buffer-png", "", "无头出图：裸页面 buffer 快照 PNG（不装工作台/接线），对照 -dump-png")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
 	shotMenu := flag.String("shot-menu", "", "与 -shot 配合：先展开指定标题的菜单（如 文件）")
@@ -58,13 +56,6 @@ func main() {
 		spec.Theme = &theme
 	}
 
-	if *dumpBufferPNG != "" {
-		if err := dumpBuffer(*dumpBufferPNG); err != nil {
-			fmt.Fprintln(os.Stderr, "无头导出失败:", err)
-			os.Exit(1)
-		}
-		return
-	}
 	if *dumpPNG != "" || *dumpSVG != "" {
 		if err := dump(spec, *dumpPNG, *dumpSVG); err != nil {
 			fmt.Fprintln(os.Stderr, "无头导出失败:", err)
@@ -240,19 +231,6 @@ func addControls(doc engine.HTMLDocument, status func(string)) {
 
 // dump 在没有窗口的情况下装好工作台并出一张图。
 //
-// dumpBuffer 出「裸页面」的 buffer 快照：只开缓冲视口 + 打开页面就光栅化
-// 落盘——不装工作台、不接线，与 -dump-png（装外壳的完整流程）对照。
-// OpenDocument 已完成首次级联+布局，直接 RenderNode 即可。
-func dumpBuffer(path string) error {
-	vp, buf := engine.NewBufferedViewport(winW, winH)
-	doc, err := engine.OpenDocument(vp, page)
-	if err != nil {
-		return err
-	}
-	engine.RenderNode(buf, doc)
-	return buf.DumpPNG(path)
-}
-
 // 这条路径和真实窗口共用 install + 布局 + 渲染，所以 PNG 看到的就是
 // 窗口里的形状与配色（文字是软件光栅后端的占位方块）。
 func dump(spec ui.Spec, pngPath, svgPath string) error {
