@@ -13,6 +13,7 @@
 //	go run ./examples/notepad -shot out.png        # 真实窗口截图：真实字体渲染一帧存 PNG
 //	go run ./examples/notepad -shot out.png -shot-find # 截图前先展开查找替换栏
 //	go run ./examples/notepad -shot out.png -shot-select # 截图前全选（状态栏报选中字数）
+//	go run ./examples/notepad -dark                  # 深色主题
 //
 // 页面完全由 page.go 用 Go 构造，没有 HTML 文件。
 //
@@ -71,9 +72,13 @@ func main() {
 	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
 	shotFind := flag.Bool("shot-find", false, "与 -shot 配合：截图前展开查找替换栏（模拟 Ctrl+F）")
 	shotSelect := flag.Bool("shot-select", false, "与 -shot 配合：截图前全选编辑区（模拟 Ctrl+A，状态栏报选中字数）")
+	dark := flag.Bool("dark", false, "使用深色主题")
 	flag.Parse()
 
 	theme := ui.Light()
+	if *dark {
+		theme = ui.Dark()
+	}
 
 	if *dumpPNG != "" || *dumpSVG != "" {
 		vp, buf := engine.NewBufferedViewport(winW, winH)
