@@ -513,7 +513,7 @@ func (n *notepad) pickFiles(title string, multi bool) []string {
 	opts := dialog.Options{
 		Title:      title,
 		DefaultDir: n.currentDir(),
-		Filters:    openFilters(), // 「打开」认识的类型都比上；「另存为」仍用 fileFilters
+		Filters:    fileFilters(),
 	}
 	var paths []string
 	if multi {
@@ -561,29 +561,14 @@ func (n *notepad) openDir() {
 	n.message("已选择 " + dir)
 }
 
-// openFilters 是「打开」对话框的过滤器：第一项「所有支持的类型」默认选中，
-// 随后每种类型一项，最后所有文件兜底。Pattern 支持分号分隔多模式
-// （Win32 COMDLG_FILTERSPEC 语法，见 backend/dialog）。
-func openFilters() []dialog.FileFilter {
-	return []dialog.FileFilter{
-		{Name: "所有支持的类型 (*.txt;*.md;*.json;*.xml;*.html)",
-			Pattern: "*.txt;*.md;*.markdown;*.json;*.xml;*.html;*.htm;*.css;*.js;*.log;*.ini;*.csv;*.yml;*.yaml"},
-		{Name: "文本文件 (*.txt)", Pattern: "*.txt"},
-		{Name: "Markdown 文件 (*.md)", Pattern: "*.md;*.markdown"},
-		{Name: "JSON 文件 (*.json)", Pattern: "*.json"},
-		{Name: "XML 文件 (*.xml)", Pattern: "*.xml"},
-		{Name: "HTML 文件 (*.html)", Pattern: "*.html;*.htm"},
-		{Name: "CSS 文件 (*.css)", Pattern: "*.css"},
-		{Name: "日志文件 (*.log)", Pattern: "*.log"},
-		{Name: "所有文件 (*.*)", Pattern: "*.*"},
-	}
-}
-
-// fileFilters 是「另存为」的过滤器：记事本产出以文本为主，保持两项，
-// 第一项决定缺省扩展名（.txt）。
+// fileFilters 是记事本对话框的文件类型过滤器：只要两项。第一项默认选中，
+// 把认识的文本类型打包进一个模式串（分号分隔是 Win32 COMDLG_FILTERSPEC
+// 语法，见 backend/dialog）；它的第一个模式 *.txt 同时决定「另存为」的
+// 缺省扩展名。第二项所有文件兜底。
 func fileFilters() []dialog.FileFilter {
 	return []dialog.FileFilter{
-		{Name: "文本文件 (*.txt)", Pattern: "*.txt"},
+		{Name: "文本文件 (*.txt;*.md;*.json;*.xml;*.html)",
+			Pattern: "*.txt;*.md;*.markdown;*.json;*.xml;*.html;*.htm;*.css;*.js;*.log;*.ini;*.csv;*.yml;*.yaml"},
 		{Name: "所有文件 (*.*)", Pattern: "*.*"},
 	}
 }
