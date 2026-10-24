@@ -50,17 +50,21 @@ func Tool(label string, run func() error) Action {
 // Sep 构造一条分隔线（菜单里是横线，工具栏里是竖线）。
 func Sep() Action { return Action{Sep: true} }
 
-// Slot 把一个现成控件（输入框、下拉等）嵌进工具栏，与命令按钮同排：
+// Slot 把一个现成控件（输入框、下拉、按钮、标签等）嵌进工具栏，与命令
+// 按钮同排：
 //
 //	addr := ui.NewTextInput(doc, "")
 //	...
 //	Tools: []ui.Action{
 //		ui.Tool("刷新", refresh).WithIcon("refresh"),
 //		ui.Slot(addr),
+//		ui.Slot(ui.NewButton(doc, "打开", open).SetVariant("default")),
 //	}
 //
-// 控件句柄仍归应用：取值、设值、禁用直接调控件自己的方法，不必按 id 回查
-// 元素。槽位不是命令：没有快捷键与可用态，禁用请用控件自己的 SetEnabled。
+// 命令按钮是无边框的（悬停才铺底）；要「一眼可点」的动作按钮或纯文本
+// 提示，走槽位放描边按钮 / Label，不做伪按钮。控件句柄仍归应用：取值、
+// 设值、禁用直接调控件自己的方法，不必按 id 回查元素。槽位不是命令：
+// 没有快捷键与可用态，禁用请用控件自己的 SetEnabled。
 func Slot(c Control) Action {
 	return Action{slot: c}
 }

@@ -734,6 +734,9 @@ html { background-color: $bg$; }
 }
 .system-ui-tool-slot .system-ui-input,
 .system-ui-tool-slot .system-ui-select { height: $toolCtrlH$px; }
+/* 槽位里的纯文本用 Label/Text 控件包裹（不做伪按钮）：单行标签的
+   块级底边距是为表单字段上方设计的，嵌进工具栏要收掉、转 inline。 */
+.system-ui-tool-slot .system-ui-label { display: inline; margin: 0; }
 .system-ui-tool-slot .system-ui-select { width: 150px; }
 
 .system-ui-status {

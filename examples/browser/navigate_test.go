@@ -47,6 +47,16 @@ func TestLinkNavigation(t *testing.T) {
 		}
 		clickCenter(el)
 	}
+	// 「打开」是槽位里的描边按钮（NewButton + default 变体），不是命令
+	// 工具按钮：选择器走 slot 路径。
+	clickSlotButton := func() {
+		t.Helper()
+		el := h.doc.QuerySelector(`.system-ui-tool-slot .system-ui-btn`)
+		if el == nil {
+			t.Fatal("找不到槽位按钮「打开」")
+		}
+		clickCenter(el)
+	}
 	addrEl := func() engine.HTMLElement {
 		t.Helper()
 		el := h.doc.QuerySelector(".system-ui-tool-slot .system-ui-input")
@@ -81,7 +91,7 @@ func TestLinkNavigation(t *testing.T) {
 			".system-ui-toolbar", ".system-ui-status",
 			`.system-ui-tool[title="后退"]`, `.system-ui-tool[title="前进"]`,
 			`.system-ui-tool[title="刷新"]`, `.system-ui-tool[title="首页"]`,
-			`.system-ui-tool[title="打开"]`,
+			`.system-ui-tool-slot .system-ui-btn`,
 			".system-ui-tool-slot .system-ui-input", ".system-ui-tool-slot .system-ui-select",
 		} {
 			if h.doc.QuerySelector(sel) == nil {
@@ -132,7 +142,7 @@ func TestLinkNavigation(t *testing.T) {
 
 	// 地址栏「打开」
 	addrEl().SetAttribute("value", "../ua/index.html")
-	clickTool("打开")
+	clickSlotButton()
 	assertTitle("UA 与排版对照 · 浏览器对照")
 	assertChrome()
 	wantUA := filepath.Join("..", "ua", "index.html")

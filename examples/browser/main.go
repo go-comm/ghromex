@@ -430,7 +430,11 @@ func (b *browserApp) navTools(doc engine.HTMLDocument) []ui.Action {
 		ui.Sep(),
 		ui.Slot(pages),
 		ui.Slot(addr),
-		ui.Tool("打开", asCmd(open)),
+		// 「打开」是表单式描边按钮（Slot + NewButton），不是无边框命令
+		// 按钮：地址栏右侧这个动作要一眼看出可点，纯文字容易和输入框
+		// 连成一片。工具栏里的纯文本同理走 Slot(NewLabel/TextView)，
+		// 不做伪按钮。
+		ui.Slot(ui.NewButton(doc, "打开", open).SetVariant("default")),
 	}
 }
 

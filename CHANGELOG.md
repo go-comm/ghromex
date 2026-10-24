@@ -13,6 +13,14 @@
   half-leading（`DrawText` 契约是 y = 纹理顶、不含半行距，常规流由
   `flushLine` 加，调用方自己居中时必须自己加）。像素实测 browser 地址
   栏文字中心 13.5 → 17.5 = 输入框中线。
+- **ui / examples**：browser 地址栏「打开」改为槽位描边按钮——
+  `ui.Tool("打开")`（无边框命令按钮，看着像纯文本）改为
+  `ui.Slot(ui.NewButton(...).SetVariant("default"))`，动作要一眼可点。
+  定下工具栏口径：命令按钮保持无边框（图标命令），「一眼可点」的动作
+  按钮与纯文本提示都走槽位放描边按钮 / Label，不做伪按钮。配套：
+  `.system-ui-tool-slot .system-ui-label { display: inline; margin: 0 }`
+  （表单标签的块级底边距嵌进工具栏要收掉）；`Slot` 文档写明口径。
+  navigate_test 断言选择器随迁到 `.system-ui-tool-slot .system-ui-btn`。
 
 - **ui**：按钮文字垂直居中修正——核心 CSS 的按钮 `line-height` 改为公式
   推导：`控件高 − 上下边框(2) − 光学修正(1)`（新增 `$btnLH$`/`$toolLH$`
