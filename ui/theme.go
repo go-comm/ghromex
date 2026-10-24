@@ -80,7 +80,7 @@ type Theme struct {
 	ToolHeight       int // 工具栏高度
 	StatusHeight     int // 状态栏高度
 	StatusRightWidth int // 状态栏右侧消息预留宽度
-	ButtonHeight     int // 按钮高度
+	ButtonHeight     int // 标准表单档控件高度（按钮/输入框/下拉），默认 32
 	// ToolControlHeight 是工具栏内交互控件（图标/文字按钮、槽位里的输入框
 	// 与下拉）的统一高度：条内所有控件同高、同用 vertical-align: middle
 	// 对齐，才能彼此顶底齐平（默认 28，配 ToolHeight 36）。
@@ -147,8 +147,10 @@ func Light() Theme {
 		ToolHeight:       36,
 		StatusHeight:     24,
 		StatusRightWidth: 280,
-		ButtonHeight:     30,
-		// 工具栏控件统一 28px：比页面按钮（30）矮一档，配 36 的条高
+		// 标准表单档：按钮/输入框/下拉同高 32（业界紧凑表单口径）；
+		// 工具栏档另见 ToolControlHeight 28，两档互不跟随。
+		ButtonHeight: 32,
+		// 工具栏控件统一 28px：比页面按钮（32）矮一档，配 36 的条高
 		// 上下各留 4px，图标/输入框/下拉同高同口径才能彼此齐平。
 		ToolControlHeight: 28,
 		BarHeight:         44,
@@ -935,8 +937,10 @@ html { background-color: $bg$; }
 .system-ui-bar .system-ui-select { width: 170px; }
 .system-ui-bar .system-ui-check { line-height: $btnH$px; }
 
+/* 表单控件与按钮同档（ButtonHeight，默认 32）：内容区里三者顶底齐平、
+   悬停/焦点反馈节奏一致。工具栏槽位里的会另被 $toolCtrlH$ 覆盖成 28。 */
 .system-ui-input {
-	width: 280px; height: 30px; padding: 0 10px; box-sizing: border-box;
+	width: 280px; height: $btnH$px; padding: 0 10px; box-sizing: border-box;
 	border: 1px solid $borderStrong$; border-radius: 7px;
 	background-color: $surface$; color: $text$; font-size: 13px;
 	font-family: $font$;
@@ -951,7 +955,7 @@ html { background-color: $bg$; }
 /* 表单控件：与页面卡片同一套圆角/描边。textarea 默认给一个可用的高度，
    应用需要更高时直接改内联样式（引擎没有 calc，不能做自适应高度）。 */
 .system-ui-select {
-	width: 280px; height: 30px; padding: 0 8px; box-sizing: border-box;
+	width: 280px; height: $btnH$px; padding: 0 8px; box-sizing: border-box;
 	border: 1px solid $borderStrong$; border-radius: 7px;
 	background-color: $surface$; color: $text$; font-size: 13px;
 	font-family: $font$;

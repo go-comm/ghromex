@@ -5,6 +5,13 @@
 
 ## 未发布
 
+- **ui**：标准表单档对齐业界口径——`ButtonHeight` 30 → 32，且
+  `.system-ui-input` / `.system-ui-select` 的高度不再写死 30px，改随
+  `$btnH$` 推导：页面内容区里按钮/输入框/下拉同高 32，顶底天然齐平。
+  尺寸阶梯定型为两档：工具栏档 `ToolControlHeight` 28（配 ToolHeight 36，
+  上下各 4px 呼吸）、标准表单档 `ButtonHeight` 32；两档互不跟随，换主题
+  各调各的。像素实测 kit 画廊：输入框边框 456..487（32px）、主按钮蓝底
+  32px。菜单浮层（30px 菜单项）与 textarea 多行档不受影响。
 - **ui**：工具栏控件统一高度与对齐（最终口径）——新增主题字段
   `ToolControlHeight`（默认 28）：工具栏内所有交互控件（图标/文字按钮、
   槽位里的输入框与下拉）同高 28px、同用 `vertical-align: middle`，盒中点

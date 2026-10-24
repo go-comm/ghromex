@@ -543,7 +543,7 @@ func TestBarThemeCSS(t *testing.T) {
 	// 换一套条高，内边距要跟着变（否则控件不在条里居中）。
 	custom := th
 	custom.BarHeight = 64
-	if got := custom.css(32, 72, 24, true); !strings.Contains(got, "height: 64px; padding: 17px") {
+	if got := custom.css(32, 72, 24, true); !strings.Contains(got, "height: 64px; padding: "+strconv.Itoa((64-th.ButtonHeight)/2)+"px") {
 		t.Error("BarHeight 改 64 后条内边距没跟着推导")
 	}
 	// 零值走 withDefaults 补齐（漏填不该生成 height: 0px 的条）。

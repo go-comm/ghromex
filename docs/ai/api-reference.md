@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-25 00:11
+> 生成时间: 2026-10-25 00:27
 
 ---
 
@@ -2926,7 +2926,7 @@ type Theme struct {
 	ToolHeight       int // 工具栏高度
 	StatusHeight     int // 状态栏高度
 	StatusRightWidth int // 状态栏右侧消息预留宽度
-	ButtonHeight     int // 按钮高度
+	ButtonHeight     int // 标准表单档控件高度（按钮/输入框/下拉），默认 32
 	// ToolControlHeight 是工具栏内交互控件（图标/文字按钮、槽位里的输入框
 	// 与下拉）的统一高度：条内所有控件同高、同用 vertical-align: middle
 	// 对齐，才能彼此顶底齐平（默认 28，配 ToolHeight 36）。
