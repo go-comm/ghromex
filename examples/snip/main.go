@@ -54,9 +54,9 @@ type app struct {
 
 func main() {
 	delay := flag.Duration("delay", 0, "抓屏前等待，留时间切换/整理窗口")
-	source := flag.String("source", "", "用图片代替桌面抓屏（调试/无头出图）")
-	shotOverlay := flag.String("shot-overlay", "", "把选区页渲染成 PNG 后退出")
-	shotPreview := flag.String("shot-preview", "", "把预览页渲染成 PNG 后退出")
+	source := flag.String("source", "", "用图片代替桌面抓屏（调试用，可不开显示器）")
+	shotOverlay := flag.String("shot-overlay", "", "真实窗口出图：选区页存 PNG 后退出")
+	shotPreview := flag.String("shot-preview", "", "真实窗口出图：预览页存 PNG 后退出")
 	exitAfter := flag.Duration("exit-after", 0, "打开后指定时长自动退出（调试/CI）")
 	flag.Parse()
 
@@ -198,33 +198,12 @@ func (a *app) renderShots(overlayPath, previewPath string) error {
 	return nil
 }
 
-// saveWindowPNG 重排当前文档、渲染一帧并回读窗口像素。
+// saveWindowPNG 出窗口当前内容的 PNG（真实渲染器与字体）。
 //
-// RenderFrame 只负责“清屏 + 画当前布局”，不自己重排——改了文档/窗口
-// 尺寸之后必须先 Refresh，否则截到的是旧布局。
+// 重排（RenderFrame 只画当前布局，改了文档/尺寸之后必须先 Refresh）已经
+// 收进 Window.SavePNG，这里直接转发。
 func (a *app) saveWindowPNG(path string) error {
-	if a.doc != nil {
-		a.doc.Refresh()
-	}
-	a.win.RenderFrame()
-	raw, _, w, h, err := a.win.Screenshot()
-	if err != nil {
-		return err
-	}
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	// 后端回读格式为 XBGR8888（小端内存序 R,G,B,X）：前三个字节就是
-	// 颜色，第 4 字节不是 alpha，统一补 255。
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := (y*w + x) * 4
-			o := y*img.Stride + x*4
-			img.Pix[o] = raw[i]
-			img.Pix[o+1] = raw[i+1]
-			img.Pix[o+2] = raw[i+2]
-			img.Pix[o+3] = 255
-		}
-	}
-	return writePNG(path, img)
+	return a.win.SavePNG(path)
 }
 
 // demoRect 给无头演示挑一个不贴边的选区（留出尺寸标签的位置）。

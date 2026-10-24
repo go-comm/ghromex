@@ -2,7 +2,7 @@
 //
 //	go run ./examples/ua
 //	go run ./examples/ua -exit-after 3s     # 调试/CI
-//	go run ./examples/ua -dump-svg out.svg  # 无头导出
+//	go run ./examples/ua -dump-svg out.svg  # 无头出图：SVG，核对布局/层级
 //
 // 页面 index.html 与本文件同目录，用 go:embed 打进二进制。
 package main
@@ -23,7 +23,7 @@ var page []byte
 
 func main() {
 	exitAfter := flag.Duration("exit-after", 0, "指定时长后自动退出，如 3s（调试/CI 用）")
-	dumpSVG := flag.String("dump-svg", "", "无头模式：完成级联与布局后把结果导出为 SVG 并退出")
+	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	flag.Parse()
 
 	if *dumpSVG != "" {

@@ -5,6 +5,15 @@
 
 ## 未发布
 
+- **browser**：新增 `Window.SavePNG(path)`：真实窗口出图的通用方法——重排
+  当前文档、渲染一帧、回读像素并编码 PNG（重排内置，改了文档不 Refresh
+  截到旧布局的坑收进库）；`ui.App.SavePNG` 转发同一能力。kit / iconsheet /
+  snip 示例各自手写的 saveShot / saveWindowPNG 删除，改调这一方法。
+- **出图三件套口径**：`doc.DumpSVG()`（`-dump-svg`）看布局几何层级；
+  `BufferGraphics.SavePNG`（`-dump-png`）是无头软件光栅像素断言（文字为
+  占位方块）；`Window.SavePNG`（`-shot`）是真实窗口渲染器 + 字体的最终
+  观感。`browser` 包文档新增小节，示例 flag 帮助文案统一为「无头出图 /
+  真实窗口出图：产出 + 用途」，browser 示例补齐 `-dump-png` / `-shot`。
 - **ui**：新增 `Spec.NoBodyReset`：跳过 `Install` 注入的 body 复位块（margin /
   padding / 颜色 / 字体），画布底色（`html` 的 `background-color`）不受影响、
   始终注入。演示 UA 样式的页面（body 的 `margin:8px` 本身就是演示内容）与

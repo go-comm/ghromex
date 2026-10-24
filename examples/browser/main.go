@@ -13,6 +13,9 @@
 //	go run ./examples/browser
 //	go run ./examples/browser -page examples/ua/index.html
 //	go run ./examples/browser -exit-after 3s
+//	go run ./examples/browser -dump-svg out.svg   # 无头出图：SVG，核对布局/层级
+//	go run ./examples/browser -shot out.png       # 真实窗口出图：真实字体观感
+//	go run ./examples/browser -shot out.png       # 真实窗口出图：真实字体观感
 package main
 
 import (
@@ -39,39 +42,16 @@ const homeURL = "about:home"
 func main() {
 	start := flag.String("page", "", "启动时打开的本地 HTML 文件（默认为内嵌起始页）")
 	exitAfter := flag.Duration("exit-after", 0, "指定时长后自动退出，如 3s（调试/CI 用）")
-	dumpSVG := flag.String("dump-svg", "", "无头模式：完成级联与布局后把结果导出为 SVG 并退出")
+	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
+	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
+	shot := flag.String("shot", "", "真实窗口出图：真实字体渲染一帧存 PNG，核对最终观感用")
 	flag.Parse()
 
-	if *dumpSVG != "" {
-		// 无头导出也走完整的浏览器外壳，便于检查工具栏与页面内容是否重叠。
-		hw := &headlessWindow{vp: engine.NewHeadlessViewport(1024, 720)}
-		app := &browserApp{win: hw, homeDir: findHomeDir(), index: -1}
-		if *start != "" {
-			abs, err := filepath.Abs(*start)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "打开文档失败:", err)
-				os.Exit(1)
-			}
-			data, err := os.ReadFile(abs)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "打开文档失败:", err)
-				os.Exit(1)
-			}
-			app.show(abs, filepath.Dir(abs), data, true)
-		} else {
-			app.showHome()
-		}
-		if hw.doc == nil {
-			fmt.Fprintln(os.Stderr, "没有可导出的文档")
-			os.Exit(1)
-		}
-		// 装配工具栏后布局还是旧的，先重排再导出（真实窗口由后端循环代劳）。
-		hw.doc.Refresh()
-		if err := os.WriteFile(*dumpSVG, []byte(hw.doc.DumpSVG()), 0o644); err != nil {
+	if *dumpPNG != "" || *dumpSVG != "" {
+		if err := dumpHeadless(*start, *dumpPNG, *dumpSVG); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		fmt.Println("SVG 已写入:", *dumpSVG)
 		return
 	}
 
@@ -98,6 +78,16 @@ func main() {
 		app.showHome()
 	}
 
+	if *shot != "" {
+		// SavePNG 自带重排（Install 刚改过 DOM，RenderFrame 只画当前布局）。
+		if err := win.SavePNG(*shot); err != nil {
+			fmt.Fprintln(os.Stderr, "截图失败:", err)
+			os.Exit(1)
+		}
+		fmt.Println("PNG 已写入:", *shot)
+		return
+	}
+
 	if *exitAfter > 0 {
 		win.SetAutoExit(time.Duration(*exitAfter))
 	}
@@ -105,6 +95,46 @@ func main() {
 		fmt.Fprintln(os.Stderr, "运行失败:", err)
 		os.Exit(1)
 	}
+}
+
+// dumpHeadless 处理 -dump-png / -dump-svg：不建真实窗口，也走完整的浏览器
+// 外壳（装工作台），导出的结果与窗口里看到的同源。
+func dumpHeadless(start, pngPath, svgPath string) error {
+	vp, buf := engine.NewBufferedViewport(1024, 720)
+	hw := &headlessWindow{vp: vp, buf: buf}
+	app := &browserApp{win: hw, homeDir: findHomeDir(), index: -1}
+	if start != "" {
+		abs, err := filepath.Abs(start)
+		if err != nil {
+			return fmt.Errorf("打开文档失败: %w", err)
+		}
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return fmt.Errorf("打开文档失败: %w", err)
+		}
+		app.show(abs, filepath.Dir(abs), data, true)
+	} else {
+		app.showHome()
+	}
+	if hw.doc == nil {
+		return fmt.Errorf("没有可导出的文档")
+	}
+	// 装配工具栏后布局还是旧的，先重排再导出（真实窗口由主循环代劳）。
+	hw.doc.Refresh()
+	if pngPath != "" {
+		engine.RenderNode(hw.buf, hw.doc)
+		if err := hw.buf.SavePNG(pngPath); err != nil {
+			return err
+		}
+		fmt.Println("PNG 已写入:", pngPath)
+	}
+	if svgPath != "" {
+		if err := os.WriteFile(svgPath, []byte(hw.doc.DumpSVG()), 0o644); err != nil {
+			return err
+		}
+		fmt.Println("SVG 已写入:", svgPath)
+	}
+	return nil
 }
 
 // findHomeDir 返回起始页相对链接的基准目录（绝对路径）。
@@ -147,10 +177,12 @@ type opener interface {
 	OpenDocumentWith(src string, opts engine.DocumentOptions) (engine.HTMLDocument, error)
 }
 
-// headlessWindow 让 -dump-svg 无需真实窗口也能走完整的浏览器加载流程
-// （包括装工作台），导出的 SVG 与窗口里看到的一致。
+// headlessWindow 让 -dump-png / -dump-svg 无需真实窗口也能走完整的浏览器
+// 加载流程（包括装工作台），导出的结果与窗口里看到的同源。buf 是软件光栅
+// 缓冲，只在 -dump-png 时消费。
 type headlessWindow struct {
 	vp  engine.Viewport
+	buf *engine.BufferGraphics
 	doc engine.HTMLDocument
 }
 

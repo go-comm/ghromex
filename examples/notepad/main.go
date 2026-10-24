@@ -8,7 +8,7 @@
 //	go run ./examples/notepad
 //	go run ./examples/notepad -file notes.txt      # 启动时打开文件
 //	go run ./examples/notepad -exit-after 3s       # 调试/CI
-//	go run ./examples/notepad -dump-svg out.svg    # 无头导出
+//	go run ./examples/notepad -dump-svg out.svg    # 无头出图：SVG，核对布局/层级
 //
 // 页面完全由 page.go 用 Go 构造，没有 HTML 文件。
 //
@@ -60,7 +60,7 @@ const (
 func main() {
 	file := flag.String("file", "", "启动时打开的文本文件")
 	exitAfter := flag.Duration("exit-after", 0, "指定时长后自动退出，如 3s（调试/CI 用）")
-	dumpSVG := flag.String("dump-svg", "", "无头模式：完成级联与布局后把结果导出为 SVG 并退出")
+	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	flag.Parse()
 
 	theme := ui.Light()
