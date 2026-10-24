@@ -11,6 +11,7 @@
 //	go run ./examples/notepad -dump-png out.png    # 无头出图：软件光栅 PNG
 //	go run ./examples/notepad -dump-svg out.svg    # 无头出图：SVG，核对布局/层级
 //	go run ./examples/notepad -shot out.png        # 真实窗口截图：真实字体渲染一帧存 PNG
+//	go run ./examples/notepad -shot out.png -shot-find # 截图前先展开查找替换栏
 //
 // 页面完全由 page.go 用 Go 构造，没有 HTML 文件。
 //
@@ -67,6 +68,7 @@ func main() {
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
+	shotFind := flag.Bool("shot-find", false, "与 -shot 配合：截图前展开查找替换栏（模拟 Ctrl+F）")
 	flag.Parse()
 
 	theme := ui.Light()
@@ -120,6 +122,9 @@ func main() {
 	}
 
 	if *shot != "" {
+		if *shotFind {
+			np.showFindBar() // 与 Ctrl+F 同一入口：查找栏展开、查找框拿焦点
+		}
 		if err := saveShot(win, doc, *shot); err != nil {
 			fmt.Fprintln(os.Stderr, "截图失败:", err)
 			os.Exit(1)

@@ -18,7 +18,8 @@
   文案统一为「无头出图 / 真实窗口截图：产出 + 用途」；示例覆盖补全：
   ua / portal / notepad 补 `-dump-png`，browser / notepad 提供本地
   `-shot`（`Window.Screenshot` 回读 + 本地编码 PNG，与 kit 同款，库层
-  不提供 PNG 编码）。
+  不提供 PNG 编码；notepad 另有 `-shot-find` 截图前展开查找栏，模拟
+  Ctrl+F 交互态）。
 - **ui**：新增 `Spec.NoBodyReset`：跳过 `Install` 注入的 body 复位块（margin /
   padding / 颜色 / 字体），画布底色（`html` 的 `background-color`）不受影响、
   始终注入。演示 UA 样式的页面（body 的 `margin:8px` 本身就是演示内容）与
