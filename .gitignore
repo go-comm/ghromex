@@ -20,3 +20,6 @@ libs/*.dll
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# notepad -shot 误把 flag 名当输出路径生成的快照（历史坑，防复发）
+/-out
