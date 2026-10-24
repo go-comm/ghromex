@@ -105,6 +105,13 @@
   同一份 HTML 与 CSS。flags：`-exit-after`/`-dump-png`/`-dump-svg`/`-shot`；
   测试覆盖加载器、外链端到端（DumpSVG 颜色证据）、15 节锚点、标签计数与
   语义块两行的布局形态（raw 并排 = 无 UA 规则的护栏）。
+- **examples/stylebook**：`-shot` 改为**真实字体整页截图**——按末节底边
+  估页高，超过单段上限时窗口按段拉起、逐段回读再纵向拼接（SDL 渲染目标
+  纹理高上限 8192，整窗拉到 8681 时其上整段黑，实测而得，段高留裕量取
+  8000）。段偏移用 `body{position:relative;top:-Npx}` 平移绘制；`fixed`
+  元素不随 body 平移，非末段 `display:none` 藏掉、末段放回来（同一选择器
+  后写规则级联取胜，顺序即正确性）。原单屏 `saveShot` 删除，
+  `rawToRGBA` 抽出供两处共用。
 - **examples**：截图工具新增 `-dump-capture path.png`——把抓屏得到的桌面
   图原样落盘再照常打开遮罩，用于排查「打开就是一片灰」这类现象：灰是抓
   到的内容本身（屏幕上盖着亮色窗口）还是遮罩压暗所致（`reset()` 的

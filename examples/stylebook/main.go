@@ -4,7 +4,7 @@
 //	go run ./examples/stylebook -exit-after 3s     # 调试/CI
 //	go run ./examples/stylebook -dump-png out.png  # 无头出图：软件光栅 PNG，文字是占位方块
 //	go run ./examples/stylebook -dump-svg out.svg  # 无头出图：级联+布局导出 SVG，核对几何/配色
-//	go run ./examples/stylebook -shot out.png      # 真实窗口截图：真实字体渲染一帧
+//	go run ./examples/stylebook -shot out.png      # 真实窗口整页截图：真实字体，超长页分段拼接
 //
 // index.html 与 stylebook.css 同目录 go:embed：页面里的
 // <link rel="stylesheet" href="stylebook.css"> 由本文件的加载器接住——引擎
@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"image/draw"
 	"image/png"
 	"os"
 	"strings"
@@ -41,7 +42,7 @@ func main() {
 	exitAfter := flag.Duration("exit-after", 0, "指定时长后自动退出，如 3s（调试/CI 用）")
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
-	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
+	shot := flag.String("shot", "", "真实窗口整页截图：真实字体，超长页分段回读拼接存 PNG")
 	flag.Parse()
 
 	if *dumpPNG != "" || *dumpSVG != "" {
@@ -84,7 +85,9 @@ func main() {
 	}
 
 	if *shot != "" {
-		if err := saveShot(win, doc, *shot); err != nil {
+		// 整页截图：视口截图只能拍到首屏；文档超过单段上限时分段回读拼接
+		// （见 saveShotFull），段高不足的窗口先拉起。
+		if err := saveShotFull(win, doc, *shot); err != nil {
 			fmt.Fprintln(os.Stderr, "截图失败:", err)
 			os.Exit(1)
 		}
@@ -123,25 +126,85 @@ func docOptions() engine.DocumentOptions {
 	}
 }
 
-// saveShot 用真实字体渲染一帧并截图：Refresh 重排、RenderFrame 画一帧、
-// Window.Screenshot 回读窗口像素后本地编码 PNG。
-//
-// 与 -dump-png 的区别：那条路用软件光栅后端，文字是占位方块（用途是逐
-// 像素断言）；这条走真实字体与 SDL 渲染器，用来看最终观感。
-func saveShot(win *browser.Window, doc engine.HTMLDocument, path string) error {
-	// OpenDocument 已布局，但先 Refresh 再画，口径与主循环一致
-	// （RenderFrame 只负责「清屏 + 画当前布局」，不自己重排）。
-	if doc != nil {
-		doc.Refresh()
+// pageHeight 估算文档总高：末节底边 + body 下边距（8px）与卡片外边距。
+// 用末节而非 body：语义标签块级化与否都会让 body 盒高度可信，取到末节
+// 底边更稳（页面后续加节只需换选择器）。
+func pageHeight(doc engine.HTMLDocument) int {
+	const last = "sec-unsupported"
+	el := doc.GetElementById(last)
+	if el == nil {
+		return 0
 	}
-	win.RenderFrame()
-	raw, _, w, h, err := win.Screenshot()
+	return el.GetBoundingClientRect().Bottom().Pixel() + 40
+}
+
+// shotSegMax 是单段截图的最大高度：SDL 渲染目标（render target 纹理）的
+// 高度上限是 8192——窗口拉到 8681 时 8192 以下有内容、以上整段黑，实测
+// 而得；留 192px 裕量取 8000。
+const shotSegMax = 8000
+
+// saveShotFull 真实字体整页截图：窗口按段高拉起、逐段回读，纵向拼成一张。
+//
+// 段偏移用 body 的 position:relative + 负 top 平移绘制（只动绘制位置，
+// 布局树不变，段间互不影响）。position:fixed 的 .pos-fix 不随 body 平移：
+// 只有「段底 == 页底」的最后一段能把它画在正确位置（段视口底 = 页底），
+// 其余段先 display:none 藏掉，末段再 display:inline 放回来——同一选择器
+// 后写的规则级联取胜，顺序即正确性，不能调换。
+func saveShotFull(win *browser.Window, doc engine.HTMLDocument, path string) error {
+	total := pageHeight(doc)
+	if total <= 0 {
+		total = win.ViewportHeight()
+	}
+	w := win.ViewportWidth()
+	out := image.NewRGBA(image.Rect(0, 0, w, total))
+
+	for off := 0; off < total; off += shotSegMax {
+		segH := shotSegMax
+		if off+segH > total {
+			segH = total - off
+		}
+		var css string
+		if off > 0 {
+			css += fmt.Sprintf("body{position:relative;top:%dpx}", -off)
+		}
+		if off+segH < total {
+			css += ".pos-fix{display:none}"
+		} else if off > 0 {
+			css += ".pos-fix{display:inline}"
+		}
+		if css != "" {
+			doc.AddStylesheetText(css)
+		}
+		if win.ViewportHeight() != segH {
+			win.Resize(w, segH)
+		}
+		doc.Refresh()
+		win.RenderFrame()
+		raw, _, sw, sh, err := win.Screenshot()
+		if err != nil {
+			return err
+		}
+		if sw != w {
+			return fmt.Errorf("段截图宽 = %d, want %d", sw, w)
+		}
+		if off+sh > total {
+			sh = total - off
+		}
+		draw.Draw(out, image.Rect(0, off, w, off+sh), rawToRGBA(raw, sw, sh), image.Point{}, draw.Src)
+	}
+
+	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
+	defer f.Close()
+	return png.Encode(f, out)
+}
+
+// rawToRGBA 把后端回读的 XBGR8888（小端内存序 R,G,B,X）转成 RGBA：前三个
+// 字节就是颜色，第 4 字节不是 alpha，统一补 255。
+func rawToRGBA(raw []byte, w, h int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	// 后端回读格式为 XBGR8888（小端内存序 R,G,B,X）：前三个字节就是
-	// 颜色，第 4 字节不是 alpha，统一补 255。
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			i := (y*w + x) * 4
@@ -152,10 +215,5 @@ func saveShot(win *browser.Window, doc engine.HTMLDocument, path string) error {
 			img.Pix[o+3] = 255
 		}
 	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return png.Encode(f, img)
+	return img
 }
