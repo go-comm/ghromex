@@ -24,7 +24,8 @@ type Theme struct {
 
 	Bg           string // 画布底色（卡片之外的区域）
 	Surface      string // 面板/栏/浮层底色
-	SurfaceAlt   string // 工具栏底色
+	SurfaceAlt   string // 工具栏/控件条底色（浮在 Surface 之上的一层）
+	Field        string // 输入控件底色（input/select/textarea/中性按钮）：深色主题沉到画布档，一眼看出哪里能打字
 	Hover        string // 悬停底色
 	Press        string // 按下底色
 	Border       string // 分隔线与描边
@@ -101,6 +102,7 @@ func Light() Theme {
 		Bg:           "#F1F5F9",
 		Surface:      "#FFFFFF",
 		SurfaceAlt:   "#F8FAFC",
+		Field:        "#FFFFFF",
 		Hover:        "#E8EDF3",
 		Press:        "#DDE4EC",
 		Border:       "#E2E8F0",
@@ -174,11 +176,18 @@ func Dark() Theme {
 	t := Light()
 	t.Bg = "#0F172A"
 	t.Surface = "#1E293B"
-	t.SurfaceAlt = "#172033"
+	// 深色主题的空间层次：画布（含输入区）最深 → 栏面 Surface →
+	// 工具栏/控件条 SurfaceAlt 逐级提亮，靠明度拉开而不是描边硬分。
+	// Field 沉到画布档：输入框/编辑区在栏底上是一个个「凹下去」的
+	// 可打字区，VS Code 同款做法。
+	t.SurfaceAlt = "#24334A"
+	t.Field = "#0F172A"
 	t.Hover = "#293548"
 	t.Press = "#334155"
 	t.Border = "#2B3A4F"
-	t.BorderStrong = "#3E5069"
+	// 输入框默认边框取「极暗灰」：#3E5069 在深底上太跳，focus 才交给
+	// 亮蓝强调色。
+	t.BorderStrong = "#334155"
 	t.Text = "#E2E8F0"
 	t.Muted = "#94A3B8"
 	t.Accent = "#60A5FA"
@@ -360,6 +369,7 @@ func (t Theme) css(menuTop, chromeTop, status int, resetBody bool) string {
 		"$bg$", t.Bg,
 		"$surface$", t.Surface,
 		"$surfaceAlt$", t.SurfaceAlt,
+		"$field$", t.Field,
 		"$hover$", t.Hover,
 		"$press$", t.Press,
 		"$border$", t.Border,
@@ -647,10 +657,11 @@ html { background-color: $bg$; }
 .system-ui-btn.is-primary:active { background-color: $accentHover$; border-color: $accentHover$; }
 
 /* 语义变体：实底 + On* 文字。悬停/按下复用更深一档的 *Hover，不再单独
-   维护 active 令牌。Default 是中性描边按钮，复用 Surface/Border/Text
-   这组中性色；Warning 的 On 是深色，琥珀底压白字不够清楚。 */
-.system-ui-btn.is-default { background-color: $surface$; border-color: $border$; color: $text$; }
-.system-ui-btn.is-default:hover { background-color: $surfaceAlt$; }
+   维护 active 令牌。Default 是中性描边按钮：底色走输入控件同档的 Field、
+   描边走 BorderStrong——和输入框同一眼看出「是一个可操作的盒子」；
+   Warning 的 On 是深色，琥珀底压白字不够清楚。 */
+.system-ui-btn.is-default { background-color: $field$; border-color: $borderStrong$; color: $text$; }
+.system-ui-btn.is-default:hover { background-color: $hover$; }
 .system-ui-btn.is-default:active { background-color: $press$; }
 .system-ui-btn.is-success { background-color: $success$; border-color: $success$; color: $onSuccess$; }
 .system-ui-btn.is-success:hover { background-color: $successHover$; border-color: $successHover$; }
@@ -712,7 +723,6 @@ html { background-color: $bg$; }
 .system-ui-tool.is-icon { width: $toolCtrlH$px; padding: 0; text-align: center; }
 .system-ui-tool.is-label { padding: 0 10px; }
 .system-ui-tool:hover { background-color: $hover$; color: $accent$; }
-.system-ui-tool:active { background-color: $press$; }
 .system-ui-tool:active { background-color: $press$; }
 .system-ui-tool.is-disabled { color: $muted$; }
 .system-ui-tool.is-disabled:hover, .system-ui-tool.is-disabled:active {
@@ -869,12 +879,14 @@ html { background-color: $bg$; }
 .system-ui-list { margin: 0; padding-left: 18px; }
 .system-ui-list li { margin: 4px 0; font-size: 14px; line-height: 22px; color: $text$; }
 .system-ui-actions { margin: 4px 0 0 0; }
-/* 内容区按钮给描边：白卡片上「透明底 + 无边框」看起来像纯文字，
-   分不清可点。工具栏按钮保持无边框（栏本身提供了分组）。 */
+/* 内容区按钮给描边：卡片上「透明底 + 无边框」看起来像纯文字，
+   分不清可点。底色/描边与输入控件同档（Field + BorderStrong），深色下
+   靠在比卡片更深的底色上拉开。工具栏命令按钮保持无边框（栏本身提供了
+   分组）。 */
 .system-ui-actions .system-ui-btn {
-	border-color: $border$; background-color: $surface$; margin-right: 8px;
+	border-color: $borderStrong$; background-color: $field$; margin-right: 8px;
 }
-.system-ui-actions .system-ui-btn:hover { background-color: $surfaceAlt$; }
+.system-ui-actions .system-ui-btn:hover { background-color: $hover$; }
 .system-ui-actions .system-ui-btn:active { background-color: $press$; }
 .system-ui-actions .system-ui-btn.is-primary {
 	border-color: $accent$; background-color: $accent$; color: $onAccent$;
@@ -959,13 +971,28 @@ html { background-color: $bg$; }
 .system-ui-bar .system-ui-input,
 .system-ui-bar .system-ui-select { width: 170px; }
 .system-ui-bar .system-ui-check { line-height: $btnH$px; }
+/* 条内中性按钮按钮化（与输入框同档 Field 底 + BorderStrong 描边）：
+   「替换/关闭」这类动作不能只剩纯文字。is-primary/hover 要在后面显式
+   压回：条选择器（0,2,0/0,3,0）后写，会盖过 .is-primary（0,2,0）与
+   条内中性 :hover（0,3,0）。禁用态同理，否则 Field 底压掉置灰。 */
+.system-ui-bar .system-ui-btn { background-color: $field$; border-color: $borderStrong$; }
+.system-ui-bar .system-ui-btn:hover { background-color: $hover$; }
+.system-ui-bar .system-ui-btn:active { background-color: $press$; }
+.system-ui-bar .system-ui-btn.is-primary { background-color: $accent$; border-color: $accent$; color: $onAccent$; }
+.system-ui-bar .system-ui-btn.is-primary:hover,
+.system-ui-bar .system-ui-btn.is-primary:active { background-color: $accentHover$; border-color: $accentHover$; }
+.system-ui-bar .system-ui-btn.is-disabled,
+.system-ui-bar .system-ui-btn.is-disabled:hover,
+.system-ui-bar .system-ui-btn.is-disabled:active {
+	background-color: transparent; border-color: transparent; color: $muted$;
+}
 
 /* 表单控件与按钮同档（ButtonHeight，默认 32）：内容区里三者顶底齐平、
    悬停/焦点反馈节奏一致。工具栏槽位里的会另被 $toolCtrlH$ 覆盖成 28。 */
 .system-ui-input {
 	width: 280px; height: $btnH$px; padding: 0 10px; box-sizing: border-box;
 	border: 1px solid $borderStrong$; border-radius: 7px;
-	background-color: $surface$; color: $text$; font-size: 13px;
+	background-color: $field$; color: $text$; font-size: 13px;
 	font-family: $font$;
 }
 .system-ui-input:focus { border-color: $accent$; }
@@ -980,14 +1007,14 @@ html { background-color: $bg$; }
 .system-ui-select {
 	width: 280px; height: $btnH$px; padding: 0 8px; box-sizing: border-box;
 	border: 1px solid $borderStrong$; border-radius: 7px;
-	background-color: $surface$; color: $text$; font-size: 13px;
+	background-color: $field$; color: $text$; font-size: 13px;
 	font-family: $font$;
 }
 .system-ui-select:focus { border-color: $accent$; }
 .system-ui-textarea {
 	width: 100%; height: 120px; padding: 8px 10px; box-sizing: border-box;
 	border: 1px solid $borderStrong$; border-radius: 7px;
-	background-color: $surface$; color: $text$; font-size: 13px;
+	background-color: $field$; color: $text$; font-size: 13px;
 	line-height: 20px; font-family: $font$; overflow: auto;
 }
 .system-ui-textarea:focus { border-color: $accent$; }

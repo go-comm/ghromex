@@ -5,6 +5,18 @@
 
 ## 未发布
 
+- **ui**：深色主题空间层次重排——新增 `Field` 令牌（输入控件底色），
+  input/select/textarea/中性按钮底色从 `Surface` 迁到 `Field`。深色下
+  Field=#0F172A 沉到画布档（一眼看出哪里能打字）、SurfaceAlt 提到
+  #24334A（工具栏/控件条比菜单栏更亮），层次变成「输入区 ≤ 画布 <
+  栏面 < 悬浮条」逐级拉开；`BorderStrong` #3E5069 → #334155（输入框
+  默认描边收暗，focus 才交给亮蓝）。浅色仅语义迁移、色值不变。
+- **ui**：中性描边按钮统一走 Field 底 + BorderStrong 描边（原 Surface
+  底 + Border 描边在深色栏底上边界不清）；`.system-ui-bar` 内的中性
+  按钮从「透明底纯文字」补成与输入框同档的描边按钮（is-primary 与
+  禁用态显式压回，不被条选择器后写覆盖）。顺带删掉 `.system-ui-tool
+  :active` 的重复声明。
+
 - **examples**：notepad 新增 `-dark` 开关（对齐 kit 惯例）——`ui.Dark()`
   整套令牌换装，菜单/工具栏/查找栏/编辑区纸面/状态栏一起变，方便核对
   深色主题下两档控件高度与文字居中的表现。

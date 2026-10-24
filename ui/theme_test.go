@@ -18,6 +18,7 @@ func TestDarkThemeIsComplete(t *testing.T) {
 		"Bg":           d.Bg,
 		"Surface":      d.Surface,
 		"SurfaceAlt":   d.SurfaceAlt,
+		"Field":        d.Field,
 		"Hover":        d.Hover,
 		"Press":        d.Press,
 		"Border":       d.Border,
@@ -81,6 +82,20 @@ func TestDarkThemeIsComplete(t *testing.T) {
 		d.ButtonHeight != l.ButtonHeight {
 		t.Fatal("两套主题的字体/尺寸应保持一致，只换颜色")
 	}
+	if d.Field == l.Field {
+		t.Fatal("深色主题的输入区底色不能沿用浅色（会和栏底糊在一起）")
+	}
+	// 空间层次：输入区/画布最深 → 栏面 → 工具栏/控件条逐级提亮。
+	// 深色主题最怕「糊成一团」，三层亮度必须拉开可辨的档位。
+	lum := func(hex string) int {
+		n, _ := strconv.ParseInt(hex[1:], 16, 32)
+		r, g, b := int(n>>16)&0xFF, int(n>>8)&0xFF, int(n)&0xFF
+		return (299*r + 587*g + 114*b) / 1000
+	}
+	if !(lum(d.Field) <= lum(d.Bg) && lum(d.Bg) < lum(d.Surface) && lum(d.Surface) < lum(d.SurfaceAlt)) {
+		t.Fatalf("深色层次不成立：Field=%s Bg=%s Surface=%s SurfaceAlt=%s",
+			d.Field, d.Bg, d.Surface, d.SurfaceAlt)
+	}
 }
 
 // 生成 CSS 时主按钮必须用 OnAccent，不能在样式表里写死白色：否则深色
@@ -131,7 +146,7 @@ func TestSemanticColorsCSS(t *testing.T) {
 				decl  string
 			}{
 				{"默认按钮", ".system-ui-btn.is-default",
-					"background-color: " + th.Surface + "; border-color: " + th.Border + "; color: " + th.Text},
+					"background-color: " + th.Field + "; border-color: " + th.BorderStrong + "; color: " + th.Text},
 				{"主按钮", ".system-ui-btn.is-primary",
 					"background-color: " + th.Accent + "; border-color: " + th.Accent + "; color: " + th.OnAccent},
 				{"成功按钮", ".system-ui-btn.is-success",
@@ -275,7 +290,7 @@ func TestSemanticButtonPaint(t *testing.T) {
 				want  string
 			}{
 				{"primary", "is-primary", tc.th.Accent},
-				{"default", "is-default", tc.th.Surface},
+				{"default", "is-default", tc.th.Field},
 				{"success", "is-success", tc.th.Success},
 				{"warning", "is-warning", tc.th.Warning},
 				{"danger", "is-danger", tc.th.Danger},

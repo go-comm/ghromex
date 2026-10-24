@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-25 01:43
+> 生成时间: 2026-10-25 02:30
 
 ---
 
@@ -2423,6 +2423,9 @@ engine.SetTooltipColors 自行指定，默认深底浅字。
 不能只写 ui.Theme{Bg: "#0F172A"} 就指望得到深色：零值字段统一按浅色 补齐（零值 Theme
 的默认语义是浅色），其余颜色会留在浅色上。OnAccent 是强调色上的文字/图标颜色，深色主题用它把亮蓝底上的字压成深色。
 
+深色的空间层次靠三档底色拉开：Field（输入区，最深）≤ Bg（画布） < Surface（菜单栏/状态栏）< SurfaceAlt（工具栏/控件条，最亮），
+输入框/编辑区沉到画布档、浮层控件条提亮，避免「糊成一团」。
+
 运行时切换用 App.SetTheme（或 Workbench.SetTheme）：新主题样式追加在旧样式 之后，页面内容不重建，适合浅色/深色切换。
 
 # 语义色
@@ -2871,7 +2874,8 @@ type Theme struct {
 
 	Bg           string // 画布底色（卡片之外的区域）
 	Surface      string // 面板/栏/浮层底色
-	SurfaceAlt   string // 工具栏底色
+	SurfaceAlt   string // 工具栏/控件条底色（浮在 Surface 之上的一层）
+	Field        string // 输入控件底色（input/select/textarea/中性按钮）：深色主题沉到画布档，一眼看出哪里能打字
 	Hover        string // 悬停底色
 	Press        string // 按下底色
 	Border       string // 分隔线与描边
