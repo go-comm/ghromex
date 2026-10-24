@@ -20,6 +20,10 @@
   `-shot`（`Window.Screenshot` 回读 + 本地编码 PNG，与 kit 同款，库层
   不提供 PNG 编码；notepad 另有 `-shot-find` 截图前展开查找栏，模拟
   Ctrl+F 交互态）。
+- **examples**：记事本「打开」对话框过滤器扩充——默认「所有支持的类型」
+  （txt/markdown/json/xml/html/htm/css/js/log/ini/csv/yml/yaml），随后每类
+  一项、所有文件兜底（多模式 Pattern 走 Win32 COMDLG_FILTERSPEC 语法）；
+  状态栏文件类型同步认识 xml/html/css。「另存为」维持 txt 优先不变。
 - **examples**：记事本状态栏口径调整——文件段不再显示文件名、改显文件
   类型（按扩展名，如 `文本文件 (*.txt)`，未保存 `*` 缀尾），文件名归
   标题栏；新增选中字数段（如 `118 个字被选中`），随选区自动刷新——引擎

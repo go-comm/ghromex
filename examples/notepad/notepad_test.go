@@ -243,6 +243,26 @@ func TestStatusSegmentsUpdateIndependently(t *testing.T) {
 	}
 }
 
+// fileType 按扩展名分类（状态栏文件段用）；未知扩展名按文本文件报、
+// 括号带实际后缀，大小写不敏感。
+func TestFileTypeFromExtension(t *testing.T) {
+	cases := map[string]string{
+		"":          "文本文件 (*.txt)",
+		`a.txt`:     "文本文件 (*.txt)",
+		`b.md`:      "Markdown 文档 (*.md)",
+		`c.json`:    "JSON 文档 (*.json)",
+		`d.xml`:     "XML 文档 (*.xml)",
+		`e.HTML`:    "HTML 文档 (*.html)",
+		`f.log`:     "日志文件 (*.log)",
+		`g.unknown`: "文本文件 (*.unknown)",
+	}
+	for path, want := range cases {
+		if got := fileType(path); got != want {
+			t.Errorf("fileType(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
 // 选中字数跟着选区走：Ctrl+A 报全量，Shift+左逐字收缩，方向键折叠后清空。
 // 选区变化能刷新状态栏，靠的是引擎 setSelection 也发文档变更通知。
 func TestStatusSelectionCount(t *testing.T) {

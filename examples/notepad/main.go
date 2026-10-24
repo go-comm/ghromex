@@ -436,15 +436,21 @@ func shortName(path string) string {
 }
 
 // fileType 按扩展名给出文件类型描述（状态栏文件段用；文件名本身归标题栏）。
-// 记事本只处理纯文本，所以未知扩展名也按「文本文件」报，括号里带上实际后缀。
+// 覆盖 openFilters 认识的类型，未知扩展名也按「文本文件」报，括号里带实际后缀。
 func fileType(path string) string {
 	switch ext := strings.ToLower(filepath.Ext(path)); ext {
-	case ".md":
+	case ".md", ".markdown":
 		return "Markdown 文档 (*.md)"
 	case ".log":
 		return "日志文件 (*.log)"
 	case ".json":
 		return "JSON 文档 (*.json)"
+	case ".xml":
+		return "XML 文档 (*.xml)"
+	case ".html", ".htm":
+		return "HTML 文档 (*.html)"
+	case ".css":
+		return "CSS 样式表 (*.css)"
 	case "":
 		return "文本文件 (*.txt)"
 	default:
@@ -507,7 +513,7 @@ func (n *notepad) pickFiles(title string, multi bool) []string {
 	opts := dialog.Options{
 		Title:      title,
 		DefaultDir: n.currentDir(),
-		Filters:    fileFilters(),
+		Filters:    openFilters(), // 「打开」认识的类型都比上；「另存为」仍用 fileFilters
 	}
 	var paths []string
 	if multi {
@@ -555,7 +561,26 @@ func (n *notepad) openDir() {
 	n.message("已选择 " + dir)
 }
 
-// fileFilters 是记事本用到的文件类型过滤器。
+// openFilters 是「打开」对话框的过滤器：第一项「所有支持的类型」默认选中，
+// 随后每种类型一项，最后所有文件兜底。Pattern 支持分号分隔多模式
+// （Win32 COMDLG_FILTERSPEC 语法，见 backend/dialog）。
+func openFilters() []dialog.FileFilter {
+	return []dialog.FileFilter{
+		{Name: "所有支持的类型 (*.txt;*.md;*.json;*.xml;*.html)",
+			Pattern: "*.txt;*.md;*.markdown;*.json;*.xml;*.html;*.htm;*.css;*.js;*.log;*.ini;*.csv;*.yml;*.yaml"},
+		{Name: "文本文件 (*.txt)", Pattern: "*.txt"},
+		{Name: "Markdown 文件 (*.md)", Pattern: "*.md;*.markdown"},
+		{Name: "JSON 文件 (*.json)", Pattern: "*.json"},
+		{Name: "XML 文件 (*.xml)", Pattern: "*.xml"},
+		{Name: "HTML 文件 (*.html)", Pattern: "*.html;*.htm"},
+		{Name: "CSS 文件 (*.css)", Pattern: "*.css"},
+		{Name: "日志文件 (*.log)", Pattern: "*.log"},
+		{Name: "所有文件 (*.*)", Pattern: "*.*"},
+	}
+}
+
+// fileFilters 是「另存为」的过滤器：记事本产出以文本为主，保持两项，
+// 第一项决定缺省扩展名（.txt）。
 func fileFilters() []dialog.FileFilter {
 	return []dialog.FileFilter{
 		{Name: "文本文件 (*.txt)", Pattern: "*.txt"},
