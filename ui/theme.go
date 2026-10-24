@@ -666,9 +666,12 @@ html { background-color: $bg$; }
 .system-ui-tool.is-disabled:hover, .system-ui-tool.is-disabled:active {
 	background-color: transparent; color: $muted$;
 }
+/* 分隔竖线：vertical-align: top 钉行盒顶 + margin-top 下推到居中，
+   与图标同一套「不依赖基线」的口径（middle 按父基线 + 半 x 高对位，
+   会把线画低 3px）。线高 18、行盒 30：margin-top = (行盒 − 线高)/2。 */
 .system-ui-sep {
-	display: inline-block; width: 1px; height: 18px; margin: 0 6px;
-	background-color: $borderStrong$; vertical-align: middle;
+	display: inline-block; width: 1px; height: 18px; margin: 6px 6px 0;
+	background-color: $borderStrong$; vertical-align: top;
 }
 
 /* 工具栏槽位（Slot）：现成控件（输入框/下拉等）嵌进工具栏，与命令按钮同排。
