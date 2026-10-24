@@ -482,8 +482,17 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 					tx = base.x + (base.width-tw)/2
 				}
 				ty := base.y
-				if th < base.height {
-					ty += (base.height - th) / 2
+				// 行盒（高 th=声明 line-height，未声明时为自然行高）按内容盒
+				// 垂直居中；比控件高（工具栏槽位继承条 line-height）时上下均
+				// 溢出——CSS 行盒语义是溢出均分，不是钳到顶边。
+				ty += (base.height - th) / 2
+				// 文字纹理落点另加 half-leading：DrawText 把纹理顶钉在传入 y，
+				// 而纹理高=自然行高；th 是声明 line-height 时两者不等，行距的
+				// 一半要加在纹理之上，否则文字贴着行盒顶偏上（browser 地址栏
+				// 实测 4px）。与常规流 flushLine 的 half-leading 同一口径。
+				textY := ty
+				if _, natH := g.MeasureText("Mg", size, p.Bold(), p.FontFamily()); th > natH {
+					textY += (th - natH) / 2
 				}
 				if focused {
 					// 选区高亮先于文字绘制：半透明蓝压在背景上，文字仍按原色
@@ -497,7 +506,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 					}
 				}
 				if val != "" {
-					g.DrawText(tx, ty, tw, th, p, val)
+					g.DrawText(tx, textY, tw, th, p, val)
 				}
 				if focused {
 					// 光标：1px 竖线（文本色）。默认在值末尾；点击中部后按

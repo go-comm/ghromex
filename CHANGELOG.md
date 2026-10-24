@@ -5,6 +5,15 @@
 
 ## 未发布
 
+- **engine**：表单 `input` 文字垂直居中修复——绘制行盒不再受继承的
+  声明 `line-height` 影响：`inputVisibleWindow` 返回的 `th` 取的是声明
+  行高（工具栏场景下被继承撑到 28，大于盒高 26），旧代码
+  `if th < height` 才居中，条件不成立、`ty` 钳到框顶，文字整体偏上约
+  半行距。现在行盒无条件居中，文字另补 `(th − 自然行高)/2` 的
+  half-leading（`DrawText` 契约是 y = 纹理顶、不含半行距，常规流由
+  `flushLine` 加，调用方自己居中时必须自己加）。像素实测 browser 地址
+  栏文字中心 13.5 → 17.5 = 输入框中线。
+
 - **ui**：按钮文字垂直居中修正——核心 CSS 的按钮 `line-height` 改为公式
   推导：`控件高 − 上下边框(2) − 光学修正(1)`（新增 `$btnLH$`/`$toolLH$`
   变量，CSS 不再写 `line-height: height` 同值）。根因：`box-sizing:
