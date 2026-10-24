@@ -21,7 +21,7 @@
 - 滚动与裁剪：`overflow(visible/hidden/clip/scroll/auto，单值两轴、两值 x y、overflow-x/overflow-y 分轴)` 滚动容器（滚轮驱动、子树平移 + padding 盒裁剪，被裁内容不可命中）、**圆角裁剪按 border-radius 的形状**（`overflow:hidden` 的圆角盒，溢出到角外的子元素按圆角裁掉，角上透出盒后底色）、文档级页面滚动（根元素以视口为滚动盒，长页面/宽页面均可滚）、`wheel` 事件（`OnWheel` 注册、`MouseEvent.DeltaX/DeltaY` 像素位移、冒泡派发）、Shift+滚轮 转横向滚动、textarea 滚轮滚动（与光标跟随同夹紧口径，全量吸收纵向滚轮、撞边界不带动页面）；裁剪经 `Graphics` 可选 `Clipper`（`PushClip`/`PopClip`，逐层求交）落地：`BufferGraphics` 像素断言、SDL2 `SDL_RenderSetClipRect`，SVG 导出同步生成 `clipPath`
 - 可插拔图形后端：`engine.Graphics` 接口（DrawText / DrawColor / DrawImage / MeasureText），内置 `FakeGraphics`（计数）、`BufferGraphics`（软件光栅化到 RGBA 缓冲，可 `SavePNG`）供无显示器测试；圆角抗锯齿走**角标精灵**（可选扩展 `SpriteDrawer`：整块圆角一次 blit，替掉逐像素的半透明小方块）——绘制调用数是 GPU 路径上的主要开销，portal 页一帧从 31840 次降到 2500 次、单帧绘制 149ms → 8.7ms（软件渲染器实测），滚动动画才不会被切成几帧；精灵的像素（引擎侧）与纹理（后端侧）都按「条数 + 像素」双上限、LRU 淘汰——键里含颜色，页面逐帧改色（动画）会不断产生新精灵，不设上限就是内存/显存泄漏；**填充率**同样要命：SDL 的绘制混合模式一旦开着，每块不透明填充都走逐像素混合（软件光栅器 2.1ns/像素，直接写像素只要 0.2ns），门户页一帧要填 1700 万像素——2560×1440 的窗体下单帧 37ms，**最大化后滚动只剩 27fps**（小窗体看不出来）。按填充的 alpha 临时切换混合模式（画完复原，贴图拷贝还要混合）后，门户页整帧（软件光栅器，含呈现）：800×600 1.35ms、1280×820 1.95ms、1920×1080 2.84ms、2560×1440 **4.07ms**（原 37ms，9 倍）、3840×2160 7.11ms；画面逐像素不变。清屏也不再重复铺白底（画布背景不透明时白底那层完全被盖住）。**诊断**：`GHROMEX_DEBUG=1` 会打印渲染路径与驱动名（`renderer=accelerated(GPU, driver=direct3d)` / `renderer=software (driver=software)`）——软件路径的瓶颈是填充率，GPU 路径通常在纹理上传/draw call/swap 间隔（GPU 路径实测：1280×820 到 4K 的整帧都是 16.6ms = vsync 周期，稳在 60fps；其中 GPU 真实工作只有 1.3~3ms，其余 13.5~14.5ms 是等 vsync）。**这些数字的口径与分段拆解见「性能实测」**——不同口径的数不能并排比
 - 元素注册表：`CustomElements().Define(tag, proto)` + `CloneElement` 注册自定义标签，解析时克隆原型生成独立实例
-- 无头运行：`-dump-svg` 导出布局结果；`NewBufferedViewport` / `OpenBufferedDocument`（视口 + 软件光栅化缓冲）可在 CI 中像素级断言渲染结果；真实窗口的最终观感走 `Window.SavePNG`（真实字体渲染一帧存 PNG，`SDL_VIDEO_DRIVER=dummy` 可无显示器跑）
+- 无头运行：`-dump-svg` 导出布局结果；`NewBufferedViewport` / `OpenBufferedDocument`（视口 + 软件光栅化缓冲）可在 CI 中像素级断言渲染结果；真实窗口的最终观感用 `Window.Screenshot()` 回读窗口像素（应用自行编码 PNG，见 `examples/snip`）
 
 ## 环境要求
 
@@ -45,20 +45,20 @@
 | `examples/notepad` | `go run ./examples/notepad` | 仿 Windows 记事本：页面由 Go 构造 DOM，无 `index.html`；`ui` 菜单（菜单项带图标）/纯图标工具栏/状态栏（文件/编辑/格式/视图/帮助，新建/打开/保存/另存为/撤销/重做）、原生「打开/另存为/选择文件夹」对话框、查找替换栏、铺满窗口的多行编辑区、状态栏（文件名/行列/字符数）；`-file` 启动时打开文件 |
 | `examples/snip` | `go run ./examples/snip` | 截图工具：冻结主屏拖选，松开后同一窗口原地缩成置顶无边框的悬浮预览（图片区即选区大小），拖动图片移动窗口，Ctrl+S 保存 PNG，Esc/关闭退出；`-delay` 留时间整理窗口 |
 
-每个示例都支持 `-exit-after`（指定时长后自动退出，调试/CI）；出图按用途分两族，别混用：
+每个示例都支持 `-exit-after`（指定时长后自动退出，调试/CI）；出图按用途分两类，别混用：
 
 ```powershell
-# 无头出图（不需要显示器）
+# 分析（无头，不需要显示器）
 go run ./examples/ua -exit-after 3s     # 指定时长后自动退出（调试/CI）
 go run ./examples/ua -dump-svg out.svg  # 级联+布局导出 SVG（真实 <text>），核对几何/层级/配色
 go run ./examples/kit -dump-png out.png # 软件光栅 PNG（文字是占位方块），断言布局/配色
-# 真实窗口出图（真实字体，看最终观感；dummy 驱动可无显示器跑）
+# 截图（真实窗口 + 真实字体；dummy 驱动可无显示器跑）
 go run ./examples/kit -shot out.png
 ```
 
-`browser/doc.go` 的「出图三件套」小节有三条路的完整分工说明（SVG 看布局、无头 PNG 像素断言、`Window.SavePNG` 看观感）。
+`browser/doc.go` 的「出图口径」小节有完整分工说明（分析用 dump-svg / dump-png，截图用 `Window.Screenshot`）。
 
-`examples/snip` 另有截图专用参数：`-source` 用一张图片代替真实桌面，`-shot-overlay`/`-shot-preview` 把选区页、预览页各存成 PNG 后退出（真实窗口出图，走 `Window.SavePNG`）；配合 `SDL_VIDEO_DRIVER=dummy` 即可在无显示器环境检查观感。
+`examples/snip` 另有截图专用参数：`-source` 用一张图片代替真实桌面，`-shot-overlay`/`-shot-preview` 把选区页、预览页各存成 PNG 后退出（回读走 `Window.Screenshot`）；配合 `SDL_VIDEO_DRIVER=dummy` 即可在无显示器环境检查观感。
 
 ```powershell
 go run ./examples/snip -source examples/kit/screenshot.png -shot-overlay overlay.png -shot-preview preview.png
@@ -372,7 +372,7 @@ page.AppendChild(preview.Element())
 靠右的菜单浮层可能超出右边缘（浮层左对齐菜单标签，不做翻转）；内置主题只有
 浅色/深色两套，更多配色改 `Theme` 字段。
 
-跑一下示例（`-shot` 真实窗口出图：真实字体看最终观感，`-shot-menu` 连菜单一起拍）：
+跑一下示例（`-shot` 真实窗口截图：真实字体看最终观感，`-shot-menu` 连菜单一起拍）：
 
 ```
 go run ./examples/kit

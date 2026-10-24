@@ -7,8 +7,8 @@
 //	go run ./examples/kit -dark                # 深色主题
 //	go run ./examples/kit -dump-png kit.png    # 无头出图：软件光栅，文字是占位方块
 //	go run ./examples/kit -dump-svg kit.svg    # 无头出图：SVG，核对布局/层级
-//	go run ./examples/kit -shot kit.png        # 真实窗口出图：真实字体观感
-//	go run ./examples/kit -dark -shot kit.png  # 深色主题 + 真实窗口出图
+//	go run ./examples/kit -shot kit.png        # 真实窗口截图：真实字体观感
+//	go run ./examples/kit -dark -shot kit.png  # 深色主题 + 真实窗口截图
 //	go run ./examples/kit -shot kit.png -shot-menu 编辑
 //	go run ./examples/kit -exit-after 2s       # 调试/CI
 package main
@@ -17,6 +17,8 @@ import (
 	_ "embed"
 	"flag"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 
 	"github.com/go-comm/ghromex/engine"
@@ -34,7 +36,7 @@ const (
 func main() {
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
-	shot := flag.String("shot", "", "真实窗口出图：真实字体渲染一帧存 PNG，核对最终观感用")
+	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
 	shotMenu := flag.String("shot-menu", "", "与 -shot 配合：先展开指定标题的菜单（如 文件）")
 	dark := flag.Bool("dark", false, "使用深色主题")
 	exitAfter := flag.Duration("exit-after", 0, "运行指定时长后自动退出（调试/CI）")
@@ -86,7 +88,7 @@ func main() {
 				}
 			}
 		}
-		if err := app.SavePNG(*shot); err != nil {
+		if err := saveShot(app, *shot); err != nil {
 			fmt.Fprintln(os.Stderr, "截图失败:", err)
 			os.Exit(1)
 		}
@@ -251,4 +253,42 @@ func dump(spec ui.Spec, pngPath, svgPath string) error {
 		return os.WriteFile(svgPath, []byte(doc.DumpSVG()), 0o644)
 	}
 	return nil
+}
+
+// saveShot 用真实字体渲染一帧并截图：Refresh 重排、RenderFrame 画一帧、
+// Window.Screenshot 回读窗口像素。
+//
+// 与 -dump-png 的区别：那条路用软件光栅后端，文字是占位方块（它的用途
+// 是逐像素断言）；这条走真实字体与 SDL 渲染器，用来检查字号、行高、
+// 垂直居中的观感。
+func saveShot(app *ui.App, path string) error {
+	// Install 刚改过 DOM 与样式表，必须先重排再画：RenderFrame 只负责
+	// 「清屏 + 画当前布局」，不会自己重排（主循环里由 ChangeCount 驱动）。
+	if doc := app.Workbench().Doc(); doc != nil {
+		doc.Refresh()
+	}
+	app.Window().RenderFrame()
+	raw, _, w, h, err := app.Window().Screenshot()
+	if err != nil {
+		return err
+	}
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	// 后端回读格式为 XBGR8888（小端内存序 R,G,B,X）：前三个字节就是
+	// 颜色，第 4 字节不是 alpha，统一补 255。
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := (y*w + x) * 4
+			o := y*img.Stride + x*4
+			img.Pix[o] = raw[i]
+			img.Pix[o+1] = raw[i+1]
+			img.Pix[o+2] = raw[i+2]
+			img.Pix[o+3] = 255
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return png.Encode(f, img)
 }

@@ -74,22 +74,19 @@
 // 暂停），因此在按钮/菜单的回调里直接调用即可。非 Windows 平台返回
 // dialog.ErrUnsupported。
 //
-// # 出图三件套（别混）
+// # 出图口径（别混）
 //
-// 看渲染结果有三条路，产物不同、用途不同，别当同一件事：
+// 分析走无头两路，产物不同、用途不同；截图是另一件事：
 //
-//   - doc.DumpSVG()（-dump-svg）：走引擎级联+布局，把结果序列化成 SVG。
-//     文字是真实 <text>、可在浏览器里看真字体；但它不经过光栅绘制器，
-//     反映的是「布局与样式」，不是最终像素（圆角精灵、抗锯齿这类绘制细节
-//     看不到）。适合核对几何、层级、配色。
+//   - doc.DumpSVG()（-dump-svg）：级联+布局序列化成 SVG，文字是真实
+//     <text>、可在浏览器里看真字体；不经过光栅绘制器，反映的是「布局与
+//     样式」，不是最终像素（圆角精灵、抗锯齿看不到）。核对几何/层级/配色。
 //   - engine.NewBufferedViewport + BufferGraphics.SavePNG（-dump-png）：
-//     无头软件光栅化到 RGBA 缓冲。文字是占位方块（不依赖字体后端），
-//     可 ColorAt 逐像素断言——CI/headless 的首选，也是「只看布局与配色」
-//     的快图。
-//   - Window.SavePNG(path)：开真实窗口（SDL 渲染器 + 真实字体）重排、
-//     画一帧、回读像素存 PNG。字体的字号/行高/字距、抗锯齿、圆角精灵
-//     都是最终观感——核对「用户实际看到的样子」走这条；配合
-//     SDL_VIDEO_DRIVER=dummy 无显示器也能跑。
+//     无头软件光栅化到 RGBA 缓冲，文字是占位方块（不依赖字体后端），
+//     可 ColorAt 逐像素断言——CI/headless 的首选。
+//   - Window.Screenshot()：回读真实窗口渲染目标的当前内容（原生字节 +
+//     格式 + 尺寸），是「用户实际看到的样子」；要存 PNG 由应用自己编码
+//     （见 examples/snip 的 saveWindowPNG）。
 //
-// 一句话：SVG 看布局，BufferedPNG 看像素断言，Window.SavePNG 看真实观感。
+// 一句话：分析用 dump-svg / dump-png，截图用 Screenshot。
 package browser

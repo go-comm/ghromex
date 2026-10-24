@@ -4,9 +4,6 @@ package browser
 
 import (
 	"fmt"
-	"image"
-	"image/png"
-	"os"
 	"time"
 
 	"github.com/go-comm/ghromex/backend/sdl2"
@@ -269,46 +266,6 @@ func clearLayers(doc engine.HTMLDocument) []core.Color {
 // Screenshot 回读渲染目标当前内容（原生字节+格式+尺寸）。
 func (win *Window) Screenshot() ([]byte, uint32, int, int, error) {
 	return win.sdl.Screenshot()
-}
-
-// SavePNG 重排当前文档、渲染一帧，并把窗口内容存成 PNG。
-//
-// 重排是这条路径的一部分：RenderFrame 只负责「清屏 + 画当前布局」，
-// Install/Resize/SetAttribute 之后不 Refresh 就会截到旧布局——每个示例
-// 自己补这一步容易漏，干脆收进来。
-//
-// 与无头出图的分工：engine.NewBufferedViewport + BufferGraphics.SavePNG
-// 走软件光栅（文字是占位方块，适合 CI 逐像素断言）；这条走真实窗口的
-// 渲染器与字体，用来核对观感。SDL_VIDEO_DRIVER=dummy 时也能在无显示器
-// 环境跑。
-func (win *Window) SavePNG(path string) error {
-	if win.doc != nil {
-		win.doc.Refresh()
-	}
-	win.RenderFrame()
-	raw, _, w, h, err := win.sdl.Screenshot()
-	if err != nil {
-		return err
-	}
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	// 后端回读格式为 XBGR8888（小端内存序 R,G,B,X）：前三个字节就是颜色，
-	// 第 4 字节不是 alpha，统一补 255。
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := (y*w + x) * 4
-			o := y*img.Stride + x*4
-			img.Pix[o] = raw[i]
-			img.Pix[o+1] = raw[i+1]
-			img.Pix[o+2] = raw[i+2]
-			img.Pix[o+3] = 255
-		}
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return png.Encode(f, img)
 }
 
 // Run 进入事件循环：处理关闭/尺寸变化/暴露/点击，并按内容变化重排、逐帧重绘。

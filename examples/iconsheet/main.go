@@ -7,7 +7,7 @@
 //	go run ./examples/iconsheet
 //	go run ./examples/iconsheet -dark                 # 以深色主题启动
 //	go run ./examples/iconsheet -search align         # 启动时预填搜索词
-//	go run ./examples/iconsheet -shot iconsheet.png   # 真实窗口出图：真实字体观感
+//	go run ./examples/iconsheet -shot iconsheet.png   # 真实窗口截图：真实字体观感
 //	go run ./examples/iconsheet -dump-png sheet.png   # 无头出图：软件光栅，文字是占位方块
 //	go run ./examples/iconsheet -dump-svg sheet.svg   # 无头出图：SVG，核对布局/层级
 package main
@@ -16,6 +16,8 @@ import (
 	"flag"
 	"fmt"
 	"html"
+	"image"
+	"image/png"
 	"os"
 	"strings"
 	"unicode/utf8"
@@ -99,7 +101,7 @@ func main() {
 	search := flag.String("search", "", "启动时预填搜索词（便于演示/截图）")
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
-	shot := flag.String("shot", "", "真实窗口出图：真实字体渲染一帧存 PNG，核对最终观感用")
+	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
 	exitAfter := flag.Duration("exit-after", 0, "运行指定时长后自动退出（调试/CI）")
 	flag.Parse()
 
@@ -172,7 +174,7 @@ func main() {
 		}
 	}
 	if *shot != "" {
-		if err := app.SavePNG(*shot); err != nil {
+		if err := saveShot(app, *shot); err != nil {
 			fmt.Fprintln(os.Stderr, "截图失败:", err)
 			os.Exit(1)
 		}
@@ -540,4 +542,36 @@ func dump(spec ui.Spec, page, search, pngPath, svgPath string) error {
 		return os.WriteFile(svgPath, []byte(doc.DumpSVG()), 0o644)
 	}
 	return nil
+}
+
+// saveShot 用真实字体渲染一帧并截图：Refresh 重排、RenderFrame 画一帧、
+// Window.Screenshot 回读窗口像素（与 kit 示例同款接线）。
+func saveShot(app *ui.App, path string) error {
+	if doc := app.Workbench().Doc(); doc != nil {
+		doc.Refresh()
+	}
+	app.Window().RenderFrame()
+	raw, _, w, h, err := app.Window().Screenshot()
+	if err != nil {
+		return err
+	}
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	// 后端回读格式为 XBGR8888（小端内存序 R,G,B,X）：前三个字节就是
+	// 颜色，第 4 字节不是 alpha，统一补 255。
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := (y*w + x) * 4
+			o := y*img.Stride + x*4
+			img.Pix[o] = raw[i]
+			img.Pix[o+1] = raw[i+1]
+			img.Pix[o+2] = raw[i+2]
+			img.Pix[o+3] = 255
+		}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return png.Encode(f, img)
 }

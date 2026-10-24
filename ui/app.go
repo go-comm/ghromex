@@ -65,12 +65,6 @@ func (a *App) LoadHTMLWith(src string, opts engine.DocumentOptions) (engine.HTML
 // Workbench 是装在当前文档上的工作台；还没加载文档时为 nil。
 func (a *App) Workbench() *Workbench { return a.workbench }
 
-// SavePNG 重排当前文档、渲染一帧并存成 PNG（真实窗口的渲染器与字体）。
-//
-// 转发 browser.Window.SavePNG；无头出图（文字是占位方块）另走
-// engine.NewBufferedViewport 那条路，见 Window.SavePNG 的分工说明。
-func (a *App) SavePNG(path string) error { return a.win.SavePNG(path) }
-
 // Window 暴露底层窗口（原生对话框父句柄、标题、截图等）。
 func (a *App) Window() *browser.Window { return a.win }
 

@@ -13,8 +13,8 @@
 //	go run ./examples/browser
 //	go run ./examples/browser -page examples/ua/index.html
 //	go run ./examples/browser -exit-after 3s
+//	go run ./examples/browser -dump-png out.png   # 无头出图：软件光栅，核对布局/配色
 //	go run ./examples/browser -dump-svg out.svg   # 无头出图：SVG，核对布局/层级
-//	go run ./examples/browser -shot out.png       # 真实窗口出图：真实字体观感
 //	go run ./examples/browser -shot out.png       # 真实窗口出图：真实字体观感
 package main
 
@@ -44,7 +44,6 @@ func main() {
 	exitAfter := flag.Duration("exit-after", 0, "指定时长后自动退出，如 3s（调试/CI 用）")
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
-	shot := flag.String("shot", "", "真实窗口出图：真实字体渲染一帧存 PNG，核对最终观感用")
 	flag.Parse()
 
 	if *dumpPNG != "" || *dumpSVG != "" {
@@ -76,16 +75,6 @@ func main() {
 		app.show(*start, filepath.Dir(*start), data, true)
 	} else {
 		app.showHome()
-	}
-
-	if *shot != "" {
-		// SavePNG 自带重排（Install 刚改过 DOM，RenderFrame 只画当前布局）。
-		if err := win.SavePNG(*shot); err != nil {
-			fmt.Fprintln(os.Stderr, "截图失败:", err)
-			os.Exit(1)
-		}
-		fmt.Println("PNG 已写入:", *shot)
-		return
 	}
 
 	if *exitAfter > 0 {

@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-24 09:09
+> 生成时间: 2026-10-24 09:33
 
 ---
 
@@ -686,20 +686,18 @@ NativeHandle——原生对话框要挂在应用 窗口下面，需要平台的�
 对话框是模态的：调用期间阻塞当前线程（父窗口的 SDL 事件循环随之 暂停），因此在按钮/菜单的回调里直接调用即可。非 Windows 平台返回
 dialog.ErrUnsupported。
 
-# 出图三件套（别混）
+# 出图口径（别混）
 
-看渲染结果有三条路，产物不同、用途不同，别当同一件事：
+分析走无头两路，产物不同、用途不同；截图是另一件事：
 
-  - doc.DumpSVG()（-dump-svg）：走引擎级联+布局，把结果序列化成 SVG。 文字是真实
-    <text>、可在浏览器里看真字体；但它不经过光栅绘制器， 反映的是「布局与样式」，不是最终像素（圆角精灵、抗锯齿这类绘制细节
-    看不到）。适合核对几何、层级、配色。
+  - doc.DumpSVG()（-dump-svg）：级联+布局序列化成 SVG，文字是真实
+    <text>、可在浏览器里看真字体；不经过光栅绘制器，反映的是「布局与 样式」，不是最终像素（圆角精灵、抗锯齿看不到）。核对几何/层级/配色。
   - engine.NewBufferedViewport + BufferGraphics.SavePNG（-dump-png）： 无头软件光栅化到
-    RGBA 缓冲。文字是占位方块（不依赖字体后端）， 可 ColorAt 逐像素断言——CI/headless 的首选，也是「只看布局与配色」 的快图。
-  - Window.SavePNG(path)：开真实窗口（SDL 渲染器 + 真实字体）重排、 画一帧、回读像素存
-    PNG。字体的字号/行高/字距、抗锯齿、圆角精灵 都是最终观感——核对「用户实际看到的样子」走这条；配合 SDL_VIDEO_DRIVER=dummy
-    无显示器也能跑。
+    RGBA 缓冲，文字是占位方块（不依赖字体后端）， 可 ColorAt 逐像素断言——CI/headless 的首选。
+  - Window.Screenshot()：回读真实窗口渲染目标的当前内容（原生字节 + 格式 + 尺寸），是「用户实际看到的样子」；要存 PNG
+    由应用自己编码 （见 examples/snip 的 saveWindowPNG）。
 
-一句话：SVG 看布局，BufferedPNG 看像素断言，Window.SavePNG 看真实观感。
+一句话：分析用 dump-svg / dump-png，截图用 Screenshot。
 
 VARIABLES
 
@@ -809,16 +807,6 @@ func (win *Window) Resize(w, h int)
 
 func (win *Window) Run() error
     Run 进入事件循环：处理关闭/尺寸变化/暴露/点击，并按内容变化重排、逐帧重绘。
-
-func (win *Window) SavePNG(path string) error
-    SavePNG 重排当前文档、渲染一帧，并把窗口内容存成 PNG。
-
-    重排是这条路径的一部分：RenderFrame 只负责「清屏 + 画当前布局」， Install/Resize/SetAttribute 之后不
-    Refresh 就会截到旧布局——每个示例 自己补这一步容易漏，干脆收进来。
-
-    与无头出图的分工：engine.NewBufferedViewport + BufferGraphics.SavePNG
-    走软件光栅（文字是占位方块，适合 CI 逐像素断言）；这条走真实窗口的 渲染器与字体，用来核对观感。SDL_VIDEO_DRIVER=dummy
-    时也能在无显示器 环境跑。
 
 func (win *Window) Screenshot() ([]byte, uint32, int, int, error)
     Screenshot 回读渲染目标当前内容（原生字节+格式+尺寸）。
@@ -2575,12 +2563,6 @@ func (a *App) RequestClose()
 
 func (a *App) Run() error
     Run 进入事件循环，直到窗口关闭。
-
-func (a *App) SavePNG(path string) error
-    SavePNG 重排当前文档、渲染一帧并存成 PNG（真实窗口的渲染器与字体）。
-
-    转发 browser.Window.SavePNG；无头出图（文字是占位方块）另走 engine.NewBufferedViewport 那条路，见
-    Window.SavePNG 的分工说明。
 
 func (a *App) SetStatus(text string)
     SetStatus 更新状态栏左侧文本（工作台还没建好时忽略，便于在命令闭包 里无脑调用）。
