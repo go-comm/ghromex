@@ -75,6 +75,20 @@
   `-shot`（`Window.Screenshot` 回读 + 本地编码 PNG，与 kit 同款，库层
   不提供 PNG 编码；notepad 另有 `-shot-find` 截图前展开查找栏，模拟
   Ctrl+F 交互态）。
+- **examples/stylebook**：新增「样式全集」对照页——`index.html` + 同目录
+  `stylebook.css` 由 `<link rel="stylesheet">` 外链加载（`docOptions` 提供
+  BaseURL + `go:embed` 加载器，引擎不碰 I/O 只回调宿主），逐节摆出引擎
+  当前支持的全部标签与 CSS：行内文本语义、块级结构、语义块（无 UA 规则的
+  h4~h6 与 section 等 raw/补齐两行对照）、媒体空盒、表单（含各 type 边界
+  与 optgroup/fieldset 语义缺口）、表格（含 colspan 错位演示）、盒模型与
+  定位（display/box-sizing/margin/padding/position/z-index）、边框圆角、
+  背景阴影、文字排版、溢出、颜色与单位、选择器（含特异度与 !important
+  演示）、11 个伪类、末节「不支持清单」（float/flex/opacity/伪元素/
+  :nth-child/em/rem/calc 等 27 行，钉明「Chrome 侧不同是预期」）；每节带
+  支持级别徽标。同一 `index.html` 可直接 `start` 进 Chrome 对照——两边读
+  同一份 HTML 与 CSS。flags：`-exit-after`/`-dump-png`/`-dump-svg`/`-shot`；
+  测试覆盖加载器、外链端到端（DumpSVG 颜色证据）、15 节锚点、标签计数与
+  语义块两行的布局形态（raw 并排 = 无 UA 规则的护栏）。
 - **examples**：截图工具新增 `-dump-capture path.png`——把抓屏得到的桌面
   图原样落盘再照常打开遮罩，用于排查「打开就是一片灰」这类现象：灰是抓
   到的内容本身（屏幕上盖着亮色窗口）还是遮罩压暗所致（`reset()` 的

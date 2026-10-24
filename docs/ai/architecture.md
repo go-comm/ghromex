@@ -168,5 +168,6 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 | `examples/kit` | 组件画廊：表单控件全家桶 + `NewBufferedViewport` 截图 |
 | `examples/portal` | 门户页：定位层/层叠/滚动性能基准页 |
 | `examples/ua` | UA 样式表对照：`NewHeadlessViewport` + `-dump-svg` |
+| `examples/stylebook` | 作者样式表全集：`<link>` 外链样式表（`docOptions` 加载器回调）+ 全标签/CSS 对照页（对照 Chrome） |
 | `examples/snip` | 截图小工具：`runtime/screen` 桌面抓屏 |
 | `examples/iconsheet` | ui 内置图标表：`ui.Icons()` 全量展示 + 搜索过滤 |

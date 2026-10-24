@@ -40,6 +40,7 @@
 | 目录 | 运行 | 内容 |
 | --- | --- | --- |
 | `examples/ua` | `go run ./examples/ua` | 原生 UA 表单 + 常用标签：零作者 CSS，可与 Chrome/Edge 直接对照 |
+| `examples/stylebook` | `go run ./examples/stylebook` | 样式全集：作者样式表（`<link>` 外链 + `go:embed`）逐节摆出引擎支持的全部标签与 CSS，每节带「支持/部分/不支持」徽标与边界注记；同一 `index.html` 可直接丢进 Chrome 对照 |
 | `examples/browser` | `go run ./examples/browser` | 迷你本地浏览器：顶部常驻地址栏与后退/前进/刷新/首页按钮、底部常驻状态栏（页标题 + 说明，换页后仍在），地址栏可打开本地路径（相对路径/`file://`），支持 `about:home`/`about:back`/`about:forward`，外部链接与缺失文件显示提示页；需在仓库内运行 |
 | `examples/portal` | `go run ./examples/portal` | 购物门户：fixed 工具条/品牌头/导航、层叠上下文、分类栏、秒杀与商品网格、搜索提示和购物车计数交互 |
 | `examples/notepad` | `go run ./examples/notepad` | 仿 Windows 记事本：页面由 Go 构造 DOM，无 `index.html`；`ui` 菜单（菜单项带图标）/纯图标工具栏/状态栏（文件/编辑/格式/视图/帮助，新建/打开/保存/另存为/撤销/重做）、原生「打开/另存为/选择文件夹」对话框、查找替换栏、铺满窗口的多行编辑区、状态栏（文件名/行列/字符数）；`-file` 启动时打开文件 |
@@ -427,6 +428,8 @@ ui/                应用工作台组件库（在 browser 之上）：菜单栏/
                    `ui.App` 把「建窗 + 装工作台 + 换页重装」封装成十来行
 examples/          可独立运行的示例（页面源码可能是内嵌 HTML、HTML 资产或由 Go 构造）：
   ua/                原生 UA 表单 + 常用标签（零作者 CSS，与 Chrome 对照）
+  stylebook/         样式全集（作者样式表：index.html + stylebook.css 外链加载，
+                     全标签/CSS 演示 + 支持级别徽标，与 Chrome 对照）
   kit/               组件库演示（菜单/工具栏/状态栏 + 卡片式页面，零作者 CSS）
   iconsheet/         内置图标表（全部名称/字形/码位，单击复制名称）
   browser/           迷你本地浏览器（常驻工具条 + 状态栏、历史/刷新、链接导航、错误提示页、

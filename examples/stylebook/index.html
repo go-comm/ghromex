@@ -1,0 +1,597 @@
+<!doctype html>
+<!--
+  Ghromex 对照页 · 作者样式表：全部支持的标签与 CSS
+  位置：examples/stylebook/index.html（样式在同目录 stylebook.css）
+  运行：go run ./examples/stylebook
+  对照：同一文件用 Chrome/Edge 直接打开（start examples\stylebook\index.html）
+        ——两边读的是同一份 index.html + 同一份 stylebook.css，逐节对照。
+
+  与 examples/ua 的分工：ua 页是「零作者 CSS」检验引擎内置 UA 默认样式；
+  本页反过来——所有样式都来自同目录 stylebook.css（作者自定义样式表），
+  逐节摆出引擎目前支持的全部标签与 CSS 能力，与 Chrome 对照作者样式的
+  解析、级联与绘制。
+
+  每节标题带支持级别徽标：
+    支持   —— 引擎实现且口径对齐 Chrome（允许 1~5px 的整数像素漂移）
+    部分   —— 能用但语义/范围打折（各节 note 写清边界）
+    不支持 —— 引擎没有该能力，Chrome 与本页引擎侧表现必然不同（是预期）
+
+  覆盖范围（与 engine/css_parser.go、style_ua.go、selector.go 同源）：
+  · 标签：行内文本语义、块级结构、语义块（含无 UA 规则的 h4~h6 与
+    section 等）、表单、表格、列表、媒体空盒
+  · CSS 属性：display、position+偏移+z-index、box-sizing、width/height、
+    margin/padding、border 全套、border-radius、border-collapse、
+    background-color/background（颜色）、color、box-shadow、
+    font-size/family/weight、line-height、text-align、text-decoration、
+    vertical-align、overflow、white-space、pointer-events
+  · 选择器：类型/#id/.class/后代/子代/分组/复合/[attr]/[attr=v]、
+    特异度、!important；伪类 :hover :focus :active :checked :disabled
+    :enabled :first-child :last-child :only-child :root :empty
+  · 值：#3/#4/#6/#8、rgb()/rgba()、具名色、transparent；
+    px/pt/dp/%/0/无单位
+  · 末节「不支持清单」：float/flex/grid、opacity、transform/transition、
+    background-image、em/rem/vh、calc()/var()、伪元素、:not()/:nth-child()、
+    + ~ 组合器、通配 *、@media/@font-face 等——Chrome 对照到这些差异属预期。
+
+  已知分叉（与 ua 页同源，详见 examples/ua/index.html 头注释）：
+  · 布局整数像素，长页逐段累积漂移约 5px/2310px
+  · 边框只画单色实线（dashed/dotted/double 退化为 solid；input/按钮/hr 的
+    Chrome 立体边框为单色）
+  · 表格最小模型：无 colspan/rowspan，列宽取各列内容最大值
+  · 无斜体字形（i/em 只保证不换行）、无 webfont/@font-face
+  · img/svg/canvas/iframe/video 无渲染链路，只有 CSS 盒
+  · 悬停/按下默认反馈是引擎有意分歧（Chrome UA 无 hover 规则）
+-->
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>样式全集 · 作者样式表对照 · 浏览器对照</title>
+	<link rel="stylesheet" href="stylebook.css">
+</head>
+<body>
+
+<div class="banner">
+	<b>样式全集页</b>：本页所有样式来自同目录 <code class="inl">stylebook.css</code>
+	（<code class="inl">&lt;link rel="stylesheet"&gt;</code> 外链）——它能显示即证明引擎的
+	外部样式表链路（href 解析 + 加载器回调）已通。对照命令：
+	<code class="inl">start examples\stylebook\index.html</code> 用 Chrome 打开同一文件，
+	读的是磁盘上同一份 CSS，两边逐节比对。
+</div>
+
+<div class="legend">
+	支持级别：<span class="badge b-full">支持</span> 口径对齐 Chrome（1~5px 整数像素漂移内）
+	<span class="badge b-part">部分</span> 能用但范围打折
+	<span class="badge b-none">不支持</span> 引擎没有该能力，Chrome 侧表现不同是预期。
+</div>
+
+<!-- ===== 行内与文本语义 ===== -->
+<div class="sec" id="sec-tags-inline">
+	<h2>行内与文本语义标签 <span class="badge b-full">支持</span></h2>
+	<div class="inline-demo">
+		<p>
+			<strong>strong</strong> / <b>b</b> · <em>em</em> / <i>i</i>（引擎无斜体字形）·
+			<u>u</u> · <s>s</s> / <strike>strike</strike> · <span class="hl">mark 高亮</span> ·
+			<code class="inl">code</code> <kbd>kbd</kbd> <samp>samp</samp> <var>var</var>
+		</p>
+		<p>
+			<cite>cite</cite> · <dfn>dfn</dfn> · <abbr title="缩写">abbr</abbr> ·
+			<q>q 引用</q> · <small>small</small> · H<sub>sub</sub> · E<sup>sup</sup> ·
+			<time datetime="2026-10-25">2026-10-25</time> · <data value="7">data</data> ·
+			<output>output</output>
+		</p>
+		<p>
+			<bdi>bdi</bdi> · <bdo dir="rtl">bdo</bdo> · <ins>ins 下划线</ins> ·
+			<del>del 删除线</del> · <ruby>漢<rt>かん</rt></ruby> ·
+			<a href="#sec-tags-inline">a 链接（可聚焦、可点击）</a>
+		</p>
+		<p>强制换行：第一行<br>第二行 · 混排 a<code class="inl">b</code>c 与中文 English 换行点对照</p>
+	</div>
+	<p class="note">行内标签全部走 <span class="code">display: inline</span> 的 UA 规则；
+		<code class="inl">i</code>/<code class="inl">em</code> 不换行但无斜体字形（v1 边界）；
+		<code class="inl">sub/sup</code> 有基线位移；<code class="inl">a:hover</code> 底色变化见「伪类」节。</p>
+</div>
+
+<!-- ===== 块级与结构 ===== -->
+<div class="sec" id="sec-tags-block">
+	<h2>块级与结构标签 <span class="badge b-full">支持</span></h2>
+	<div class="blk headings">
+		<h1>h1 标题</h1><p>UA：2em/0.67em 边距（引擎按整数像素取整）</p>
+		<h2>h2 标题</h2><p>UA：1.5em</p>
+		<h3>h3 标题</h3><p>UA：1.17em</p>
+		<h4>h4 标题（引擎无 UA 规则）</h4>
+		<h5>h5 标题（引擎无 UA 规则）</h5>
+		<h6>h6 标题（引擎无 UA 规则）</h6>
+	</div>
+	<p class="note">h1~h3 有 UA 规则；<b>h4~h6 引擎无 UA 规则</b>——Chrome 里递减字号、块级，
+		引擎里与正文同字号且是 inline-block（与下一节的语义块同因），本页刻意不补样式让差异可见。</p>
+	<blockquote class="blk-quote">blockquote 引用块：UA 缩进 16px 40px，本页加了左边框与底色。</blockquote>
+	<div class="blk">
+		<p>pre 预格式化（UA：<span class="code">white-space: pre</span> + 等宽 13px）：</p>
+		<pre>
+行首空格保留
+	制表符保留
+a  b   c    d</pre>
+		<hr>
+		<p>hr 分隔线（无专用渲染器：Chrome 是上暗下浅 inset 双色，引擎按 border 单色画）。</p>
+		<figure>
+			<figcaption>figure / figcaption：UA 缩进 40px</figcaption>
+		</figure>
+	</div>
+	<div class="blk">
+		<dl>
+			<dt>dt 术语（UA 不加粗）</dt>
+			<dd>dd 解释（UA 缩进 40px）</dd>
+			<dt>dt 第二条</dt>
+			<dd>dd 第二条</dd>
+		</dl>
+		<ul>
+			<li>ul 无序列表（标记引擎自绘）</li>
+			<li>第二项</li>
+		</ul>
+		<ol>
+			<li>ol 有序列表（序号引擎自绘）</li>
+			<li>第二项</li>
+		</ol>
+	</div>
+	<p class="note">列表标记（圆点/序号）由引擎在布局期自绘，Chrome 是 <code class="inl">::marker</code>
+		伪元素——结果一致，机制不同；<code class="inl">list-style*</code> 属性两边都不生效于引擎。</p>
+</div>
+
+<!-- ===== 语义块标签 ===== -->
+<div class="sec" id="sec-semantic">
+	<h2>语义块标签与 h4~h6（无 UA 规则）<span class="badge b-none">不支持</span></h2>
+	<p class="note">下面一行只加了边框、<b>没有</b>补 display：引擎里这些标签没有 UA 规则，
+		退化成 inline-block 原子盒（一行排开）；Chrome 里它们是块级（逐行堆叠）——差异即演示内容。</p>
+	<div class="raw">
+		<section>section</section>
+		<article>article</article>
+		<header>header</header>
+		<footer>footer</footer>
+		<main>main</main>
+		<nav>nav</nav>
+		<aside>aside</aside>
+		<address>address</address>
+		<h4>h4</h4>
+		<h5>h5</h5>
+		<h6>h6</h6>
+	</div>
+	<p class="cap">作者 CSS 补齐后（<span class="code">display: block</span> + 字号/字重）——两边应当一致：</p>
+	<div class="fixed">
+		<section>section</section>
+		<article>article</article>
+		<header>header</header>
+		<footer>footer</footer>
+		<main>main</main>
+		<nav>nav</nav>
+		<aside>aside</aside>
+		<address>address</address>
+		<h4>h4（作者补字号与加粗）</h4>
+		<h5>h5</h5>
+		<h6>h6</h6>
+	</div>
+</div>
+
+<!-- ===== 表单 ===== -->
+<div class="sec" id="sec-forms">
+	<h2>表单标签与控件 <span class="badge b-part">部分</span></h2>
+	<div class="frow">
+		<label for="f-name">文本：</label>
+		<input id="f-name" class="field" type="text" value="可编辑、可拖选、可聚焦">
+		<label>密码 <input class="field" type="password" value="secret"></label>
+		<input class="btn" type="submit" value="提交">
+		<input class="btn" type="reset" value="重置">
+		<button class="btn" type="button">button</button>
+	</div>
+	<div class="frow">
+		<label class="chk"><input type="checkbox" checked> :checked 勾选</label>
+		<label class="chk"><input type="radio" name="pk" checked> 单选甲</label>
+		<label class="chk"><input type="radio" name="pk"> 单选乙</label>
+		<label class="chk"><input type="checkbox" disabled> 禁用复选</label>
+		<label>点击 label 文字也能切换
+			<input type="checkbox">
+		</label>
+	</div>
+	<div class="frow">
+		其他 type（引擎按 text 外观画值、<b>不可编辑</b>；Chrome 是原生控件）：
+		<input class="field" type="email" value="a@b.c">
+		<input class="field" type="number" value="42">
+		<input class="field" type="date" value="2026-10-25">
+		<input class="field" type="file">
+		<input class="field" type="range" value="30">
+		<input class="field" type="hidden" value="hidden-value">
+	</div>
+	<div class="frow">
+		<textarea class="ta">textarea：折行、光标、滚动、覆盖式滚动条</textarea>
+		<select class="sel">
+			<option>苹果</option>
+			<option selected>香蕉</option>
+			<option>橙子</option>
+		</select>
+		<select class="sel">
+			<optgroup label="夏果">
+				<option>西瓜</option>
+				<option>桃子</option>
+			</optgroup>
+			<optgroup label="冬果">
+				<option>苹果</option>
+			</optgroup>
+		</select>
+	</div>
+	<fieldset class="fset">
+		<legend>fieldset / legend</legend>
+		<label class="chk"><input type="checkbox" checked> 组内复选</label>
+		<label class="chk"><input type="radio" name="fs"> 组内单选</label>
+	</fieldset>
+	<p class="note">
+		支持：text/password 编辑全套（键入/拖选/剪贴板/掩码光标）、checkbox/radio（13×13、
+		分组互斥、点击切换）、submit/reset/button、button、textarea（含滚动）、select 展开点选、
+		label 点击转发。<br>
+		边界：email/number/date/file/range/hidden 等 type 不可编辑（hidden 在 Chrome 隐藏、
+		引擎仍按 text 外观绘制）；第二个 select 的 <code class="inl">optgroup</code> 内
+		option 收集不到（引擎只收直接 option 子，Chrome 正常分组显示）；fieldset/legend
+		无盒语义（Chrome 的 legend 镶在边框上，引擎是普通内容盒，见上框）。
+	</p>
+</div>
+
+<!-- ===== 媒体与嵌入标签 ===== -->
+<div class="sec" id="sec-tags-media">
+	<h2>媒体与嵌入标签 <span class="badge b-none">不支持</span></h2>
+	<p class="note">引擎没有图像/矢量/画布渲染链路（不加载 <code class="inl">img src</code>、
+		不解析 SVG 元素、无 canvas 绘制）：下面每个元素在引擎里都是<b>空的 inline-block 盒</b>
+		（只画 CSS 底色与边框）。Chrome 里各按自身规则显示（alt 文字、画布、内嵌页面）——差异是预期。</p>
+	<img class="media" src="missing.png" alt="img：Chrome 显示 alt/裂图，引擎只有盒">
+	<svg class="media" width="150" height="64">svg：Chrome 有矢量画布，引擎只有盒</svg>
+	<canvas class="media">canvas：Chrome 默认 300x150 画布，引擎只有盒</canvas>
+	<video class="media">video</video>
+	<iframe class="media" title="空">iframe</iframe>
+</div>
+
+<!-- ===== 表格 ===== -->
+<div class="sec" id="sec-table">
+	<h2>表格标签 <span class="badge b-part">部分</span></h2>
+	<table class="grid">
+		<caption>table.grid · border-collapse: collapse · caption/thead/tbody/tfoot/th/td</caption>
+		<thead>
+			<tr><th>列 A</th><th>列 B</th><th>列 C</th></tr>
+		</thead>
+		<tbody>
+			<tr><td>1</td><td>2222</td><td>3</td></tr>
+			<tr><td>44444</td><td>5</td><td>6</td></tr>
+		</tbody>
+		<tfoot>
+			<tr><td>合计</td><td>7</td><td>9</td></tr>
+		</tfoot>
+	</table>
+	<p class="cap">colspan / rowspan <span class="badge b-none">不支持</span>（Chrome 合并单元格，引擎按格独立排 → 错位）：</p>
+	<table class="grid">
+		<thead>
+			<tr><th colspan="2">th colspan=2（引擎忽略）</th><th>第三列</th></tr>
+		</thead>
+		<tbody>
+			<tr><td>a</td><td>b</td><td>c</td></tr>
+		</tbody>
+	</table>
+	<p class="cap">border-collapse: separate（引擎用 2px 间隙近似 border-spacing，Chrome 默认正好 2px）：</p>
+	<table class="spread">
+		<tbody>
+			<tr><td>separate 甲</td><td>separate 乙</td></tr>
+		</tbody>
+	</table>
+	<p class="note">专用布局器（列对齐 + 行堆叠）：列宽取各列内容最大值（Chrome 是自动表格布局分配，
+		带小数像素）；collapse 按「单元格画上/左 + 表格补外缘右/下」的半边框实现；
+		<code class="inl">col/colgroup</code>、<code class="inl">border-spacing</code>、
+		<code class="inl">table-layout</code> 无布局语义。</p>
+</div>
+
+<!-- ===== 盒模型与定位 ===== -->
+<div class="sec" id="sec-box">
+	<h2>盒模型与定位 <span class="badge b-full">支持</span></h2>
+
+	<p class="cap"><span class="code">display: none / inline / inline-block / block</span></p>
+	<div class="d-none">display: none —— 两边都应不可见</div>
+	<p class="d-block">display: block —— 独占一行（整行宽）</p>
+	<p>行内混排：<span class="d-inline">display: inline 进文字流</span> 前后文字照常排列。</p>
+	<span class="d-ib">display: inline-block</span>
+	<span class="d-ib">第二个原子盒（并排、可设宽高）</span>
+
+	<p class="cap"><span class="code">box-sizing</span>（同 width:160 + padding:16 + border:8）：</p>
+	<div class="sizing sizing-content">content-box → 总宽 208</div>
+	<div class="sizing sizing-border">border-box → 总宽 160</div>
+
+	<p class="cap"><span class="code">margin</span>（1~4 值、负值）与 <span class="code">padding</span>（1~4 值）：</p>
+	<div class="m-demo">margin: 12px 24px 12px 0</div>
+	<div class="m-neg">margin: -4px 0 8px 24px（负值上移）</div>
+	<div class="pad p1">padding: 12px（1 值）</div>
+	<div class="pad p2">padding: 8px 16px（2 值）</div>
+	<div class="pad p3">padding: 6px 14px 10px（3 值）</div>
+	<div class="pad p4">padding: 4px 10px 8px 16px（4 值）</div>
+
+	<p class="cap"><span class="code">position: relative / absolute / fixed</span> + <span class="code">z-index</span>：</p>
+	<div class="pos-wrap">
+		<span class="pos-rel">relative：top:10 left:24（原位偏移）</span>
+		<span class="pos-abs">absolute：定位父右上（right:8 top:6）</span>
+	</div>
+	<div class="z-wrap">
+		<div class="z-box z1">z-index: 1（下）</div>
+		<div class="z-box z2">z-index: 3（上）</div>
+		<div class="z-box z3">z-index: 2（中）</div>
+	</div>
+	<div class="pct">width: 60%（百分比相对包含块）</div>
+	<span class="pos-fix">position: fixed —— 相对视口停在右下角</span>
+
+	<p class="note">支持 <span class="code">width/height</span>（px/pt/dp/%/auto/0）、
+		<span class="code">top/right/bottom/left</span>（含负值）、<span class="code">z-index</span>
+		（整数；<code class="inl">auto</code> 按 0）。<b>不支持</b> min/max-width/height（末节清单）。</p>
+</div>
+
+<!-- ===== 边框与圆角 ===== -->
+<div class="sec" id="sec-border">
+	<h2>边框与圆角 <span class="badge b-part">部分</span></h2>
+	<p class="cap"><span class="code">border</span> 简写（宽/色/样式 token 顺序不限）与线型：</p>
+	<span class="bd">border: 2px dashed #0b57d0</span>
+	<span class="bd bd-radius">border-radius: 12px</span>
+	<span class="bd-circle">radius 50%</span>
+	<p class="note">线型关键字都能解析，但 <b>绘制统一按 solid</b>——Chrome 里上面第一块是虚线，
+		引擎是实线（外盒尺寸一致）。</p>
+
+	<p class="cap">四边单写 <span class="code">border-top/right/bottom/left</span>：</p>
+	<span class="bd-side">四边各异 4px</span>
+
+	<p class="cap">长写 <span class="code">border-width / border-style / border-color</span>：</p>
+	<span class="bd-long">width:3 style:solid color:#6a4fa3</span>
+
+	<p class="cap"><span class="code">border-color: currentcolor</span>（随文字色）：</p>
+	<span class="bd-current">边框应与文字同为 #b3392f</span>
+
+	<p class="note">支持 <span class="code">border</span> 四边简写、单边简写、12 个单边长写、
+		<span class="code">border-radius</span>（四角统一，% 相对短边）。线型仅 none/hidden 有语义
+		（其余按 solid）；<code class="inl">border-image</code> 不解析；负边距宽度忽略。</p>
+</div>
+
+<!-- ===== 背景与阴影 ===== -->
+<div class="sec" id="sec-bg">
+	<h2>背景与阴影 <span class="badge b-part">部分</span></h2>
+	<p class="cap"><span class="code">background-color</span> / <span class="code">background</span> 简写（只取颜色）：</p>
+	<span class="swatch bg-blue">#0b57d0 派生底色</span>
+	<span class="swatch bg-short">background: rgba(...)</span>
+	<span class="swatch bg-amber">rgba 底色 35%</span>
+
+	<p class="cap"><span class="code">box-shadow</span>（单条 / 模糊+扩散 / 多条 / inset）：</p>
+	<span class="sh sh1">0 2px 6px 淡影</span>
+	<span class="sh sh2">0 8px 24px 4px 大扩散</span>
+	<span class="sh sh3">两条逗号分隔</span>
+	<span class="sh sh-in">inset（引擎解析不绘制 → 应无内阴影）</span>
+
+	<p class="note">支持颜色背景与外阴影（x y blur spread 颜色，逗号多条，位置不限，只画外阴影）。
+		<b>不支持</b> background-image / 渐变 / url() / position / size / repeat（末节清单）。</p>
+</div>
+
+<!-- ===== 文字与排版 ===== -->
+<div class="sec" id="sec-text">
+	<h2>文字与排版 <span class="badge b-part">部分</span></h2>
+
+	<p class="cap"><span class="code">font-size</span>（px / %，% 相对父级）：</p>
+	<p class="tline"><span class="fs-sm">13px</span> · <span class="fs-md">20px</span> ·
+		<span class="fs-pct">font-size: 200%（父 16 → 32px）</span></p>
+
+	<p class="cap"><span class="code">font-family</span>（通用族与具名族）：</p>
+	<p class="tline"><span class="ff-serif">serif 衬线 Ag文</span> ·
+		<span class="ff-sans">sans-serif 无衬线 Ag文</span> ·
+		<span class="ff-mono">monospace 等宽 Ag文</span> ·
+		<span class="ff-arial">Arial Ag文</span> ·
+		<span class="ff-yh">微软雅黑 Ag文</span></p>
+
+	<p class="cap"><span class="code">font-weight</span>（引擎二分：400 普通 / 700、900 加粗）：</p>
+	<p class="tline"><span class="w400">400 普通</span> · <span class="w700">700 加粗</span> ·
+		<span class="w900">900 加粗</span></p>
+
+	<p class="cap"><span class="code">line-height</span>（normal / 倍数 / 百分比 / 绝对长度）：</p>
+	<div class="lh-box lh-n">line-height: normal——甲乙丙丁戊己庚辛壬癸甲乙丙丁（折行看行距）</div>
+	<div class="lh-box lh-num">line-height: 1.6——甲乙丙丁戊己庚辛壬癸甲乙丙丁戊己庚辛壬癸</div>
+	<div class="lh-box lh-pct">line-height: 150%——甲乙丙丁戊己庚辛壬癸甲乙丙丁戊己庚辛壬癸</div>
+	<div class="lh-box lh-px">line-height: 34px——甲乙丙丁戊己庚辛壬癸甲乙丙丁戊己庚辛壬癸</div>
+
+	<p class="cap"><span class="code">text-align</span>（left / center / right）：</p>
+	<div class="ta-box ta-l">text-align: left 默认左对齐</div>
+	<div class="ta-box ta-c">text-align: center 居中</div>
+	<div class="ta-box ta-r">text-align: right 右对齐</div>
+
+	<p class="cap"><span class="code">text-decoration</span>（underline / line-through / none；overline 忽略）：</p>
+	<p class="tline"><span class="td-u">underline 下划线</span> ·
+		<span class="td-l">line-through 删除线</span> ·
+		<span class="td-n">none 无</span> ·
+		<span class="td-o">overline（Chrome 有上划线，引擎无）</span></p>
+
+	<p class="cap"><span class="code">white-space: pre</span>（源码换行与空格保留）：</p>
+	<div class="pre-box">行一
+行二（源码里的换行）
+    缩进四格  连续空格</div>
+
+	<p class="cap"><span class="code">vertical-align</span>（一排等高盒按不同关键字对齐基线）：</p>
+	<div class="va-row">文字
+		<span class="va va-top">top</span>
+		<span class="va va-mid">middle</span>
+		<span class="va va-bot">bottom</span>
+		<span class="va va-sub">sub</span>
+		<span class="va va-super">super</span>
+		<span class="va va-ttop">text-top</span>
+		<span class="va va-tbot">text-bottom</span>
+		<span class="va va-len">8px</span>
+		<span class="va va-pct">50%</span>
+	</div>
+
+	<p class="note">支持 <span class="code">color</span>、<span class="code">font-size</span>（含级联期 % 折算）、
+		<code class="inl">line-height</code>（normal/倍数/%/px，<b>em/rem/vh 整条忽略</b>）、
+		<code class="inl">font-weight</code>（二分）、<code class="inl">font-family</code>、
+		<code class="inl">text-align</code>、<code class="inl">text-decoration</code>（随父继承）、
+		<code class="inl">vertical-align</code>。均随级联继承。<b>不支持</b> font-style/斜体、
+		letter-spacing、text-transform、text-shadow（末节清单）。</p>
+</div>
+
+<!-- ===== 溢出与指针 ===== -->
+<div class="sec" id="sec-overflow">
+	<h2>溢出与指针 <span class="badge b-part">部分</span></h2>
+	<div class="ov-box ov-h"><span class="code">overflow: hidden</span> 超出内容被裁掉：甲乙丙丁戊己庚辛壬癸甲乙丙丁戊己庚辛壬癸</div>
+	<div class="ov-box ov-s"><span class="code">overflow: scroll</span> 同段文本：甲乙丙丁戊己庚辛壬癸甲乙丙丁戊己庚辛壬癸</div>
+	<div class="ov-box ov-a"><span class="code">overflow: auto</span> 同段文本：甲乙丙丁戊己庚辛壬癸甲乙丙丁戊己庚辛壬癸</div>
+	<p class="cap">pointer-events：左边 <span class="pe-none">none（不再接收鼠标）</span>
+		右边 <span class="pe-auto">auto（默认）</span></p>
+	<p class="note">支持单值与双值 <span class="code">overflow(-x/-y)</span>（visible/hidden/clip/scroll/auto），
+		裁剪生效；<b>通用容器不画滚动条滑块，滚轮是唯一驱动源</b>（textarea 才有覆盖式滚动条，见表单节）。
+		<code class="inl">pointer-events</code> 只区分 none/auto 两态。<b>不支持</b>
+		<code class="inl">visibility</code>、<code class="inl">cursor</code>（末节清单）。</p>
+</div>
+
+<!-- ===== 颜色与单位 ===== -->
+<div class="sec" id="sec-values">
+	<h2>颜色与单位 <span class="badge b-part">部分</span></h2>
+	<p class="cap">颜色格式（<span class="code">#3 / #6 / #8</span>、<span class="code">rgb()</span>、
+		<span class="code">rgba()</span>、具名、transparent）：</p>
+	<span class="csw c-hex3">#fc6</span>
+	<span class="csw c-hex6">#2f6f4f</span>
+	<span class="csw c-hex8">#0b57d080</span>
+	<span class="csw c-rgb">rgb(179,57,47)</span>
+	<span class="csw c-rgba">rgba(106,79,163,.45)</span>
+	<span class="csw c-named">orange</span>
+	<span class="csw c-trans">transparent</span>
+
+	<p class="cap">单位（<span class="code">px / pt / dp / % / 0 / 无单位</span>）：</p>
+	<span class="usw u-px">width: 90px</span>
+	<span class="usw u-pt">width: 68pt (=90px)</span>
+	<span class="usw u-dp">width: 56dp (=90px)</span>
+	<span class="usw u-pct">width: 30%</span>
+	<span class="usw u-unitless">width: 90（按 px）</span>
+	<span class="usw u0">width: 0</span>
+
+	<p class="note">具名色只支持 19 个（black white red green blue gray grey lightgray lightgrey
+		darkgray yellow orange purple pink brown cyan magenta silver transparent），
+		<code class="inl">currentcolor</code> 仅边框与阴影色合法；alpha 是 0~1 浮点。
+		<b>不支持</b> <code class="inl">hsl()</code>、<code class="inl">em/rem/ex/ch/vh/vw</code>、
+		<code class="inl">calc()</code>、<code class="inl">var()</code>（末节清单）。</p>
+</div>
+
+<!-- ===== 选择器 ===== -->
+<div class="sec" id="sec-selectors">
+	<h2>选择器 <span class="badge b-part">部分</span></h2>
+
+	<div class="sel-row sel-tag"><span class="code">cite 类型</span> 目标：<cite>这个 cite 应有底色</cite></div>
+
+	<div class="sel-row"><span class="code">#sel-id</span> 目标：<span id="sel-id">#id 目标（虚线橙框）</span></div>
+
+	<div class="sel-row"><span class="code">.selcls</span> 目标：<span class="selcls">.class 目标</span>
+		<span>（不在 class 里则不命中）</span></div>
+
+	<div class="sel-row desc-wrap"><span class="code">.desc-wrap p（后代）</span>
+		<p>直接子 p</p>
+		<div><p>嵌套层的 p 也命中（后代组合器沿父链向上匹配）</p></div>
+	</div>
+
+	<div class="sel-row child-wrap"><span class="code">.child-wrap &gt; p（子代）</span>
+		<p>直接子 → 命中（蓝框）</p>
+		<div><p>孙子层 → 不命中（红框来自另一条规则）</p></div>
+	</div>
+
+	<div class="sel-row"><span class="code">.grp-a, .grp-b（分组）</span>
+		<span class="grp-a">甲</span> <span class="grp-b">乙</span></div>
+
+	<div class="sel-row"><span class="code">p.comp.d2（复合：元素+两类同时满足）</span>
+		<p class="comp d2">命中（蓝框）</p>
+		<p class="comp">只带 comp → 不命中</p></div>
+
+	<div class="sel-row"><span class="code">[data-k]</span> / <span class="code">[data-k="v2"]</span>
+		&nbsp;<span data-k="v1">v1（存在即中，橙）</span>
+		&nbsp;<span data-k="v2">v2（精确相等，红）</span>
+		&nbsp;<span>无属性（不中）</span></div>
+
+	<div class="sel-row spec-a"><span class="code">特异度</span>
+		<p id="sel-spec" class="s">id(1,0,0) 赢过两条 class 规则 → 应为蓝 #0b57d0</p>
+		<p class="s">两条 class 规则竞争：.spec-a .s(0,2,0) 赢过 .spec-a p(0,1,1) → 应为绿</p></div>
+
+	<div class="sel-row"><span class="code">!important</span>
+		&nbsp;<span id="sel-imp" class="imp">.imp 的 important 橙色压过 #sel-imp 的 id 红</span></div>
+
+	<p class="note">支持类型/#id/.class/后代/子代/分组/复合、<code class="inl">[attr]</code> 与
+		<code class="inl">[attr=value]</code>、特异度字典序比较、<code class="inl">!important</code>
+		（作者 important &gt; 作者普通 &gt; UA）。<b>不命中</b>：伪元素、
+		<code class="inl">:not()/:nth-child()/:is()</code>、<code class="inl">+</code>/<code class="inl">~</code>
+		组合器、通配 <code class="inl">*</code>、属性选择器 <code class="inl">~= |= ^= $= *=</code>
+		（末节清单）。</p>
+</div>
+
+<!-- ===== 伪类 ===== -->
+<div class="sec" id="sec-pseudo">
+	<h2>伪类 <span class="badge b-full">支持</span></h2>
+
+	<p class="cap">动态伪类（本页可交互：悬停 / 按下 / 聚焦）：</p>
+	<span class="ph">:hover 悬停变蓝</span>
+	<span class="pa">:active 按下变蓝</span>
+	<input class="field pf" type="text" value=":focus 聚焦后变蓝边框">
+
+	<p class="cap">控件伪类：</p>
+	<label class="chk"><input type="checkbox" checked>:checked</label>
+	<label class="chk"><input type="checkbox">未勾选</label>
+	<input class="field dis" type="text" value=":disabled 禁用态" disabled>
+	<input class="field" type="text" value=":enabled 可用态">
+
+	<p class="cap">结构伪类：</p>
+	<ul class="ch-list">
+		<li>:first-child 命中（底色）</li>
+		<li>中间项（不中）</li>
+		<li>中间项（不中）</li>
+		<li>:last-child 命中（底色）</li>
+	</ul>
+	<ul class="only-list ch-list">
+		<li>only-child 命中（绿底）——整表只有这一项</li>
+	</ul>
+	<span class="em"></span><span class="em">:empty 不中</span>
+	<span class="code">:empty（左盒无内容命中变绿，右盒有文字不中）</span>
+
+	<p class="note">共 11 个伪类：:hover/:focus/:active、:checked/:disabled/:enabled、
+		:first-child/:last-child/:only-child/:root/:empty。悬停与按下<b>沿父链继承</b>
+		（父级 :hover 时子级也匹配）、聚焦不继承；状态变化走「变更通知 → 重排重绘 → 级联重算」。
+		<code class="inl">:root</code> 命中 &lt;html&gt;——本页整圈浅绿底色即其效果（body 白底让位处可见）。
+		伪元素（::before/::after 等）<b>永不命中</b>（末节清单）。</p>
+</div>
+
+<!-- ===== 不支持清单 ===== -->
+<div class="sec" id="sec-unsupported">
+	<h2>不支持清单 <span class="badge b-none">不支持</span></h2>
+	<p class="note">下列能力引擎侧一律无效（未识别的声明静默忽略、未命中的选择器永不匹配、
+		at-rule 整块跳过）。Chrome 对照到这些差异是预期行为，不在「bug」之列。</p>
+	<table class="unsup">
+		<thead>
+			<tr><th>能力</th><th>Chrome</th><th>引擎</th></tr>
+		</thead>
+		<tbody>
+			<tr><td><code class="inl">float</code> / <code class="inl">clear</code></td><td>浮动布局</td><td class="x">忽略，仍按正常流</td></tr>
+			<tr><td><code class="inl">display: flex / grid</code> 及 flex*/grid*</td><td>弹性/网格布局</td><td class="x">display 只认 none/inline/inline-block/block，其余忽略</td></tr>
+			<tr><td><code class="inl">opacity</code> / <code class="inl">visibility</code></td><td>半透明/可见性</td><td class="x">忽略（半透明改用 rgba 颜色）</td></tr>
+			<tr><td><code class="inl">cursor</code></td><td>光标样式</td><td class="x">忽略，光标恒默认</td></tr>
+			<tr><td><code class="inl">transform</code> / <code class="inl">transition</code> / <code class="inl">animation</code> / <code class="inl">filter</code></td><td>变换/过渡/动画/滤镜</td><td class="x">忽略</td></tr>
+			<tr><td><code class="inl">background-image</code> / 渐变 / <code class="inl">url()</code> / background-position/size/repeat</td><td>图片与渐变背景</td><td class="x">background 简写只取颜色 token</td></tr>
+			<tr><td><code class="inl">list-style*</code></td><td>标记形状/图片</td><td class="x">忽略（标记由引擎按 ol/ul 自绘）</td></tr>
+			<tr><td><code class="inl">font-style: italic</code></td><td>斜体</td><td class="x">不解析、无斜体字形</td></tr>
+			<tr><td><code class="inl">letter-spacing</code> / <code class="inl">word-spacing</code> / <code class="inl">text-transform</code> / <code class="inl">text-shadow</code></td><td>字距/大小写/文字阴影</td><td class="x">忽略</td></tr>
+			<tr><td><code class="inl">min/max-width</code> / <code class="inl">min/max-height</code></td><td>尺寸钳制</td><td class="x">忽略</td></tr>
+			<tr><td><code class="inl">em</code> / <code class="inl">rem</code> / <code class="inl">ex</code> / <code class="inl">ch</code> / <code class="inl">vh</code> / <code class="inl">vw</code></td><td>相对/视口单位</td><td class="x">不解析（只认 px/pt/dp/%/0/无单位）</td></tr>
+			<tr><td><code class="inl">calc()</code> / <code class="inl">var()</code> / <code class="inl">hsl()</code></td><td>函数值</td><td class="x">不解析</td></tr>
+			<tr><td><code class="inl">::before</code> / <code class="inl">::after</code> / <code class="inl">::marker</code> 等伪元素</td><td>生成内容</td><td class="x">解析但选择器永不命中</td></tr>
+			<tr><td><code class="inl">:not()</code> / <code class="inl">:nth-child()</code> / <code class="inl">:is()</code> / <code class="inl">:focus-within</code></td><td>结构伪类</td><td class="x">未识别伪类，永不匹配</td></tr>
+			<tr><td><code class="inl">+</code> / <code class="inl">~</code> 组合器、通配 <code class="inl">*</code></td><td>兄弟/通配选择</td><td class="x">不命中（* 被当成标签名）</td></tr>
+			<tr><td>属性选择器 <code class="inl">~= |= ^= $= *=</code></td><td>匹配运算</td><td class="x">只支持存在性与 <code class="inl">=</code></td></tr>
+			<tr><td><code class="inl">@media</code> / <code class="inl">@font-face</code> / <code class="inl">@keyframes</code></td><td>条件/字体/动画规则</td><td class="x">整块跳过（@media 不分屏，内容不生效）</td></tr>
+			<tr><td><code class="inl">@import</code></td><td>导入样式表</td><td>支持（需宿主提供加载器，本页未用）</td></tr>
+			<tr><td><code class="inl">col</code> / <code class="inl">colgroup</code> / colspan / rowspan</td><td>表格扩展</td><td class="x">无布局语义</td></tr>
+			<tr><td><code class="inl">script</code> / <code class="inl">meta</code> / <code class="inl">base</code></td><td>脚本执行/元数据</td><td class="x">解析期丢弃（script 不进 DOM、不执行）</td></tr>
+			<tr><td><code class="inl">img</code> / <code class="inl">svg</code> / <code class="inl">canvas</code> / <code class="inl">iframe</code> / <code class="inl">video</code></td><td>图像/矢量/画布/嵌入</td><td class="x">无渲染链路，只有 CSS 盒</td></tr>
+			<tr><td><code class="inl">white-space: nowrap</code> / <code class="inl">pre-wrap</code></td><td>折行控制</td><td class="x">只区分 pre 与其余（nowrap 按 normal 折行）</td></tr>
+			<tr><td><code class="inl">border-image</code> / 非 solid 线型</td><td>图片边框/虚线点线</td><td class="x">不解析 / 按 solid 绘制</td></tr>
+			<tr><td><code class="inl">box-shadow: inset</code></td><td>内阴影</td><td class="x">解析但不绘制</td></tr>
+			<tr><td><code class="inl">z-index: auto</code></td><td>自动层叠</td><td class="x">按 0 处理</td></tr>
+			<tr><td><code class="inl">optgroup</code> / <code class="inl">fieldset</code> / <code class="inl">legend</code> / 非基础 type 的 <code class="inl">input</code></td><td>分组与原生控件</td><td class="x">见「表单」节边界说明</td></tr>
+		</tbody>
+	</table>
+</div>
+
+</body>
+</html>

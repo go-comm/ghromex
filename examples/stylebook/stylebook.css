@@ -1,0 +1,1157 @@
+/*
+  Ghromex 样式全集 · 作者样式表
+  位置：examples/stylebook/stylebook.css
+  引用方：同目录 index.html（<link rel="stylesheet" href="stylebook.css">）
+
+  本文件是**作者样式表**（非 UA 默认）：index.html 里的每个演示都靠这里的
+  声明摆出来，逐节覆盖引擎目前解析并应用的全部 CSS 能力。同一份文件被
+  Chrome 才打开的 index.html 原样读取，两边逐条对照。
+
+  编写约束（与 engine/css_parser.go 的 applyDecl 同源，写了也不会生效的
+  属性本文件一律不用，只在末节「不支持清单」里以文字列举）：
+  · 单位只用 px / pt / dp / % / 0 / 无单位（em、rem、vh、vw 不解析）
+  · 不用 float/flex/grid、opacity、visibility、cursor、transform、
+    transition、animation、background-image、list-style*、font-style、
+    letter-spacing、text-shadow、min/max-*
+  · 不用 calc()、var()、hsl()；颜色只用 #3/#4/#6/#8、rgb()/rgba()、
+    具名色（见「颜色与单位」节）与 transparent
+  · border-style 关键字都能解析，但绘制统一按 solid（「边框」节有对照）
+  · box-shadow 的 inset 解析但不绘制（「背景与阴影」节有对照）
+  · white-space 只区分 pre 与其余（nowrap 会按 normal 折行）
+  · 不用伪元素、:not()/:nth-child()、+/~ 组合器、通配 *、属性选择器
+    的 ~= |= ^= $= *= 运算符——它们在引擎里永不命中
+*/
+
+/* ===== 页面骨架 ===== */
+
+/* :root 命中 <html>：整页底色演示（body 有白底，四周 8px 让位处露出） */
+:root {
+	background-color: #eef3ea;
+}
+
+body {
+	margin: 8px;
+	background-color: #ffffff;
+	color: #1b1b1f;
+	font-family: "Microsoft YaHei", sans-serif;
+	font-size: 16px;
+}
+
+/* 顶部说明条：本页样式来自 <link> 外链样式表——它能显示本身就证明
+   引擎的外部样式表链路（href 解析 + 加载器回调）通了 */
+.banner {
+	border: 1px solid #2f7d4f;
+	background-color: #eef7f0;
+	padding: 10px 14px;
+	margin: 0 0 10px;
+}
+
+.banner b {
+	color: #2f7d4f;
+}
+
+.legend {
+	border: 1px solid #d7dbe0;
+	background-color: #f7f8fa;
+	padding: 8px 14px;
+	margin: 0 0 14px;
+	font-size: 14px;
+}
+
+/* 支持级别徽标：三档 */
+.badge {
+	display: inline-block;
+	font-size: 12px;
+	line-height: 1.4;
+	padding: 1px 8px;
+	margin-left: 8px;
+	vertical-align: middle;
+	color: #ffffff;
+	border-radius: 9px;
+}
+
+.b-full {
+	background-color: #2f7d4f;
+}
+
+.b-part {
+	background-color: #b07a12;
+}
+
+.b-none {
+	background-color: #b3392f;
+}
+
+/* 每节一张卡片 */
+.sec {
+	border: 1px solid #d7dbe0;
+	border-radius: 6px;
+	background-color: #ffffff;
+	padding: 12px 16px 16px;
+	margin: 0 0 16px;
+}
+
+.sec h2 {
+	font-size: 20px;
+	margin: 0 0 4px;
+}
+
+.note {
+	font-size: 13px;
+	line-height: 1.7;
+	color: #5a6472;
+	margin: 6px 0 10px;
+}
+
+.cap {
+	font-size: 14px;
+	font-weight: bold;
+	color: #444c58;
+	margin: 14px 0 6px;
+}
+
+/* 被演示的 CSS 原文（等宽小标签） */
+.code {
+	font-family: Consolas, monospace;
+	font-size: 13px;
+	background-color: #f1f3f5;
+	border: 1px solid #e3e7eb;
+	padding: 0 5px;
+	margin: 0 6px 0 0;
+}
+
+/* ===== 行内与文本语义 ===== */
+
+.inline-demo {
+	border: 1px solid #e3e7eb;
+	background-color: #fafbfc;
+	padding: 10px 12px;
+	line-height: 1.8;
+}
+
+.inline-demo a {
+	color: #0b57d0;
+}
+
+.inline-demo a:hover {
+	background-color: #e8f0fe;
+}
+
+.hl {
+	background-color: #fff3a6;
+	padding: 0 3px;
+}
+
+code.inl {
+	font-family: Consolas, monospace;
+	background-color: #f1f3f5;
+	padding: 0 4px;
+}
+
+/* ===== 块级与结构 ===== */
+
+.blk {
+	border: 1px solid #e3e7eb;
+	background-color: #fafbfc;
+	padding: 8px 12px;
+	margin: 8px 0;
+}
+
+.blk-quote {
+	border-left: 4px solid #c9d2db;
+	background-color: #f4f6f8;
+	padding: 6px 14px;
+	margin: 8px 0;
+}
+
+.blk pre {
+	background-color: #f6f8fa;
+	border: 1px solid #e3e7eb;
+	padding: 8px 10px;
+	margin: 8px 0;
+}
+
+.blk hr {
+	border-color: #c9d2db;
+}
+
+.blk figcaption {
+	font-size: 13px;
+	color: #5a6472;
+}
+
+/* 标题演示：h1~h3 有 UA 规则；h4~h6 引擎无 UA 规则（字号/加粗/块级全缺，
+   见「语义块」节），这里刻意不加作者样式，让差异直接可见 */
+.headings h1 {
+	font-size: 28px;
+}
+
+.headings h2 {
+	font-size: 23px;
+}
+
+.headings h3 {
+	font-size: 19px;
+}
+
+.headings p {
+	margin: 4px 0;
+	font-size: 13px;
+	color: #5a6472;
+}
+
+/* ===== 语义块标签（无 UA 规则的一组） ===== */
+
+/* raw 行：只加边框好观察盒子，不碰 display——引擎里它们是 inline-block
+   原子盒（一行排开），Chrome 里是块级（逐行堆叠），差异即演示内容 */
+.raw > * {
+	border: 1px dashed #c9c2b2;
+	background-color: #fbf9f4;
+	padding: 3px 8px;
+	font-size: 14px;
+}
+
+/* 修复行：作者 CSS 补齐 display:block 后两边应当一致 */
+.fixed > * {
+	display: block;
+	border: 1px solid #d8cfe0;
+	background-color: #f7f2fb;
+	padding: 4px 8px;
+	margin: 4px 0;
+	font-size: 14px;
+}
+
+/* h4~h6 的字号与字重也要作者补（Chrome 是 UA 给的：1em/加粗起） */
+.fixed h4,
+.fixed h5,
+.fixed h6 {
+	font-weight: bold;
+}
+
+/* ===== 表单 ===== */
+
+.frow {
+	margin: 8px 0;
+}
+
+.frow label {
+	font-size: 14px;
+}
+
+/* 作者 CSS 可覆盖控件外观（引擎按 Chrome 实测值给的 UA 默认在此可改） */
+.field {
+	border: 1px solid #767676;
+	background-color: #ffffff;
+	font-family: "Microsoft YaHei", sans-serif;
+	font-size: 14px;
+	padding: 3px 6px;
+}
+
+.field:focus {
+	border-color: #0b57d0;
+	background-color: #f0f6ff;
+}
+
+.btn {
+	border: 1px solid #767676;
+	background-color: #efefef;
+	font-size: 13px;
+	padding: 2px 10px;
+}
+
+.btn:hover {
+	background-color: #e3e3e3;
+}
+
+.ta {
+	border: 1px solid #767676;
+	background-color: #ffffff;
+	font-family: "Microsoft YaHei", sans-serif;
+	font-size: 14px;
+	padding: 4px 6px;
+	width: 320px;
+	height: 72px;
+}
+
+/* fieldset：不给 display——引擎里是 inline-block 收缩盒（无 UA 规则），
+   Chrome 里是块级且 legend 镶在边框上，差异即演示内容 */
+fieldset.fset {
+	border: 1px dashed #c9c2b2;
+	background-color: #fbf9f4;
+	padding: 4px 10px;
+	margin: 6px 0;
+	font-size: 14px;
+}
+
+/* 媒体与嵌入标签：引擎无渲染链路，只画这个 CSS 盒 */
+.media {
+	display: inline-block;
+	width: 150px;
+	height: 64px;
+	border: 1px dashed #b3392f;
+	background-color: #fbeceb;
+	margin: 4px 8px 4px 0;
+	font-size: 12px;
+	vertical-align: top;
+}
+
+.sel {
+	border: 1px solid #767676;
+	background-color: #ffffff;
+	font-size: 14px;
+	padding: 2px 4px;
+}
+
+.dis {
+	background-color: #f0f1f3;
+	color: #8a919b;
+}
+
+/* ===== 表格 ===== */
+
+table.grid {
+	border-collapse: collapse;
+	margin: 6px 0;
+}
+
+table.grid th,
+table.grid td {
+	border: 1px solid #c9d2db;
+	padding: 6px 12px;
+	font-size: 14px;
+}
+
+table.grid th {
+	background-color: #f1f5f9;
+}
+
+table.grid caption {
+	font-size: 13px;
+	color: #5a6472;
+	padding: 2px 0;
+}
+
+/* separate：引擎用 2px 间隙近似 border-spacing（Chrome 默认正好 2px） */
+table.spread {
+	border-collapse: separate;
+	border: 2px solid #c9d2db;
+	margin: 6px 0;
+}
+
+table.spread td {
+	border: 1px solid #c9d2db;
+	padding: 5px 10px;
+	font-size: 14px;
+}
+
+/* ===== 盒模型与定位 ===== */
+
+.box {
+	display: inline-block;
+	border: 1px solid #0b57d0;
+	background-color: #e8f0fe;
+	width: 150px;
+	padding: 8px 12px;
+	margin: 4px 8px 4px 0;
+	font-size: 13px;
+}
+
+/* display 演示：none 应两边都不可见 */
+.d-none {
+	display: none;
+}
+
+.d-block {
+	display: block;
+	border: 1px solid #2f7d4f;
+	background-color: #eef7f0;
+	padding: 4px 8px;
+	margin: 4px 0;
+}
+
+.d-inline {
+	display: inline;
+	background-color: #fff3a6;
+	padding: 0 4px;
+}
+
+.d-ib {
+	display: inline-block;
+	border: 1px solid #b07a12;
+	background-color: #fdf0e3;
+	padding: 4px 8px;
+}
+
+/* box-sizing：同 width/padding/border，content-box 总宽 208、border-box 160 */
+.sizing {
+	width: 160px;
+	padding: 16px;
+	border: 8px solid #0b57d0;
+	background-color: #e8f0fe;
+	margin: 4px 0;
+	font-size: 13px;
+}
+
+.sizing-content {
+	box-sizing: content-box;
+}
+
+.sizing-border {
+	box-sizing: border-box;
+}
+
+/* margin / padding 简写 */
+.m-demo {
+	margin: 12px 24px 12px 0;
+	border: 1px dashed #b07a12;
+	background-color: #fdf0e3;
+	padding: 4px 8px;
+}
+
+.m-neg {
+	margin: -4px 0 8px 24px;
+	border: 1px dashed #b3392f;
+	background-color: #fbeceb;
+	padding: 4px 8px;
+}
+
+.p1 {
+	padding: 12px;
+}
+
+.p2 {
+	padding: 8px 16px;
+}
+
+.p3 {
+	padding: 6px 14px 10px;
+}
+
+.p4 {
+	padding: 4px 10px 8px 16px;
+}
+
+.pad {
+	border: 1px solid #d7dbe0;
+	background-color: #f7f8fa;
+	margin: 4px 0;
+	font-size: 13px;
+}
+
+/* position：relative 偏移 / absolute 相对定位父 / fixed 相对视口 */
+.pos-wrap {
+	position: relative;
+	border: 1px solid #d7dbe0;
+	background-color: #f7f8fa;
+	height: 96px;
+	margin: 6px 0;
+}
+
+.pos-rel {
+	position: relative;
+	top: 10px;
+	left: 24px;
+	border: 1px solid #2f7d4f;
+	background-color: #eef7f0;
+	padding: 4px 8px;
+	display: inline-block;
+}
+
+.pos-abs {
+	position: absolute;
+	top: 6px;
+	right: 8px;
+	border: 1px solid #b07a12;
+	background-color: #fdf0e3;
+	padding: 4px 8px;
+}
+
+.pos-fix {
+	position: fixed;
+	right: 10px;
+	bottom: 10px;
+	z-index: 5;
+	border: 1px solid #b3392f;
+	background-color: #fbeceb;
+	padding: 4px 10px;
+	font-size: 13px;
+}
+
+/* z-index：三块重叠，数字越大越靠上 */
+.z-wrap {
+	position: relative;
+	height: 92px;
+	margin: 6px 0;
+}
+
+.z-box {
+	position: absolute;
+	width: 120px;
+	height: 56px;
+	border: 1px solid #444c58;
+	font-size: 13px;
+	padding: 2px 4px;
+}
+
+.z1 {
+	left: 8px;
+	top: 4px;
+	z-index: 1;
+	background-color: #cfe0f7;
+}
+
+.z2 {
+	left: 56px;
+	top: 20px;
+	z-index: 3;
+	background-color: #f7d9d5;
+}
+
+.z3 {
+	left: 104px;
+	top: 36px;
+	z-index: 2;
+	background-color: #d8ecd9;
+}
+
+/* 百分比宽度 */
+.pct {
+	width: 60%;
+	border: 1px dashed #0b57d0;
+	background-color: #e8f0fe;
+	padding: 4px 8px;
+	margin: 4px 0;
+	font-size: 13px;
+}
+
+/* ===== 边框与圆角 ===== */
+
+.bd {
+	display: inline-block;
+	border: 2px dashed #0b57d0;
+	background-color: #e8f0fe;
+	padding: 6px 12px;
+	margin: 4px 8px 4px 0;
+	font-size: 13px;
+}
+
+.bd-side {
+	display: inline-block;
+	border-top: 4px solid #b3392f;
+	border-right: 4px solid #2f7d4f;
+	border-bottom: 4px solid #0b57d0;
+	border-left: 4px solid #b07a12;
+	background-color: #ffffff;
+	padding: 6px 12px;
+	margin: 4px 8px 4px 0;
+	font-size: 13px;
+}
+
+.bd-long {
+	display: inline-block;
+	border-width: 3px;
+	border-style: solid;
+	border-color: #6a4fa3;
+	background-color: #f2ecf9;
+	padding: 6px 12px;
+	margin: 4px 8px 4px 0;
+	font-size: 13px;
+}
+
+.bd-radius {
+	display: inline-block;
+	border: 2px solid #2f7d4f;
+	background-color: #eef7f0;
+	border-radius: 12px;
+	padding: 6px 14px;
+	margin: 4px 8px 4px 0;
+	font-size: 13px;
+}
+
+.bd-circle {
+	display: inline-block;
+	border: 2px solid #b07a12;
+	background-color: #fdf0e3;
+	border-radius: 50%;
+	width: 64px;
+	height: 64px;
+	margin: 4px 8px 4px 0;
+	font-size: 13px;
+	text-align: center;
+}
+
+/* currentcolor：边框随文字色 */
+.bd-current {
+	display: inline-block;
+	color: #b3392f;
+	border: 2px solid currentcolor;
+	background-color: #ffffff;
+	padding: 6px 12px;
+	margin: 4px 0;
+	font-size: 13px;
+}
+
+/* ===== 背景与阴影 ===== */
+
+.swatch {
+	display: inline-block;
+	width: 150px;
+	height: 44px;
+	border: 1px solid #d7dbe0;
+	margin: 4px 8px 4px 0;
+	padding: 2px 6px;
+	font-size: 12px;
+	overflow: hidden;
+}
+
+.bg-blue {
+	background-color: #e8f0fe;
+}
+
+.bg-short {
+	background: rgba(47, 125, 79, 0.30);
+}
+
+.bg-amber {
+	background-color: rgba(176, 122, 18, 0.35);
+}
+
+.sh {
+	display: inline-block;
+	background-color: #ffffff;
+	border: 1px solid #e3e7eb;
+	padding: 10px 16px;
+	margin: 10px 12px 14px 0;
+	font-size: 13px;
+}
+
+.sh1 {
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.sh2 {
+	box-shadow: 0 8px 24px 4px rgba(11, 87, 208, 0.30);
+}
+
+.sh3 {
+	box-shadow: 0 2px 4px rgba(179, 57, 47, 0.5), 0 10px 20px rgba(0, 0, 0, 0.25);
+}
+
+/* inset：引擎解析但不绘制——Chrome 可见内阴影，引擎不可见 */
+.sh-in {
+	box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+/* ===== 文字与排版 ===== */
+
+.tline {
+	border: 1px solid #e3e7eb;
+	background-color: #fafbfc;
+	padding: 6px 10px;
+	margin: 4px 0;
+	font-size: 14px;
+}
+
+.fs-sm {
+	font-size: 13px;
+}
+
+.fs-md {
+	font-size: 20px;
+}
+
+.fs-pct {
+	font-size: 200%;
+}
+
+.ff-serif {
+	font-family: serif;
+}
+
+.ff-sans {
+	font-family: sans-serif;
+}
+
+.ff-mono {
+	font-family: monospace;
+}
+
+.ff-arial {
+	font-family: Arial;
+}
+
+.ff-yh {
+	font-family: "Microsoft YaHei";
+}
+
+.w400 {
+	font-weight: 400;
+}
+
+.w700 {
+	font-weight: 700;
+}
+
+.w900 {
+	font-weight: 900;
+}
+
+.lh-box {
+	border: 1px solid #e3e7eb;
+	background-color: #fafbfc;
+	width: 360px;
+	padding: 6px 10px;
+	margin: 4px 0;
+	font-size: 14px;
+}
+
+.lh-n {
+	line-height: normal;
+}
+
+.lh-num {
+	line-height: 1.6;
+}
+
+.lh-pct {
+	line-height: 150%;
+}
+
+.lh-px {
+	line-height: 34px;
+}
+
+.ta-box {
+	border: 1px solid #e3e7eb;
+	background-color: #fafbfc;
+	width: 320px;
+	padding: 6px 10px;
+	margin: 4px 0;
+	font-size: 14px;
+}
+
+.ta-l {
+	text-align: left;
+}
+
+.ta-c {
+	text-align: center;
+}
+
+.ta-r {
+	text-align: right;
+}
+
+.td-u {
+	text-decoration: underline;
+}
+
+.td-l {
+	text-decoration: line-through;
+}
+
+.td-n {
+	text-decoration: none;
+}
+
+/* overline：引擎容忍解析但不绘制（只认 underline/line-through/none），
+   Chrome 可见上划线 */
+.td-o {
+	text-decoration: overline;
+}
+
+.pre-box {
+	font-family: "Microsoft YaHei";
+	font-size: 14px;
+	border: 1px solid #e3e7eb;
+	background-color: #f6f8fa;
+	padding: 6px 10px;
+	margin: 4px 0;
+}
+
+/* vertical-align：一排等高 inline-block 按不同关键字对齐基线 */
+.va-row {
+	border: 1px solid #e3e7eb;
+	background-color: #fafbfc;
+	padding: 6px 10px;
+	font-size: 13px;
+}
+
+.va {
+	display: inline-block;
+	width: 54px;
+	height: 22px;
+	background-color: #cfe0f7;
+	border: 1px solid #0b57d0;
+	font-size: 12px;
+	text-align: center;
+}
+
+.va-top {
+	vertical-align: top;
+}
+
+.va-mid {
+	vertical-align: middle;
+}
+
+.va-bot {
+	vertical-align: bottom;
+}
+
+.va-sub {
+	vertical-align: sub;
+}
+
+.va-super {
+	vertical-align: super;
+}
+
+.va-ttop {
+	vertical-align: text-top;
+}
+
+.va-tbot {
+	vertical-align: text-bottom;
+}
+
+.va-len {
+	vertical-align: 8px;
+}
+
+.va-pct {
+	vertical-align: 50%;
+}
+
+/* ===== 溢出与指针 ===== */
+
+.ov-box {
+	width: 220px;
+	height: 68px;
+	border: 1px solid #0b57d0;
+	background-color: #f0f6ff;
+	padding: 4px 8px;
+	margin: 4px 8px 4px 0;
+	font-size: 13px;
+	display: inline-block;
+	vertical-align: top;
+}
+
+.ov-h {
+	overflow: hidden;
+}
+
+.ov-s {
+	overflow: scroll;
+}
+
+.ov-a {
+	overflow: auto;
+}
+
+/* pointer-events: none —— 元素不再接收鼠标（引擎只有 none/auto 两态） */
+.pe-none {
+	pointer-events: none;
+	border: 1px solid #b3392f;
+	background-color: #fbeceb;
+	padding: 4px 8px;
+	font-size: 13px;
+}
+
+.pe-auto {
+	pointer-events: auto;
+	border: 1px solid #2f7d4f;
+	background-color: #eef7f0;
+	padding: 4px 8px;
+	font-size: 13px;
+}
+
+/* ===== 颜色与单位 ===== */
+
+.csw {
+	display: inline-block;
+	width: 92px;
+	height: 40px;
+	border: 1px solid #d7dbe0;
+	margin: 4px 6px 4px 0;
+	font-size: 11px;
+	text-align: center;
+	padding-top: 11px;
+}
+
+.c-hex3 {
+	background-color: #fc6;
+}
+
+.c-hex6 {
+	background-color: #2f6f4f;
+}
+
+.c-hex8 {
+	background-color: #0b57d080;
+}
+
+.c-rgb {
+	background-color: rgb(179, 57, 47);
+}
+
+.c-rgba {
+	background-color: rgba(106, 79, 163, 0.45);
+}
+
+.c-named {
+	background-color: orange;
+}
+
+.c-trans {
+	background-color: transparent;
+}
+
+.usw {
+	display: inline-block;
+	height: 26px;
+	border: 1px solid #0b57d0;
+	background-color: #e8f0fe;
+	margin: 4px 8px 4px 0;
+	font-size: 12px;
+	text-align: center;
+	padding-top: 4px;
+}
+
+.u-px {
+	width: 90px;
+}
+
+.u-pt {
+	width: 68pt;
+}
+
+.u-dp {
+	width: 56dp;
+}
+
+.u-pct {
+	width: 30%;
+}
+
+.u-unitless {
+	width: 90;
+}
+
+.u0 {
+	width: 0;
+	border-left: 3px solid #b3392f;
+	background-color: transparent;
+	padding: 0;
+}
+
+/* ===== 选择器 ===== */
+
+.sel-row {
+	border: 1px solid #e3e7eb;
+	background-color: #fafbfc;
+	padding: 8px 10px;
+	margin: 6px 0;
+	font-size: 14px;
+}
+
+/* 类型选择器 */
+#sec-selectors .sel-tag cite {
+	background-color: #e8f0fe;
+	padding: 1px 5px;
+}
+
+/* #id 选择器 */
+#sel-id {
+	border: 2px dashed #b07a12;
+	background-color: #fdf0e3;
+	padding: 4px 8px;
+}
+
+/* .class 选择器 */
+.selcls {
+	background-color: #fdf0e3;
+	border: 1px solid #b07a12;
+	padding: 4px 8px;
+}
+
+/* 后代组合器：.desc-wrap 里所有 p（含嵌套层） */
+#sec-selectors .desc-wrap p {
+	border-left: 4px solid #2f7d4f;
+	background-color: #eef7f0;
+	padding: 2px 8px;
+}
+
+/* 子代组合器：只命中 .child-wrap 的直接 p 子；孙子层由下面那条后代规则
+   染红。两条规则命中不相交：若引擎的 > 语义生效，直接子是蓝框；不生效
+   则直接子无样式（白底），与红框孙子层一眼可辨。 */
+#sec-selectors .child-wrap div p {
+	border-left: 4px solid #b3392f;
+	background-color: #fbeceb;
+	padding: 2px 8px;
+}
+
+#sec-selectors .child-wrap > p {
+	border-left: 4px solid #0b57d0;
+	background-color: #e8f0fe;
+	padding: 2px 8px;
+}
+
+/* 分组选择器 */
+#sec-selectors .grp-a,
+#sec-selectors .grp-b {
+	background-color: #efe7f8;
+	border: 1px solid #6a4fa3;
+	padding: 4px 8px;
+}
+
+/* 复合选择器：元素 + 两个 class 同时满足才命中 */
+#sec-selectors p.comp.d2 {
+	background-color: #e7f1fb;
+	border: 1px solid #0b57d0;
+	padding: 4px 8px;
+}
+
+/* 属性选择器：存在 / 精确相等（~= ^= $= *= |= 引擎不支持） */
+#sec-selectors [data-k] {
+	border-left: 4px solid #b07a12;
+	background-color: #fdf0e3;
+	padding: 3px 8px;
+}
+
+#sec-selectors [data-k="v2"] {
+	background-color: #fbeceb;
+	border-left-color: #b3392f;
+}
+
+/* 特异度：id(1,0,0) > 两个 class(0,2,0) > class+类型(0,1,1)——id 那条赢 */
+#sec-selectors .spec-a p {
+	color: #b3392f;
+}
+
+#sec-selectors .spec-a .s {
+	color: #2f7d4f;
+}
+
+#sel-spec {
+	color: #0b57d0;
+}
+
+/* !important：压过上面的 id 规则（同来源下 important 先过筛选） */
+#sel-imp {
+	color: #b3392f;
+}
+
+.imp {
+	color: #b07a12 !important;
+}
+
+/* ===== 伪类 ===== */
+
+.ph {
+	display: inline-block;
+	border: 1px solid #767676;
+	background-color: #f0f1f3;
+	padding: 6px 14px;
+	margin: 4px 8px 4px 0;
+	font-size: 13px;
+}
+
+.ph:hover {
+	background-color: #0b57d0;
+	color: #ffffff;
+	border-color: #0b57d0;
+}
+
+.pa {
+	display: inline-block;
+	border: 1px solid #767676;
+	background-color: #f0f1f3;
+	padding: 6px 14px;
+	margin: 4px 8px 4px 0;
+	font-size: 13px;
+}
+
+.pa:active {
+	background-color: #0b57d0;
+	color: #ffffff;
+	border-color: #0b57d0;
+}
+
+.pf:focus {
+	border-color: #0b57d0;
+	background-color: #f0f6ff;
+}
+
+input:disabled {
+	background-color: #f0f1f3;
+	color: #8a919b;
+	border-color: #b8bdc4;
+}
+
+.chk {
+	font-size: 14px;
+	margin: 4px 14px 4px 0;
+}
+
+.ch-list {
+	border: 1px solid #e3e7eb;
+	background-color: #fafbfc;
+	padding: 6px 12px;
+	margin: 6px 0;
+	font-size: 14px;
+}
+
+.ch-list li:first-child {
+	background-color: #e8f0fe;
+}
+
+.ch-list li:last-child {
+	background-color: #fdf0e3;
+}
+
+.only-list li:only-child {
+	background-color: #eef7f0;
+}
+
+/* :empty：只命中无内容元素（有文字的兄弟不中） */
+.em {
+	display: inline-block;
+	width: 72px;
+	height: 20px;
+	margin: 4px 6px 0 0;
+	font-size: 12px;
+	border: 1px solid #d7dbe0;
+	text-align: center;
+}
+
+.em:empty {
+	background-color: #2f7d4f;
+	color: #ffffff;
+	border-color: #2f7d4f;
+}
+
+/* ===== 不支持清单（本表自身只用支持的样式画） ===== */
+
+table.unsup {
+	border-collapse: collapse;
+	margin: 6px 0;
+	width: 100%;
+}
+
+table.unsup th,
+table.unsup td {
+	border: 1px solid #d7dbe0;
+	padding: 5px 10px;
+	font-size: 13px;
+	text-align: left;
+	vertical-align: top;
+}
+
+table.unsup th {
+	background-color: #f1f5f9;
+}
+
+table.unsup td.x {
+	color: #b3392f;
+}
