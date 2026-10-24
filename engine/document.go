@@ -129,7 +129,10 @@ type htmlDocument struct {
 	// dragInput 是鼠标按下时命中的可编辑控件。拖选期间活动端可移出控件
 	// 甚至窗口，仍应把坐标反推为同一控件的光标位置（浏览器同语义）；
 	// 因此不能在每次 MouseMotion 时重新命中测试。鼠标抬起即清空。
-	dragInput  *htmlElement
+	dragInput *htmlElement
+	// dragScroll 是按在 textarea 覆盖滚动条上时的控件（与 dragInput 互斥）：
+	// 拖动期间指针 y 映射为滚动偏移（见 textareaScrollTo），抬起即清空。
+	dragScroll *htmlElement
 	changed    int64
 	onChanged  func()
 	onNavigate func(href string)

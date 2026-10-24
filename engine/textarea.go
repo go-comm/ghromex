@@ -2,6 +2,84 @@ package engine
 
 import "strings"
 
+// textareaScrollbarWidth 是 textarea 覆盖式滚动条的宽度（px）：贴内容盒
+// 右缘绘制，叠在文本之上，不占布局宽度（折行口径不变）。
+const textareaScrollbarWidth = 8
+
+// scrollbarTrack/scrollbarThumb 是覆盖滚动条的轨道与滑块配色（半透明黑，
+// 在 textarea 白底与选区高亮上都能看清）。
+var (
+	scrollbarTrack = NewColor(0x00, 0x00, 0x00, 0x14)
+	scrollbarThumb = NewColor(0x00, 0x00, 0x00, 0x5C)
+)
+
+// textareaScrollbar 返回 textarea 覆盖滚动条的几何：轨道 (tx,ty,tw,th)、
+// 滑块 (tx,thumbY,tw,thumbH)；ok=false 表示内容未溢出、没有滚动条。
+// 绘制与命中/拖拽共用本函数，保证「看到的就是能点的」。
+func textareaScrollbar(g Graphics, b *htmlElement) (tx, ty, tw, th, thumbY, thumbH int, ok bool) {
+	l := layoutTextarea(g, b)
+	contentH := len(l.lines) * l.lh
+	if contentH <= b.height {
+		return 0, 0, 0, 0, 0, 0, false
+	}
+	tw = textareaScrollbarWidth
+	tx = b.x + b.width - tw
+	ty = b.y
+	th = b.height
+	thumbH = th * b.height / contentH
+	if thumbH < 24 {
+		thumbH = 24 // 最小可抓握高度
+	}
+	if thumbH > th {
+		thumbH = th
+	}
+	maxScroll := contentH - b.height
+	if maxScroll < 1 {
+		maxScroll = 1
+	}
+	if th > thumbH {
+		thumbY = ty + l.scroll*(th-thumbH)/maxScroll
+	}
+	return tx, ty, tw, th, thumbY, thumbH, true
+}
+
+// textareaHitScrollbar 判断 (x,y) 是否落在该元素滚动条轨道内（含滑块）。
+// 非 textarea 或未溢出都返回 false。
+func textareaHitScrollbar(g Graphics, b *htmlElement, x, y int) bool {
+	if b == nil || !strings.EqualFold(b.tagName, "textarea") {
+		return false
+	}
+	tx, ty, tw, th, _, _, ok := textareaScrollbar(g, b)
+	return ok && x >= tx && x < tx+tw && y >= ty && y < ty+th
+}
+
+// scrollbarClick 判断点击 (x,y) 是否落在可编辑元素的覆盖滚动条上——
+// 滚动条只管滚动，mousedown 与后续 click 都不应移动光标。
+func scrollbarClick(doc HTMLDocument, el HTMLElement, x, y int) bool {
+	return textareaHitScrollbar(docGraphics(doc), inner(el), x, y)
+}
+
+// textareaScrollTo 把轨道内的 y 坐标映射为滚动偏移（滑块中心对准指针），
+// 变化时写回 scrollTop 并发文档变更通知（重排/状态栏随之刷新）。
+func textareaScrollTo(doc HTMLDocument, b *htmlElement, y int) {
+	g := docGraphics(doc)
+	l := layoutTextarea(g, b)
+	contentH := len(l.lines) * l.lh
+	maxScroll := contentH - b.height
+	if maxScroll <= 0 {
+		return
+	}
+	_, ty, _, th, _, thumbH, ok := textareaScrollbar(g, b)
+	if !ok || th <= thumbH {
+		return
+	}
+	pos := clampInt(y-ty-thumbH/2, 0, th-thumbH)
+	if next := pos * maxScroll / (th - thumbH); next != b.scrollTop {
+		b.scrollTop = next
+		b.onChanged()
+	}
+}
+
 // textarea 多行编辑：折行、光标↔坐标映射与纵向滚动。
 //
 // textarea 的内容存在 value 属性（解析器按原始文本元素读入，见

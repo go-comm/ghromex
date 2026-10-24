@@ -19,7 +19,9 @@ import (
 //   - 文档级滚动是**动画式**的（Chrome 同款）：滚轮只改目标，视觉位置由
 //     弹簧（位置+速度）逐帧推进，见 advanceScrollAnim/startScrollAnim。
 //
-// 滚动条 UI 不做（README 已知限制），滚轮是唯一驱动源。
+// textarea 提供覆盖式滚动条 UI（绘制+拖拽见 textarea.go 的
+// textareaScrollbar）；通用容器（overflow 滚动）仍无滚动条，滚轮是唯一
+// 驱动源，也仍无 PageUp/PageDown 翻页与触控板惯性。
 
 // clampInt 夹紧到 [lo, hi]（hi < lo 时取 lo）。
 func clampInt(v, lo, hi int) int {

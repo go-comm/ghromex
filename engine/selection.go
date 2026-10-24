@@ -104,12 +104,29 @@ func OnDocumentMouseDown(doc HTMLDocument, x, y int) bool {
 	if next == nil {
 		return false
 	}
-	SetFocusedElement(doc, next)
 	b := inner(next)
+	// 按在 textarea 覆盖滚动条上：只滚动——不移动光标、不改变焦点，
+	// 按下即跳到点击位置，随后拖动跟随指针（OnDocumentMouseDrag）。
+	if textareaHitScrollbar(docGraphics(doc), b, x, y) {
+		d.dragScroll = b
+		textareaScrollTo(doc, b, y)
+		return true
+	}
+	// 可编辑控件先按「指针此刻看到的视口」算好目标光标，再改焦点：
+	// 首次聚焦会把光标落到值末尾并滚动跟随（Tab 聚焦的合理行为），若
+	// 聚焦之后才映射，点击点会按跳走后的视口反推出完全错误的行。
+	var caretHint int
+	clickCaret := b != nil && editableInput(next)
+	if clickCaret {
+		caretHint = controlCaretFromPoint(doc, b, x, y)
+	}
+	SetFocusedElement(doc, next)
 	if b == nil {
 		return false
 	}
-	setControlCaretFromPoint(doc, next, x, y)
+	if clickCaret {
+		setSelection(doc, b, caretHint, caretHint)
+	}
 	b.selAnchor = b.caret
 	d.dragInput = b
 	return true
@@ -117,10 +134,17 @@ func OnDocumentMouseDown(doc HTMLDocument, x, y int) bool {
 
 // OnDocumentMouseDrag 把拖选活动端移到指针位置，锚点保持不变。指针移出
 // 控件后仍按原控件布局反推光标（并自然夹到行首/行尾/首末行），因此
-// 可以拖到输入框外继续扩选。
+// 可以拖到输入框外继续扩选。按住 textarea 覆盖滚动条时改为滚动。
 func OnDocumentMouseDrag(doc HTMLDocument, x, y int) bool {
 	d, ok := doc.(*htmlDocument)
-	if !ok || d.dragInput == nil {
+	if !ok {
+		return false
+	}
+	if d.dragScroll != nil {
+		textareaScrollTo(doc, d.dragScroll, y)
+		return true
+	}
+	if d.dragInput == nil {
 		return false
 	}
 	b := d.dragInput
@@ -136,6 +160,7 @@ func OnDocumentMouseDrag(doc HTMLDocument, x, y int) bool {
 func OnDocumentMouseUp(doc HTMLDocument) {
 	if d, ok := doc.(*htmlDocument); ok {
 		d.dragInput = nil
+		d.dragScroll = nil
 	}
 	SetActiveElement(doc, nil)
 }

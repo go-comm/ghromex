@@ -740,7 +740,7 @@ func updateClickFocus(doc HTMLDocument, target HTMLElement, x, y int) {
 		}
 	}
 	SetFocusedElement(doc, next)
-	if next != nil && editableInput(next) {
+	if next != nil && editableInput(next) && !scrollbarClick(doc, next, x, y) {
 		setControlCaretFromPoint(doc, next, x, y)
 	}
 }

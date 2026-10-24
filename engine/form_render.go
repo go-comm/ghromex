@@ -113,6 +113,11 @@ func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p
 			drawDecoration(g, dec, l.x, y, ln.w, l.lh, l.asc, px, p)
 		}
 	}
+	// 覆盖滚动条：内容溢出即显示（与命中/拖拽同一几何源），聚焦与否都在。
+	if tx, ty, tw, th, thumbY, thumbH, ok := textareaScrollbar(g, b); ok {
+		g.DrawColor(tx, ty, tw, th, scrollbarTrack)
+		g.DrawColor(tx, thumbY, tw, thumbH, scrollbarThumb)
+	}
 	if !focused {
 		return
 	}
