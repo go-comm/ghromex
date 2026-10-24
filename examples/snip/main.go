@@ -6,6 +6,7 @@
 //	go run ./examples/snip
 //	go run ./examples/snip -delay 1s          # 留时间切换窗口再抓屏
 //	go run ./examples/snip -source a.png -shot-overlay o.png -shot-preview p.png
+//	go run ./examples/snip -dump-capture raw.png   # 把抓到的桌面原样落盘（排查"打开就是灰"）
 //
 // 只支持主屏：多显示器虚拟桌面（负坐标、混合 DPI）留给后续能力。
 package main
@@ -16,6 +17,7 @@ import (
 	"image"
 	"image/draw"
 	"image/png"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,18 +57,19 @@ type app struct {
 func main() {
 	delay := flag.Duration("delay", 0, "抓屏前等待，留时间切换/整理窗口")
 	source := flag.String("source", "", "用图片代替桌面抓屏（调试用，可不开显示器）")
+	dumpCapture := flag.String("dump-capture", "", "把抓到的桌面图原样落盘为 PNG（对照抓屏内容：打开后看到的灰是不是它造成的）")
 	shotOverlay := flag.String("shot-overlay", "", "真实窗口截图：选区页存 PNG 后退出")
 	shotPreview := flag.String("shot-preview", "", "真实窗口截图：预览页存 PNG 后退出")
 	exitAfter := flag.Duration("exit-after", 0, "打开后指定时长自动退出（调试/CI）")
 	flag.Parse()
 
-	if err := run(*delay, *source, *shotOverlay, *shotPreview, *exitAfter); err != nil {
+	if err := run(*delay, *source, *dumpCapture, *shotOverlay, *shotPreview, *exitAfter); err != nil {
 		fmt.Fprintln(os.Stderr, "snip:", err)
 		os.Exit(1)
 	}
 }
 
-func run(delay time.Duration, source, overlayPath, previewPath string, exitAfter time.Duration) error {
+func run(delay time.Duration, source, dumpCapture, overlayPath, previewPath string, exitAfter time.Duration) error {
 	var (
 		desktop *image.RGBA
 		err     error
@@ -81,6 +84,12 @@ func run(delay time.Duration, source, overlayPath, previewPath string, exitAfter
 	}
 	if err != nil {
 		return err
+	}
+	if dumpCapture != "" {
+		if err := writePNG(dumpCapture, desktop); err != nil {
+			return err
+		}
+		log.Printf("抓屏原图已写入 %s", dumpCapture)
 	}
 
 	b := desktop.Bounds()

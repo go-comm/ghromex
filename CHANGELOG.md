@@ -58,6 +58,12 @@
   `-shot`（`Window.Screenshot` 回读 + 本地编码 PNG，与 kit 同款，库层
   不提供 PNG 编码；notepad 另有 `-shot-find` 截图前展开查找栏，模拟
   Ctrl+F 交互态）。
+- **examples**：截图工具新增 `-dump-capture path.png`——把抓屏得到的桌面
+  图原样落盘再照常打开遮罩，用于排查「打开就是一片灰」这类现象：灰是抓
+  到的内容本身（屏幕上盖着亮色窗口）还是遮罩压暗所致（`reset()` 的
+  `rgba(10,16,30,0.46)` 全屏 overlay），对照原图即可定性；配合
+  `-delay 3s`（抓屏前睡眠，期间 Win+D 清屏）与 `-source`（跳过抓屏用
+  指定图片）可分别隔离抓屏时机与渲染管线。
 - **examples**：记事本对话框类型下拉收敛为两项——「文本文件」一项打包
   常见文本扩展名（txt/markdown/json/xml/html/htm/css/js/log/ini/csv/
   yml/yaml，分号分隔多模式走 Win32 COMDLG_FILTERSPEC 语法），所有文件
