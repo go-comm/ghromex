@@ -64,8 +64,9 @@ func (n *notepad) buildSpec() ui.Spec {
 	return ui.Spec{
 		Theme: &n.theme,
 		StatusSegments: []ui.StatusSegment{
-			{Key: "file", Text: untitled, Width: 220},
+			{Key: "file", Text: "文本文件 (*.txt)", Width: 220},
 			{Key: "pos", Text: "行 1，列 1", Width: 140},
+			{Key: "sel", Text: "", Width: 110},
 			{Key: "chars", Text: "0 个字符", Width: 110},
 		},
 		Menus: []ui.Menu{

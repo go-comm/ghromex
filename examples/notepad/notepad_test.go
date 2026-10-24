@@ -224,22 +224,41 @@ func TestFindBarVisibilityKeepsPosition(t *testing.T) {
 	}
 }
 
-// 状态栏三段各自更新：改文字只影响字符数，文件段仍保留未保存标记，
-// 右侧提示不会被编辑事件覆盖。
+// 状态栏各段各自更新：改文字只影响字符数，文件段（类型+未保存标记）
+// 不受干扰，右侧提示不会被编辑事件覆盖。
 func TestStatusSegmentsUpdateIndependently(t *testing.T) {
 	np := newTestNotepad(t)
-	if got, ok := np.workbench.StatusSegment("file"); !ok || !strings.Contains(got, untitled) {
-		t.Fatalf("文件段 = %q, %v", got, ok)
+	if got, ok := np.workbench.StatusSegment("file"); !ok || !strings.Contains(got, "文本文件") {
+		t.Fatalf("文件段 = %q, %v，期望显示文件类型", got, ok)
 	}
 	np.editor.SetValue("ab\ncd")
 	if got, ok := np.workbench.StatusSegment("chars"); !ok || got != "5 个字符" {
 		t.Fatalf("字符段 = %q, %v, want 5 个字符", got, ok)
 	}
-	if got, _ := np.workbench.StatusSegment("file"); !strings.Contains(got, "*") {
-		t.Fatalf("编辑后文件段 = %q, want 含未保存标记", got)
+	if got, _ := np.workbench.StatusSegment("file"); !strings.HasSuffix(got, " *") {
+		t.Fatalf("编辑后文件段 = %q, want 尾部带未保存标记", got)
 	}
 	if got := statusRight(np); got != "就绪" {
 		t.Fatalf("右侧提示 = %q, want 就绪（不应被编辑事件覆盖）", got)
+	}
+}
+
+// 选中字数跟着选区走：Ctrl+A 报全量，Shift+左逐字收缩，方向键折叠后清空。
+// 选区变化能刷新状态栏，靠的是引擎 setSelection 也发文档变更通知。
+func TestStatusSelectionCount(t *testing.T) {
+	np := newTestNotepad(t)
+	np.editor.SetValue("你好\nworld") // 8 个 rune（含换行）
+	np.selectAll()
+	if got, ok := np.workbench.StatusSegment("sel"); !ok || got != "8 个字被选中" {
+		t.Fatalf("全选后选中段 = %q, %v, want 8 个字被选中", got, ok)
+	}
+	engine.OnDocumentKeyDownMods(np.doc, engine.KeyLeft, engine.ModShift)
+	if got, _ := np.workbench.StatusSegment("sel"); got != "7 个字被选中" {
+		t.Fatalf("Shift+左后选中段 = %q, want 7 个字被选中", got)
+	}
+	engine.OnDocumentKeyDown(np.doc, engine.KeyRight) // 无 Shift：折叠选区
+	if got, _ := np.workbench.StatusSegment("sel"); got != "" {
+		t.Fatalf("折叠后选中段 = %q, want 空", got)
 	}
 }
 
@@ -341,8 +360,8 @@ func TestOpenAndSaveFile(t *testing.T) {
 	if np.dirty {
 		t.Fatal("刚打开的文件不应标记为已修改")
 	}
-	if got := statusLeft(np); !strings.Contains(got, "note.txt") || strings.Contains(got, "*") {
-		t.Fatalf("打开后状态栏 = %q，期望含文件名且不带未保存标记", got)
+	if got, _ := np.workbench.StatusSegment("file"); !strings.Contains(got, "文本文件 (*.txt)") || strings.HasSuffix(got, " *") {
+		t.Fatalf("打开后文件段 = %q，期望含文件类型且不带未保存标记", got)
 	}
 
 	// 改内容 → 标记已修改 → 保存后落盘。
@@ -350,8 +369,8 @@ func TestOpenAndSaveFile(t *testing.T) {
 	if !np.dirty {
 		t.Fatal("编辑后未标记为已修改")
 	}
-	if got := statusLeft(np); !strings.Contains(got, "*") {
-		t.Fatalf("编辑后状态栏 = %q，期望带未保存标记", got)
+	if got, _ := np.workbench.StatusSegment("file"); !strings.HasSuffix(got, " *") {
+		t.Fatalf("编辑后文件段 = %q，期望尾部带未保存标记", got)
 	}
 	np.saveFile()
 	data, err := os.ReadFile(path)
@@ -364,8 +383,8 @@ func TestOpenAndSaveFile(t *testing.T) {
 	if np.dirty {
 		t.Fatal("保存后仍标记为已修改")
 	}
-	if got := statusLeft(np); strings.Contains(got, "*") {
-		t.Fatalf("保存后状态栏 = %q，不应带未保存标记", got)
+	if got, _ := np.workbench.StatusSegment("file"); strings.HasSuffix(got, " *") {
+		t.Fatalf("保存后文件段 = %q，不应带未保存标记", got)
 	}
 
 	// 打开不存在的文件：状态栏提示，编辑区内容不变。

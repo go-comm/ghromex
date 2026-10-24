@@ -12,6 +12,7 @@
 //	go run ./examples/notepad -dump-svg out.svg    # 无头出图：SVG，核对布局/层级
 //	go run ./examples/notepad -shot out.png        # 真实窗口截图：真实字体渲染一帧存 PNG
 //	go run ./examples/notepad -shot out.png -shot-find # 截图前先展开查找替换栏
+//	go run ./examples/notepad -shot out.png -shot-select # 截图前全选（状态栏报选中字数）
 //
 // 页面完全由 page.go 用 Go 构造，没有 HTML 文件。
 //
@@ -69,6 +70,7 @@ func main() {
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
 	shotFind := flag.Bool("shot-find", false, "与 -shot 配合：截图前展开查找替换栏（模拟 Ctrl+F）")
+	shotSelect := flag.Bool("shot-select", false, "与 -shot 配合：截图前全选编辑区（模拟 Ctrl+A，状态栏报选中字数）")
 	flag.Parse()
 
 	theme := ui.Light()
@@ -124,6 +126,9 @@ func main() {
 	if *shot != "" {
 		if *shotFind {
 			np.showFindBar() // 与 Ctrl+F 同一入口：查找栏展开、查找框拿焦点
+		}
+		if *shotSelect {
+			np.selectAll() // 与 Ctrl+A 同一入口：全选后状态栏报选中字数
 		}
 		if err := saveShot(win, doc, *shot); err != nil {
 			fmt.Fprintln(os.Stderr, "截图失败:", err)
@@ -374,15 +379,11 @@ func (n *notepad) editorValue() string {
 	return n.editor.Value()
 }
 
-// updateStatus 刷新状态栏：文件名（带未保存标记）、光标位置、字符数。
-// 三段独立更新，右侧消息不随每次光标移动被覆盖。
+// updateStatus 刷新状态栏：文件类型（带未保存标记）、光标位置、字符数、
+// 选中字数。各段独立更新，右侧消息不随每次光标移动被覆盖。
+// 选区变化也会走到这里：引擎 setSelection 触发文档变更通知（见 onChanged）。
 func (n *notepad) updateStatus() {
-	name := n.path
-	if name == "" {
-		name = untitled
-	} else {
-		name = shortName(name)
-	}
+	name := fileType(n.path)
 	if n.dirty {
 		name += " *"
 	}
@@ -390,15 +391,21 @@ func (n *notepad) updateStatus() {
 	if line, col, ok := engine.CaretPosition(n.editorEl()); ok {
 		pos = fmt.Sprintf("行 %d，列 %d", line, col)
 	}
+	sel := ""
+	if txt, ok := engine.SelectedText(n.doc); ok {
+		sel = strconv.Itoa(len([]rune(txt))) + " 个字被选中"
+	}
 	if n.workbench != nil {
 		n.workbench.SetStatusSegment("file", name)
 		n.workbench.SetStatusSegment("pos", pos)
 		n.workbench.SetStatusSegment("chars", strconv.Itoa(len([]rune(n.cur)))+" 个字符")
+		n.workbench.SetStatusSegment("sel", sel)
 	}
 	n.updateTitle()
 }
 
-// updateTitle 把文件名写进窗口标题（记事本的习惯）。
+// updateTitle 把文件名写进窗口标题（记事本的习惯：状态栏让位给文件类型，
+// 文件名归标题栏）。
 func (n *notepad) updateTitle() {
 	if n.win == nil {
 		return
@@ -406,6 +413,8 @@ func (n *notepad) updateTitle() {
 	name := n.path
 	if name == "" {
 		name = untitled
+	} else {
+		name = shortName(name)
 	}
 	if n.dirty {
 		name += " *"
@@ -424,6 +433,23 @@ func shortName(path string) string {
 		return path[i+1:]
 	}
 	return path
+}
+
+// fileType 按扩展名给出文件类型描述（状态栏文件段用；文件名本身归标题栏）。
+// 记事本只处理纯文本，所以未知扩展名也按「文本文件」报，括号里带上实际后缀。
+func fileType(path string) string {
+	switch ext := strings.ToLower(filepath.Ext(path)); ext {
+	case ".md":
+		return "Markdown 文档 (*.md)"
+	case ".log":
+		return "日志文件 (*.log)"
+	case ".json":
+		return "JSON 文档 (*.json)"
+	case "":
+		return "文本文件 (*.txt)"
+	default:
+		return "文本文件 (*" + ext + ")"
+	}
 }
 
 // message 在状态栏右侧提示一条消息。

@@ -20,6 +20,11 @@
   `-shot`（`Window.Screenshot` 回读 + 本地编码 PNG，与 kit 同款，库层
   不提供 PNG 编码；notepad 另有 `-shot-find` 截图前展开查找栏，模拟
   Ctrl+F 交互态）。
+- **examples**：记事本状态栏口径调整——文件段不再显示文件名、改显文件
+  类型（按扩展名，如 `文本文件 (*.txt)`，未保存 `*` 缀尾），文件名归
+  标题栏；新增选中字数段（如 `118 个字被选中`），随选区自动刷新——引擎
+  `setSelection` 本就走文档变更通知，应用层零新接口。`-shot` 另配
+  `-shot-select`（截图前全选，模拟 Ctrl+A）。
 - **ui**：新增 `Spec.NoBodyReset`：跳过 `Install` 注入的 body 复位块（margin /
   padding / 颜色 / 字体），画布底色（`html` 的 `background-color`）不受影响、
   始终注入。演示 UA 样式的页面（body 的 `margin:8px` 本身就是演示内容）与
