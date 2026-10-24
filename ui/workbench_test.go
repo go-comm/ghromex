@@ -480,9 +480,9 @@ func TestToolbarSlots(t *testing.T) {
 	if got := len(sh.tools); got != 1 {
 		t.Fatalf("命令按钮数 = %d，期望 1（槽位不参与刷新）", got)
 	}
-	// 槽位控件随工具栏布局：高度与按钮同为 ButtonHeight，位置在栏内。
-	if got := boxOf(sel.Element()); got.h != Light().ButtonHeight || got.y < boxOf(bar).y {
-		t.Fatalf("下拉框框 = %+v，期望与按钮同高且在栏内", got)
+	// 槽位控件随工具栏布局：高度与按钮同为 ToolControlHeight，位置在栏内。
+	if got := boxOf(sel.Element()); got.h != Light().ToolControlHeight || got.y < boxOf(bar).y {
+		t.Fatalf("下拉框框 = %+v，期望与按钮同高（%d）且在栏内", got, Light().ToolControlHeight)
 	}
 }
 
@@ -506,8 +506,8 @@ func TestToolbarIcons(t *testing.T) {
 	if class := saved.GetAttribute("class"); !strings.Contains(class, "is-icon") {
 		t.Fatalf("图标按钮类名 = %q，期望含 is-icon", class)
 	}
-	if b := boxOf(saved); b.w != th.ButtonHeight || b.h != th.ButtonHeight {
-		t.Fatalf("图标按钮尺寸 = %dx%d，期望正方形 %d", b.w, b.h, th.ButtonHeight)
+	if b := boxOf(saved); b.w != th.ToolControlHeight || b.h != th.ToolControlHeight {
+		t.Fatalf("图标按钮尺寸 = %dx%d，期望正方形 %d", b.w, b.h, th.ToolControlHeight)
 	}
 	// 图标按钮只显示字形，不显示 Label 文字。
 	if got := saved.Text(); got != "" {

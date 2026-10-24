@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-24 10:48
+> 生成时间: 2026-10-25 00:11
 
 ---
 
@@ -1194,7 +1194,7 @@ func OnDocumentMouseDown(doc HTMLDocument, x, y int) bool
 
 func OnDocumentMouseDrag(doc HTMLDocument, x, y int) bool
     OnDocumentMouseDrag 把拖选活动端移到指针位置，锚点保持不变。指针移出
-    控件后仍按原控件布局反推光标（并自然夹到行首/行尾/首末行），因此 可以拖到输入框外继续扩选。
+    控件后仍按原控件布局反推光标（并自然夹到行首/行尾/首末行），因此 可以拖到输入框外继续扩选。按住 textarea 覆盖滚动条时改为滚动。
 
 func OnDocumentMouseMove(doc HTMLDocument, x, y int) bool
     OnDocumentMouseMove 按坐标更新悬停态：命中测试后把命中的元素记为 悬停元素（命中空白处则清除）。返回是否命中了元素。
@@ -2927,6 +2927,10 @@ type Theme struct {
 	StatusHeight     int // 状态栏高度
 	StatusRightWidth int // 状态栏右侧消息预留宽度
 	ButtonHeight     int // 按钮高度
+	// ToolControlHeight 是工具栏内交互控件（图标/文字按钮、槽位里的输入框
+	// 与下拉）的统一高度：条内所有控件同高、同用 vertical-align: middle
+	// 对齐，才能彼此顶底齐平（默认 28，配 ToolHeight 36）。
+	ToolControlHeight int
 	// BarHeight 是控件条（NewBar）的高度。控件条是页面内容里的一行工具，
 	// 应用要按它给自己的内容让位，所以尺寸得能从主题读到，不能只写在 CSS 里。
 	BarHeight int

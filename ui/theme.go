@@ -81,6 +81,10 @@ type Theme struct {
 	StatusHeight     int // 状态栏高度
 	StatusRightWidth int // 状态栏右侧消息预留宽度
 	ButtonHeight     int // 按钮高度
+	// ToolControlHeight 是工具栏内交互控件（图标/文字按钮、槽位里的输入框
+	// 与下拉）的统一高度：条内所有控件同高、同用 vertical-align: middle
+	// 对齐，才能彼此顶底齐平（默认 28，配 ToolHeight 36）。
+	ToolControlHeight int
 	// BarHeight 是控件条（NewBar）的高度。控件条是页面内容里的一行工具，
 	// 应用要按它给自己的内容让位，所以尺寸得能从主题读到，不能只写在 CSS 里。
 	BarHeight int
@@ -144,7 +148,10 @@ func Light() Theme {
 		StatusHeight:     24,
 		StatusRightWidth: 280,
 		ButtonHeight:     30,
-		BarHeight:        44,
+		// 工具栏控件统一 28px：比页面按钮（30）矮一档，配 36 的条高
+		// 上下各留 4px，图标/输入框/下拉同高同口径才能彼此齐平。
+		ToolControlHeight: 28,
+		BarHeight:         44,
 	}
 }
 
@@ -268,6 +275,7 @@ func (t Theme) withDefaults() Theme {
 		{&t.Radius, d.Radius}, {&t.MenuHeight, d.MenuHeight},
 		{&t.ToolHeight, d.ToolHeight}, {&t.StatusHeight, d.StatusHeight},
 		{&t.StatusRightWidth, d.StatusRightWidth}, {&t.ButtonHeight, d.ButtonHeight},
+		{&t.ToolControlHeight, d.ToolControlHeight},
 		{&t.BarHeight, d.BarHeight},
 	}
 	for _, s := range sizes {
@@ -308,22 +316,26 @@ func (t Theme) css(menuTop, chromeTop, status int, resetBody bool) string {
 	if barDown < 0 {
 		barDown = 0
 	}
-	// 工具栏的上下内边距由条高减按钮高推出（与 barDown 同一口径）：默认
-	// 36−30=6 → 每侧 3px，换主题改 ToolHeight 不会把按钮裁掉或顶歪。
-	toolPad := (t.ToolHeight - t.ButtonHeight) / 2
-	if toolPad < 0 {
-		toolPad = 0
+	// 工具栏内所有交互控件（按钮/输入框/下拉）统一 ToolControlHeight 高，
+	// 上下内边距由条高减控件高推出（默认 36−28=8 → 每侧 4px）。同高 + 同
+	// vertical-align: middle，控件盒的中点都落到父级同一参考线上，彼此才
+	// 能顶底齐平。
+	toolCtrl := t.ToolControlHeight
+	if toolCtrl <= 0 {
+		toolCtrl = t.ButtonHeight
 	}
-	// 工具栏图标的行盒要比按钮矮一截：引擎的 half-leading 把 em 盒居中，
-	// 但 Segoe MDL2 的墨迹中心在 em 中心下方（16px 时实测低 3~4px，字号
-	// 越大偏得越多）。行盒每收矮 2px 基线上移 1px（vertical-align: top
-	// 把行盒顶钉在行顶），20px 图标收 8px 后墨迹中心与按钮中线重合
-	//（像素实测）。不能用 vertical-align: middle——引擎按「基线 + 半 x
-	// 高」对位，符号字体 x 高度失真，落点反而更飘。
-	iconLH := t.ButtonHeight - 8
-	if iconLH < 20 {
-		iconLH = 20
+	// middle 的参考线（父基线 + 半 x 高）天然比几何中线低约 3px：所有
+	// 控件同低 3px 彼此是齐平的，但整排内容在条带里看着偏下。padding
+	// 上下差 3px 把参考线整体抬回几何中线（像素实测）。
+	toolPad := (t.ToolHeight - toolCtrl) / 2
+	if toolPad < 3 {
+		toolPad = 3
 	}
+	toolPadUp, toolPadDown := toolPad-3, toolPad+3
+	// 图标行盒取字号（20px，CSS 里与 font-size 就近同写）：middle 的位移
+	// 只由字体升降部/x 高推算，与行盒高度无关，line-height 在这里只是
+	// 把行盒收到底、避免撑高工具栏行盒。墨迹下沉的补偿见 CSS 的
+	// relative top（实测 −4px）。
 	r := strings.NewReplacer(
 		"$font$", t.Font,
 		"$iconFont$", t.IconFont,
@@ -372,8 +384,9 @@ func (t Theme) css(menuTop, chromeTop, status int, resetBody bool) string {
 		"$statusH$", strconv.Itoa(t.StatusHeight),
 		"$statusRightW$", strconv.Itoa(t.StatusRightWidth),
 		"$btnH$", strconv.Itoa(t.ButtonHeight),
-		"$toolIconLH$", strconv.Itoa(iconLH),
-		"$toolPad$", strconv.Itoa(toolPad),
+		"$toolCtrlH$", strconv.Itoa(toolCtrl),
+		"$toolPadUp$", strconv.Itoa(toolPadUp),
+		"$toolPadDown$", strconv.Itoa(toolPadDown),
 		"$barH$", strconv.Itoa(t.BarHeight),
 		"$barPad$", strconv.Itoa(barDown),
 		"$toolTop$", strconv.Itoa(menuTop),
@@ -594,9 +607,9 @@ html { background-color: $bg$; }
 
 .system-ui-toolbar {
 	position: fixed; left: 0; top: $toolTop$px; width: 100%; height: $toolH$px;
-	padding: $toolPad$px 8px; box-sizing: border-box;
+	padding: $toolPadUp$px 8px $toolPadDown$px; box-sizing: border-box;
 	background-color: $surfaceAlt$; z-index: 999;
-	font-family: $font$; line-height: $btnH$px;
+	font-family: $font$; line-height: $toolCtrlH$px;
 }
 .system-ui-toolbar .system-ui-hairline { position: absolute; left: 0; bottom: 0; width: 100%; }
 
@@ -648,7 +661,12 @@ html { background-color: $bg$; }
 	background-color: transparent; border-color: transparent; color: $muted$;
 }
 
-.system-ui-toolbar .system-ui-btn { margin-right: 2px; }
+/* 工具栏内的交互控件统一口径：同高（ToolControlHeight）+ 同
+   vertical-align: middle——盒高相同、对位参考线相同，按钮/输入框/下拉
+   才能彼此顶底齐平。 */
+.system-ui-toolbar .system-ui-btn {
+	margin-right: 2px; height: $toolCtrlH$px; line-height: $toolCtrlH$px;
+}
 
 /* 图标字形：Segoe MDL2 按 16px 网格设计，颜色跟随 color，所以悬停/禁用
    只需要改按钮的 color，不用为图标单独写状态。 */
@@ -657,37 +675,43 @@ html { background-color: $bg$; }
 	font-weight: normal;
 }
 /* 工具栏按钮里的图标：放大到 20px（基础 .system-ui-icon 的 16px 是菜单
-   图标等共用的，不动）。行盒收矮见 Theme.css 的 iconLH：vertical-align
-   保持 top，行盒顶对齐行顶，行盒变矮 = 基线整体上移，墨迹落进行盒上半部
-   与视觉中线重合。不能用 vertical-align: middle——引擎按「父基线 + 半
-   x 高」对位，符号字体没有可信的 x 高度，落点反而乱飘。 */
-.system-ui-tool .system-ui-icon { font-size: 20px; line-height: $toolIconLH$px; vertical-align: top; }
+   图标等共用的，不动），行盒收到字号同高免得撑高工具栏行盒。
+   vertical-align: middle 与控件盒同一对位参考线；符号字体没有可信的
+   x 高度/升降部（middle 的位移由它们推算），MDL2 20px 实测墨迹比控件
+   参考线低 4px，用相对定位一次上移补偿（top 为负值）。像素实测：browser
+   条带图标/分隔线/下拉/地址栏中心全部落在 17.5~18 = 条带中线。 */
+.system-ui-tool .system-ui-icon {
+	position: relative; top: -4px;
+	font-size: 20px; line-height: 20px; vertical-align: middle;
+}
 
 /* 工具栏图标按钮：方形、无边框，悬停只铺一层浅底。没有图标的命令退回
    文字按钮（is-label），不会被压成方块。 */
-.system-ui-tool.is-icon { width: $btnH$px; padding: 0; text-align: center; }
+.system-ui-tool.is-icon { width: $toolCtrlH$px; padding: 0; text-align: center; }
 .system-ui-tool.is-label { padding: 0 10px; }
 .system-ui-tool:hover { background-color: $hover$; color: $accent$; }
+.system-ui-tool:active { background-color: $press$; }
 .system-ui-tool:active { background-color: $press$; }
 .system-ui-tool.is-disabled { color: $muted$; }
 .system-ui-tool.is-disabled:hover, .system-ui-tool.is-disabled:active {
 	background-color: transparent; color: $muted$;
 }
-/* 分隔竖线：vertical-align: top 钉行盒顶 + margin-top 下推到居中，
-   与图标同一套「不依赖基线」的口径（middle 按父基线 + 半 x 高对位，
-   会把线画低 3px）。线高 18、行盒 30：margin-top = (行盒 − 线高)/2。 */
+/* 分隔竖线：与控件同用 vertical-align: middle（同一条参考线，天然齐平）。
+   线高 18 比控件盒矮一档，留白显呼吸感。 */
 .system-ui-sep {
-	display: inline-block; width: 1px; height: 18px; margin: 6px 6px 0;
-	background-color: $borderStrong$; vertical-align: top;
+	display: inline-block; width: 1px; height: 18px; margin: 0 6px;
+	background-color: $borderStrong$; vertical-align: middle;
 }
 
-/* 工具栏槽位（Slot）：现成控件（输入框/下拉等）嵌进工具栏，与命令按钮同排。
-   控件高度与按钮一致（ButtonHeight，正好填满 ToolHeight 减上下内边距）；
-   输入框沿用主题的表单宽度，下拉是「选择器」不是表单字段，收窄一档——
-   都可用内联样式再调（引擎没有 flex，宽度只能定量，不能弹性拉伸）。 */
+/* 工具栏槽位（Slot）：现成控件（输入框/下拉等）嵌进工具栏，与命令按钮
+   同排。控件高度统一 ToolControlHeight（与按钮同高同 middle 口径，顶底
+   齐平）；输入框沿用主题的表单宽度，下拉是「选择器」不是表单字段，收窄
+   一档——都可用内联样式再调（引擎没有 flex，宽度只能定量，不能弹性拉伸）。 */
 .system-ui-tool-slot {
 	display: inline-block; margin-right: 2px; vertical-align: middle;
 }
+.system-ui-tool-slot .system-ui-input,
+.system-ui-tool-slot .system-ui-select { height: $toolCtrlH$px; }
 .system-ui-tool-slot .system-ui-select { width: 150px; }
 
 .system-ui-status {
