@@ -308,6 +308,17 @@ func (t Theme) css(menuTop, chromeTop, status int, resetBody bool) string {
 	if barDown < 0 {
 		barDown = 0
 	}
+	// 工具栏图标的行盒要比按钮矮一截：引擎的 half-leading 把 em 盒居中，
+	// 但 Segoe MDL2 的墨迹中心在 em 中心下方约 2.5px(px)，照按钮行高排版
+	// 图标会画低约 3~4px。行盒每收矮 2px 基线上移 1px（vertical-align:
+	// top 把行盒顶钉在行顶），共收 8px 后墨迹中心与按钮中线重合（像素
+	// 实测：30 时中心 55.5，22 时 51.5，带中线 51.5）。不能用
+	// vertical-align: middle——引擎按「基线 + 半 x 高」对位，符号字体
+	// x 高度失真，落点反而更飘。
+	iconLH := t.ButtonHeight - 8
+	if iconLH < 16 {
+		iconLH = 16
+	}
 	r := strings.NewReplacer(
 		"$font$", t.Font,
 		"$iconFont$", t.IconFont,
@@ -356,6 +367,7 @@ func (t Theme) css(menuTop, chromeTop, status int, resetBody bool) string {
 		"$statusH$", strconv.Itoa(t.StatusHeight),
 		"$statusRightW$", strconv.Itoa(t.StatusRightWidth),
 		"$btnH$", strconv.Itoa(t.ButtonHeight),
+		"$toolIconLH$", strconv.Itoa(iconLH),
 		"$barH$", strconv.Itoa(t.BarHeight),
 		"$barPad$", strconv.Itoa(barDown),
 		"$toolTop$", strconv.Itoa(menuTop),
@@ -638,7 +650,11 @@ html { background-color: $bg$; }
 	font-family: $iconFont$; font-size: 16px; line-height: 16px;
 	font-weight: normal;
 }
-.system-ui-tool .system-ui-icon { line-height: $btnH$px; vertical-align: top; }
+/* 工具栏按钮里的图标行盒收矮（见 Theme.css 的 iconLH）：vertical-align
+   保持 top，行盒顶对齐行顶，行盒变矮 = 基线整体上移，墨迹落进行盒上半部
+   与视觉中线重合。不能用 vertical-align: middle——引擎按「父基线 + 半
+   x 高」对位，符号字体没有可信的 x 高度，落点反而乱飘。 */
+.system-ui-tool .system-ui-icon { line-height: $toolIconLH$px; vertical-align: top; }
 
 /* 工具栏图标按钮：方形、无边框，悬停只铺一层浅底。没有图标的命令退回
    文字按钮（is-label），不会被压成方块。 */
