@@ -5,6 +5,15 @@
 
 ## 未发布
 
+- **ui**：按钮文字垂直居中修正——核心 CSS 的按钮 `line-height` 改为公式
+  推导：`控件高 − 上下边框(2) − 光学修正(1)`（新增 `$btnLH$`/`$toolLH$`
+  变量，CSS 不再写 `line-height: height` 同值）。根因：`box-sizing:
+  border-box` + 1px 边框下内容盒比 height 矮 2px，line-height 若等于
+  height，行盒比内容盒高 2px，引擎按钮行盒居中守卫（pctH > lineH）不
+  生效、行盒贴内容盒顶，文字偏低约 2px；再收 1px 是雅黑升降部不对称的
+  光学修正。图标 middle 补偿随基线联动 4 → 2。像素实测：kit 主按钮
+  白字中心 = 盒中线（+2 → 0），browser「打开」回到条带中线 17.5，
+  三示例图标/分隔线/输入框/下拉全部 = 条带中线 ±0.5px。
 - **ui**：标准表单档对齐业界口径——`ButtonHeight` 30 → 32，且
   `.system-ui-input` / `.system-ui-select` 的高度不再写死 30px，改随
   `$btnH$` 推导：页面内容区里按钮/输入框/下拉同高 32，顶底天然齐平。

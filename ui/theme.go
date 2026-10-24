@@ -334,6 +334,22 @@ func (t Theme) css(menuTop, chromeTop, status int, resetBody bool) string {
 		toolPad = 3
 	}
 	toolPadUp, toolPadDown := toolPad-3, toolPad+3
+	// line-height 恒等于「控件高 − 上下边框 − 1px 光学修正」：按钮是
+	// box-sizing: border-box + 1px 边框，内容盒比 height 矮 2px；line-height
+	// 若写成 height 同值，行盒比内容盒高 2px，引擎的按钮行盒居中守卫
+	// （pctH > lineH）不生效、行盒贴内容盒顶，文字偏低约 2px。再收 1px 是
+	// 光学修正：13px 雅黑升降部不对称，墨迹中心比 em 盒中心低 1px，
+	// half-leading 居中消不掉，行盒多收 1px 把基线抬回、墨迹正中。
+	// 像素实测 kit 主按钮白字：+2 →（−2）+1 →（−3）0 = 盒中线。
+	// 公式集中在这里推导，CSS 只引用变量，改 height 或边框时自动跟上。
+	btnLH := t.ButtonHeight - 3
+	if btnLH < 0 {
+		btnLH = 0
+	}
+	toolLH := toolCtrl - 3
+	if toolLH < 0 {
+		toolLH = 0
+	}
 	// 图标行盒取字号（20px，CSS 里与 font-size 就近同写）：middle 的位移
 	// 只由字体升降部/x 高推算，与行盒高度无关，line-height 在这里只是
 	// 把行盒收到底、避免撑高工具栏行盒。墨迹下沉的补偿见 CSS 的
@@ -386,7 +402,9 @@ func (t Theme) css(menuTop, chromeTop, status int, resetBody bool) string {
 		"$statusH$", strconv.Itoa(t.StatusHeight),
 		"$statusRightW$", strconv.Itoa(t.StatusRightWidth),
 		"$btnH$", strconv.Itoa(t.ButtonHeight),
+		"$btnLH$", strconv.Itoa(btnLH),
 		"$toolCtrlH$", strconv.Itoa(toolCtrl),
+		"$toolLH$", strconv.Itoa(toolLH),
 		"$toolPadUp$", strconv.Itoa(toolPadUp),
 		"$toolPadDown$", strconv.Itoa(toolPadDown),
 		"$barH$", strconv.Itoa(t.BarHeight),
@@ -616,7 +634,7 @@ html { background-color: $bg$; }
 .system-ui-toolbar .system-ui-hairline { position: absolute; left: 0; bottom: 0; width: 100%; }
 
 .system-ui-btn {
-	display: inline-block; height: $btnH$px; line-height: $btnH$px;
+	display: inline-block; height: $btnH$px; line-height: $btnLH$px;
 	padding: 0 10px; box-sizing: border-box;
 	border: 1px solid transparent; border-radius: 6px;
 	font-size: 13px; color: $text$; background-color: transparent;
@@ -667,7 +685,7 @@ html { background-color: $bg$; }
    vertical-align: middle——盒高相同、对位参考线相同，按钮/输入框/下拉
    才能彼此顶底齐平。 */
 .system-ui-toolbar .system-ui-btn {
-	margin-right: 2px; height: $toolCtrlH$px; line-height: $toolCtrlH$px;
+	margin-right: 2px; height: $toolCtrlH$px; line-height: $toolLH$px;
 }
 
 /* 图标字形：Segoe MDL2 按 16px 网格设计，颜色跟随 color，所以悬停/禁用
@@ -680,10 +698,12 @@ html { background-color: $bg$; }
    图标等共用的，不动），行盒收到字号同高免得撑高工具栏行盒。
    vertical-align: middle 与控件盒同一对位参考线；符号字体没有可信的
    x 高度/升降部（middle 的位移由它们推算），MDL2 20px 实测墨迹比控件
-   参考线低 4px，用相对定位一次上移补偿（top 为负值）。像素实测：browser
-   条带图标/分隔线/下拉/地址栏中心全部落在 17.5~18 = 条带中线。 */
+   参考线低 2px，用相对定位一次上移补偿（top 为负值）。补偿量与按钮
+   line-height 联动（行盒收矮 1px 基线上移 1px），当前口径实测 −2。
+   像素实测：browser/notepad 条带图标/分隔线/下拉/地址栏中心全部落在
+   条带中线 ±0.5px。 */
 .system-ui-tool .system-ui-icon {
-	position: relative; top: -4px;
+	position: relative; top: -2px;
 	font-size: 20px; line-height: 20px; vertical-align: middle;
 }
 
