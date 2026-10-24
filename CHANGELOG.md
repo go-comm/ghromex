@@ -15,8 +15,10 @@
   `BufferGraphics.DumpPNG` 仅存缓冲快照、不是出图入口；截图用
   `Window.Screenshot()` 回读真实窗口像素（应用自行编码 PNG，见
   `examples/snip`）。`browser` 包文档新增「出图口径」小节，示例 flag 帮助
-  文案统一为「无头出图 / 真实窗口截图：产出 + 用途」，browser 示例补齐
-  `-dump-png`（无头分析，复用外壳装配）。
+  文案统一为「无头出图 / 真实窗口截图：产出 + 用途」；示例覆盖补全：
+  ua / portal / notepad 补 `-dump-png`，kit / iconsheet / browser 新增
+  `-dump-buffer-png`（裸页面 buffer 快照，不装工作台，与 `-dump-png` 的
+  完整流程对照）。
 - **ui**：新增 `Spec.NoBodyReset`：跳过 `Install` 注入的 body 复位块（margin /
   padding / 颜色 / 字体），画布底色（`html` 的 `background-color`）不受影响、
   始终注入。演示 UA 样式的页面（body 的 `margin:8px` 本身就是演示内容）与

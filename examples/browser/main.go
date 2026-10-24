@@ -14,6 +14,7 @@
 //	go run ./examples/browser -page examples/ua/index.html
 //	go run ./examples/browser -exit-after 3s
 //	go run ./examples/browser -dump-png out.png   # 无头出图：软件光栅，核对布局/配色
+//	go run ./examples/browser -dump-buffer-png out.png # 无头出图：裸页面快照（不装外壳）
 //	go run ./examples/browser -dump-svg out.svg   # 无头出图：SVG，核对布局/层级
 //	go run ./examples/browser -shot out.png       # 真实窗口出图：真实字体观感
 package main
@@ -43,9 +44,17 @@ func main() {
 	start := flag.String("page", "", "启动时打开的本地 HTML 文件（默认为内嵌起始页）")
 	exitAfter := flag.Duration("exit-after", 0, "指定时长后自动退出，如 3s（调试/CI 用）")
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
+	dumpBufferPNG := flag.String("dump-buffer-png", "", "无头出图：裸页面 buffer 快照 PNG（不装外壳），对照 -dump-png")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	flag.Parse()
 
+	if *dumpBufferPNG != "" {
+		if err := dumpBuffer(*start, *dumpBufferPNG); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *dumpPNG != "" || *dumpSVG != "" {
 		if err := dumpHeadless(*start, *dumpPNG, *dumpSVG); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -84,6 +93,36 @@ func main() {
 		fmt.Fprintln(os.Stderr, "运行失败:", err)
 		os.Exit(1)
 	}
+}
+
+// dumpBuffer 出「裸页面」的 buffer 快照：只开缓冲视口 + 打开文档就光栅化
+// 落盘——不装工作台/外壳，与 -dump-png（走完整外壳的 dumpHeadless）对照。
+// OpenDocumentWith 已完成首次级联+布局，直接 RenderNode 即可；BaseURL 与
+// show 同口径，起始页的相对链接照样解析。
+func dumpBuffer(start, path string) error {
+	src, baseURL := string(homeHTML), pageBaseURL(homeURL, findHomeDir())
+	if start != "" {
+		abs, err := filepath.Abs(start)
+		if err != nil {
+			return fmt.Errorf("打开文档失败: %w", err)
+		}
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return fmt.Errorf("打开文档失败: %w", err)
+		}
+		src, baseURL = string(data), pageBaseURL(abs, filepath.Dir(abs))
+	}
+	vp, buf := engine.NewBufferedViewport(1024, 720)
+	doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{BaseURL: baseURL})
+	if err != nil {
+		return err
+	}
+	engine.RenderNode(buf, doc)
+	if err := buf.DumpPNG(path); err != nil {
+		return err
+	}
+	fmt.Println("PNG 已写入:", path)
+	return nil
 }
 
 // dumpHeadless 处理 -dump-png / -dump-svg：不建真实窗口，也走完整的浏览器

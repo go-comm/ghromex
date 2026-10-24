@@ -9,6 +9,7 @@
 //	go run ./examples/iconsheet -search align         # 启动时预填搜索词
 //	go run ./examples/iconsheet -shot iconsheet.png   # 真实窗口截图：真实字体观感
 //	go run ./examples/iconsheet -dump-png sheet.png   # 无头出图：软件光栅，文字是占位方块
+//	go run ./examples/iconsheet -dump-buffer-png sheet.png # 无头出图：裸页面快照（不装工作台）
 //	go run ./examples/iconsheet -dump-svg sheet.svg   # 无头出图：SVG，核对布局/层级
 package main
 
@@ -100,6 +101,7 @@ func main() {
 	dark := flag.Bool("dark", false, "使用深色主题")
 	search := flag.String("search", "", "启动时预填搜索词（便于演示/截图）")
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
+	dumpBufferPNG := flag.String("dump-buffer-png", "", "无头出图：裸页面 buffer 快照 PNG（不装工作台/接线，忽略 -search），对照 -dump-png")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
 	exitAfter := flag.Duration("exit-after", 0, "运行指定时长后自动退出（调试/CI）")
@@ -143,6 +145,13 @@ func main() {
 		spec.Theme = &theme
 	}
 
+	if *dumpBufferPNG != "" {
+		if err := dumpBuffer(page, *dumpBufferPNG); err != nil {
+			fmt.Fprintln(os.Stderr, "无头导出失败:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if *dumpPNG != "" || *dumpSVG != "" {
 		if err := dump(spec, page, *search, *dumpPNG, *dumpSVG); err != nil {
 			fmt.Fprintln(os.Stderr, "无头导出失败:", err)
@@ -516,6 +525,19 @@ func setHidden(el engine.HTMLElement, base string, hidden bool) {
 	if el.GetAttribute("class") != class {
 		el.SetAttribute("class", class)
 	}
+}
+
+// dumpBuffer 出「裸页面」的 buffer 快照：只开缓冲视口 + 打开页面就光栅化
+// 落盘——不装工作台、不接线（-search 也忽略），与 -dump-png（装外壳的
+// 完整流程）对照。OpenDocument 已完成首次级联+布局，直接 RenderNode 即可。
+func dumpBuffer(page, path string) error {
+	vp, buf := engine.NewBufferedViewport(winW, winH)
+	doc, err := engine.OpenDocument(vp, page)
+	if err != nil {
+		return err
+	}
+	engine.RenderNode(buf, doc)
+	return buf.DumpPNG(path)
 }
 
 func dump(spec ui.Spec, page, search, pngPath, svgPath string) error {

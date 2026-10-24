@@ -2,6 +2,7 @@
 //
 //	go run ./examples/ua
 //	go run ./examples/ua -exit-after 3s     # 调试/CI
+//	go run ./examples/ua -dump-png out.png  # 无头出图：软件光栅 PNG
 //	go run ./examples/ua -dump-svg out.svg  # 无头出图：SVG，核对布局/层级
 //
 // 页面 index.html 与本文件同目录，用 go:embed 打进二进制。
@@ -23,21 +24,33 @@ var page []byte
 
 func main() {
 	exitAfter := flag.Duration("exit-after", 0, "指定时长后自动退出，如 3s（调试/CI 用）")
+	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	flag.Parse()
 
-	if *dumpSVG != "" {
-		vp := engine.NewHeadlessViewport(1024, 720)
+	if *dumpPNG != "" || *dumpSVG != "" {
+		vp, buf := engine.NewBufferedViewport(1024, 720)
 		doc, err := engine.OpenDocument(vp, string(page))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "打开文档失败:", err)
 			os.Exit(1)
 		}
-		if err := os.WriteFile(*dumpSVG, []byte(doc.DumpSVG()), 0o644); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+		// 两个出口共用一份布局：先光栅化（要 PNG 才画），再出 SVG。
+		if *dumpPNG != "" {
+			engine.RenderNode(buf, doc)
+			if err := buf.DumpPNG(*dumpPNG); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			fmt.Println("PNG 已写入:", *dumpPNG)
 		}
-		fmt.Println("SVG 已写入:", *dumpSVG)
+		if *dumpSVG != "" {
+			if err := os.WriteFile(*dumpSVG, []byte(doc.DumpSVG()), 0o644); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			fmt.Println("SVG 已写入:", *dumpSVG)
+		}
 		return
 	}
 
