@@ -5,6 +5,15 @@
 
 ## 未发布
 
+- **ui**：状态栏支持多个右项——右钉段全部显式定宽时，右区宽度与左轨道
+  垫宽按「Σ段宽+分隔线」自动外扩（原先装不下的部分会被 `overflow:hidden`
+  裁掉）；含自适应段则回退 `Theme.StatusRightWidth` 基准预留。贴边口径
+  补齐：糖消息缺位时最右段带 `is-last` 收掉右内边距贴 `right:12px` 盒缘
+  （与左区 `is-first`、糖消息同为 12px），糖消息在场时让位留 10px 间隙；
+  右钉段零值对齐按右区口径写实为右对齐。kit 状态栏改为两个定宽右钉段
+  演示（Σ=351 外扩），新增 `TestStatusRightZoneWidth` 守卫（外扩/回退/
+  内联清理/盒几何/is-last），`TestStatusRightSegment` 补贴边位让位回收断言。
+
 - **ui**：状态栏统一到段模型——`StatusSegment` 新增 `AnchorRight`，右钉段
   与左段走同一套构建/更新路径（进右侧固定区、参与 `has-right` 预留、
   `SetStatusSegment`/`StatusSegment` 按 Key 读写），空文本右钉段视为无

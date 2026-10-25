@@ -346,14 +346,23 @@ func TestStatusRightSegment(t *testing.T) {
 		t.Fatalf("StatusSegment(zoom) = %q, %v", got, ok)
 	}
 
-	// 糖消息与自建右钉段共存：都进右区，糖排最右。
+	// 糖消息与自建右钉段共存：都进右区，糖排最右；贴边位让给糖
+	//（最右段不带 is-last，靠右内边距留间隙）。
 	sh.SetStatusRight("已保存")
 	if got := textsOf(box.Children()); len(got) != 2 ||
 		got[0] != "125%" || got[1] != "已保存" {
 		t.Fatalf("共存时右区 = %v, want [125%% 已保存]", got)
 	}
-	// 糖收起后，右钉段继续撑住 has-right。
+	if strings.Contains(box.Children()[0].GetAttribute("class"), "is-last") {
+		t.Fatalf("糖消息在场时最右段不应带 is-last: %q",
+			box.Children()[0].GetAttribute("class"))
+	}
+	// 糖收起后，贴边位还给右钉段，且右钉段继续撑住 has-right。
 	sh.SetStatusRight("")
+	if !strings.Contains(box.Children()[0].GetAttribute("class"), "is-last") {
+		t.Fatalf("糖收起后最右段应带 is-last: %q",
+			box.Children()[0].GetAttribute("class"))
+	}
 	if !hasWord(status.GetAttribute("class"), "has-right") {
 		t.Fatal("糖消息收起后右钉段应继续撑住 has-right")
 	}
@@ -381,6 +390,89 @@ func TestStatusRightSegment(t *testing.T) {
 	}
 	if !hasWord(status.GetAttribute("class"), "has-right") {
 		t.Fatal("重建后糖消息应恢复 has-right")
+	}
+}
+
+// 多右项：右钉段全部显式定宽时，右区宽度与左轨道垫宽按「Σ段宽+分隔线」
+// 自动外扩（超主题预留的部分装不下会被 overflow 裁掉）；含自适应段或
+// 右区空置时清掉内联样式，回退主题常量。
+func TestStatusRightZoneWidth(t *testing.T) {
+	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
+	sh := Install(doc, Spec{
+		StatusSegments: []StatusSegment{
+			{Key: "file", Text: "未命名"},
+			{Key: "enc", Text: "UTF-8", Width: 90, AnchorRight: true},
+			{Key: "zoom", Text: "100%", Width: 70, AnchorRight: true},
+		},
+	})
+	doc.Refresh()
+	box := doc.QuerySelector(".system-ui-status-right")
+	track := doc.QuerySelector(".system-ui-status-track")
+	// Σ=90+70+1=161 < 主题 280：不外扩，不写内联样式。
+	if got := box.GetAttribute("style"); got != "" {
+		t.Fatalf("未超主题预留时右区内联 = %q, want 空", got)
+	}
+	if got := track.GetAttribute("style"); got != "" {
+		t.Fatalf("未超主题预留时轨道内联 = %q, want 空", got)
+	}
+
+	// 定宽段把 Σ 顶过主题预留：200+180+1=381 > 280 → 双侧同步外扩。
+	sh.SetStatusSegments([]StatusSegment{
+		{Key: "file", Text: "未命名"},
+		{Key: "big1", Text: "ABCDEFGHIJKLMNOP", Width: 200, AnchorRight: true},
+		{Key: "big2", Text: "QRSTUVWXYZ012345", Width: 180, AnchorRight: true},
+	})
+	doc.Refresh() // 几何断言读布局，必须先重排
+	if got := box.GetAttribute("style"); !strings.Contains(got, "width:381px") {
+		t.Fatalf("右区内联 = %q, want width:381px", got)
+	}
+	if got := track.GetAttribute("style"); !strings.Contains(got, "padding-right:381px") {
+		t.Fatalf("轨道内联 = %q, want padding-right:381px", got)
+	}
+	if got := len(box.Children()); got != 3 {
+		t.Fatalf("右区子节点 = %d, want 3（段+分隔线+段）", got)
+	}
+	// 几何：右区右缘 = 文档宽-12（right:12px），段按显式宽度落位，
+	// 段与段之间由 1px 分隔线隔开。
+	if got := box.GetBoundingClientRect().Right().Pixel(); got != 640-12 {
+		t.Fatalf("右区右缘 = %d, want %d", got, 640-12)
+	}
+	if got := box.GetBoundingClientRect().Left().Pixel(); got != 640-12-381 {
+		t.Fatalf("右区左缘 = %d, want %d", got, 640-12-381)
+	}
+	if got := box.Children()[0].GetBoundingClientRect().Right().Pixel() -
+		box.Children()[0].GetBoundingClientRect().Left().Pixel(); got != 200 {
+		t.Fatalf("右段1宽度 = %d, want 200", got)
+	}
+	if got := box.Children()[2].GetBoundingClientRect().Right().Pixel() -
+		box.Children()[2].GetBoundingClientRect().Left().Pixel(); got != 180 {
+		t.Fatalf("右段2宽度 = %d, want 180", got)
+	}
+	// 贴边位：糖消息缺位时最右一段带 is-last（收右内边距贴12px 盒缘）。
+	if !strings.Contains(box.Children()[0].GetAttribute("class"), "system-ui-status-seg") {
+		t.Fatalf("右段1类名 = %q", box.Children()[0].GetAttribute("class"))
+	}
+	if !strings.Contains(box.Children()[2].GetAttribute("class"), "is-last") {
+		t.Fatalf("最右段缺 is-last 类: %q", box.Children()[2].GetAttribute("class"))
+	}
+
+	// 含自适应右段：无法预量，回退主题常量（内联清空）。
+	sh.SetStatusSegments([]StatusSegment{
+		{Key: "file", Text: "未命名"},
+		{Key: "big1", Text: "ABCDEFGHIJKLMNOP", Width: 200, AnchorRight: true},
+		{Key: "auto", Text: "自适应", AnchorRight: true},
+	})
+	if got := box.GetAttribute("style"); got != "" {
+		t.Fatalf("自适应段回退后右区内联 = %q, want 空", got)
+	}
+	if got := track.GetAttribute("style"); got != "" {
+		t.Fatalf("自适应段回退后轨道内联 = %q, want 空", got)
+	}
+
+	// 右区空置：同样清掉内联。
+	sh.SetStatusSegments([]StatusSegment{{Key: "file", Text: "未命名"}})
+	if got := box.GetAttribute("style"); got != "" {
+		t.Fatalf("右区空置后右区内联 = %q, want 空", got)
 	}
 }
 

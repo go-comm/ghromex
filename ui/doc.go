@@ -55,8 +55,8 @@
 //
 // 整条状态栏只有一种结构——分段：段有 Key、固定/自适应宽度、段内对齐和
 // 隐藏态，默认排进左侧轨道；AnchorRight 的段钉在右侧固定区（按
-// Theme.StatusRightWidth 预留宽度），适合贴右的提示/计数。高频更新只改
-// 文字：
+// Theme.StatusRightWidth 预留宽度，右钉段全部定宽时按 Σ 自动外扩），
+// 适合贴右的提示/计数，多个右项依次排入右区。高频更新只改文字：
 //
 //	spec.StatusSegments = []ui.StatusSegment{
 //		{Key: "file", Text: "未命名", Width: 220},

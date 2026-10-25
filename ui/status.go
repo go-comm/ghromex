@@ -23,13 +23,18 @@ type StatusSegment struct {
 	Key    string           // 更新用；空时按位置生成，调用方应保证唯一
 	Text   string           // 初始文字
 	Width  int              // 0 = 自适应；>0 = 固定宽度（含 padding，单位 px）
-	Align  engine.TextAlign // 段内对齐，零值即左对齐
+	Align  engine.TextAlign // 段内对齐；零值左侧段左对齐、右钉段右对齐（贴列右缘）
 	Hidden bool             // 为 true 时不生成该段，也不生成它前面的分隔线
 
 	// AnchorRight 把该段钉在状态栏右缘的固定区，不进左侧轨道。
 	// 空文本的右钉段视为「无消息」：不生成、不留占位、不参与预留
 	// （左段空文本仍占位）；右钉段跨重建保留的能力不受影响——
 	// SetStatusSegment 按 Key 照常只改文字。
+	//
+	// 多个右钉段共享右区：全部给定 Width 时右区按「Σ段宽+分隔线」
+	// 自动外扩（含任意自适应段则回退 Theme.StatusRightWidth 预留，
+	// 超出被裁）。要多项稳定共存，逐段定宽即可。零值对齐按右区口径
+	// 视为右对齐；糖消息缺位时最右一段收掉右内边距贴 right:12px 盒缘。
 	AnchorRight bool
 }
 
@@ -81,7 +86,10 @@ func (s *Workbench) SetStatusSegments(segs []StatusSegment) {
 	s.statusLeft = nil
 	s.statusRight = nil
 	s.rightVisible = 0
-	visible := 0 // 左侧已生成段数
+	s.lastRightSeg = nil
+	visible := 0       // 左侧已生成段数
+	rightSum := 0      // 可见右钉段显式宽度累计
+	rightAuto := false // 有无自适应右钉段（无法预量）
 	for i, seg := range segs {
 		if seg.Hidden || (seg.AnchorRight && seg.Text == "") {
 			continue
@@ -121,6 +129,12 @@ func (s *Workbench) SetStatusSegments(segs []StatusSegment) {
 		s.statusSegs = append(s.statusSegs, statusSegView{key: key, el: el})
 		if seg.AnchorRight {
 			s.rightVisible++
+			s.lastRightSeg = el
+			if seg.Width > 0 {
+				rightSum += seg.Width
+			} else {
+				rightAuto = true
+			}
 			continue
 		}
 		if s.statusLeft == nil {
@@ -134,8 +148,32 @@ func (s *Workbench) SetStatusSegments(segs []StatusSegment) {
 		s.statusRightBox.AppendChild(s.statusRight)
 		s.statusSegs = append(s.statusSegs,
 			statusSegView{key: statusRightKey, el: s.statusRight})
+	} else if s.lastRightSeg != nil {
+		// 糖消息缺位：最右一段收掉右内边距，文字贴 right:12px 盒缘，
+		// 与左区 is-first / 糖消息同一边距口径。
+		addClass(s.lastRightSeg, "is-last")
 	}
+	s.layoutRightZone(rightSum, rightAuto)
 	s.syncHasRight()
+}
+
+// layoutRightZone 回写右侧固定区宽度：多右项场景下主题预留可能装不下。
+// 可见右钉段全部显式定宽时，按「Σ段宽 + 段间分隔线」外扩右区宽度与左
+// 轨道垫宽（仅超出主题 StatusRightWidth 时写内联样式，且段宽含 padding、
+// 稳定不随文字抖动）；只要有自适应段就无法预量，清掉内联样式回退主题
+// 常量——超出部分由 overflow:hidden 裁掉，与旧口径一致。
+func (s *Workbench) layoutRightZone(sum int, auto bool) {
+	zone := 0
+	if s.rightVisible > 0 && !auto {
+		zone = sum + (s.rightVisible - 1)
+	}
+	if zone <= s.theme.StatusRightWidth {
+		s.statusRightBox.RemoveAttribute("style")
+		s.statusTrack.RemoveAttribute("style")
+		return
+	}
+	s.statusRightBox.SetAttribute("style", fmt.Sprintf("width:%dpx;", zone))
+	s.statusTrack.SetAttribute("style", fmt.Sprintf("padding-right:%dpx;", zone))
 }
 
 // SetStatusSegment 按 Key 更新一段文字；找不到 Key 时返回 false。
@@ -225,6 +263,10 @@ func (s *Workbench) SetStatusRight(text string) {
 			s.statusRight = nil
 		}
 		s.dropStatusSeg(statusRightKey)
+		// 糖让位：贴边位还给最右右钉段。
+		if s.lastRightSeg != nil {
+			addClass(s.lastRightSeg, "is-last")
+		}
 		s.syncHasRight()
 		return
 	}
@@ -233,6 +275,10 @@ func (s *Workbench) SetStatusRight(text string) {
 		s.statusRightBox.AppendChild(s.statusRight)
 		s.statusSegs = append(s.statusSegs,
 			statusSegView{key: statusRightKey, el: s.statusRight})
+		// 糖占贴边位：最右右钉段让出，保留右内边距做两者间隙。
+		if s.lastRightSeg != nil {
+			removeClass(s.lastRightSeg, "is-last")
+		}
 	} else {
 		s.statusRight.SetText(text)
 	}

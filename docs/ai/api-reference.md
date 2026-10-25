@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-25 20:17
+> 生成时间: 2026-10-25 20:37
 
 ---
 
@@ -2324,7 +2324,7 @@ body 原样的页面（演示 UA 样式、靠 body padding 给固定栏让位）
 # 状态栏
 
 整条状态栏只有一种结构——分段：段有 Key、固定/自适应宽度、段内对齐和 隐藏态，默认排进左侧轨道；AnchorRight 的段钉在右侧固定区（按
-Theme.StatusRightWidth 预留宽度），适合贴右的提示/计数。高频更新只改 文字：
+Theme.StatusRightWidth 预留宽度，右钉段全部定宽时按 Σ 自动外扩）， 适合贴右的提示/计数，多个右项依次排入右区。高频更新只改文字：
 
     spec.StatusSegments = []ui.StatusSegment{
     	{Key: "file", Text: "未命名", Width: 220},
@@ -2801,13 +2801,18 @@ type StatusSegment struct {
 	Key    string           // 更新用；空时按位置生成，调用方应保证唯一
 	Text   string           // 初始文字
 	Width  int              // 0 = 自适应；>0 = 固定宽度（含 padding，单位 px）
-	Align  engine.TextAlign // 段内对齐，零值即左对齐
+	Align  engine.TextAlign // 段内对齐；零值左侧段左对齐、右钉段右对齐（贴列右缘）
 	Hidden bool             // 为 true 时不生成该段，也不生成它前面的分隔线
 
 	// AnchorRight 把该段钉在状态栏右缘的固定区，不进左侧轨道。
 	// 空文本的右钉段视为「无消息」：不生成、不留占位、不参与预留
 	// （左段空文本仍占位）；右钉段跨重建保留的能力不受影响——
 	// SetStatusSegment 按 Key 照常只改文字。
+	//
+	// 多个右钉段共享右区：全部给定 Width 时右区按「Σ段宽+分隔线」
+	// 自动外扩（含任意自适应段则回退 Theme.StatusRightWidth 预留，
+	// 超出被裁）。要多项稳定共存，逐段定宽即可。零值对齐按右区口径
+	// 视为右对齐；糖消息缺位时最右一段收掉右内边距贴 right:12px 盒缘。
 	AnchorRight bool
 }
     StatusSegment 是状态栏的一段文字。
@@ -2943,7 +2948,7 @@ type Theme struct {
 	MenuHeight       int // 菜单栏高度
 	ToolHeight       int // 工具栏高度
 	StatusHeight     int // 状态栏高度
-	StatusRightWidth int // 状态栏右侧固定区（右钉段+糖消息）预留宽度
+	StatusRightWidth int // 状态栏右侧固定区基准预留宽度（右钉段全定宽时按 Σ 外扩）
 	ButtonHeight     int // 标准表单档控件高度（按钮/输入框/下拉），默认 32
 	// ToolControlHeight 是工具栏内交互控件（图标/文字按钮、槽位里的输入框
 	// 与下拉）的统一高度：条内所有控件同高、同用 vertical-align: middle

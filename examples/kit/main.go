@@ -146,11 +146,16 @@ func buildSpec(status func(string)) ui.Spec {
 	about := ui.Item("关于", "", cmd("Ghromex 组件库 · 纯 Go 渲染")).WithIcon("info")
 
 	return ui.Spec{
-		Title:       "Ghromex 组件库",
-		Width:       winW,
-		Height:      winH,
-		Status:      "就绪",
-		StatusRight: "Ctrl+S 保存 · Ctrl+F 查找 · Ctrl+H 替换",
+		Title:  "Ghromex 组件库",
+		Width:  winW,
+		Height: winH,
+		// 右侧演示多右项：全部显式定宽，右区按 Σ+分隔线自动外扩到
+		// 351px（主题基准 280 装不下），两段之间带分隔线。
+		StatusSegments: []ui.StatusSegment{
+			{Key: "status", Text: "就绪"},
+			{Key: "keys1", Text: "Ctrl+S 保存", Width: 130, AnchorRight: true},
+			{Key: "keys2", Text: "Ctrl+F 查找 · Ctrl+H 替换", Width: 220, AnchorRight: true},
+		},
 		Menus: []ui.Menu{
 			{Title: "文件", Items: []ui.Action{
 				newFile, openFile, ui.Sep(),

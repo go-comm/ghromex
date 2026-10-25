@@ -80,7 +80,7 @@ type Theme struct {
 	MenuHeight       int // 菜单栏高度
 	ToolHeight       int // 工具栏高度
 	StatusHeight     int // 状态栏高度
-	StatusRightWidth int // 状态栏右侧固定区（右钉段+糖消息）预留宽度
+	StatusRightWidth int // 状态栏右侧固定区基准预留宽度（右钉段全定宽时按 Σ 外扩）
 	ButtonHeight     int // 标准表单档控件高度（按钮/输入框/下拉），默认 32
 	// ToolControlHeight 是工具栏内交互控件（图标/文字按钮、槽位里的输入框
 	// 与下拉）的统一高度：条内所有控件同高、同用 vertical-align: middle
@@ -770,6 +770,10 @@ html { background-color: $bg$; }
 	overflow: hidden;
 }
 .system-ui-status-seg.is-first { padding-left: 0; }
+/* 右区贴边位：最右一段（糖消息缺位时）收掉右内边距，文字直接贴
+   right:12px 盒缘——与左区 is-first、糖消息同一边距口径。糖消息
+   在场时该类不加，保留的 10px 内边距充当两者间隙。 */
+.system-ui-status-seg.is-last { padding-right: 0; }
 .system-ui-status-sep {
 	display: inline-block; width: 1px; height: 12px; margin: 6px 0;
 	background-color: $border$; vertical-align: top;

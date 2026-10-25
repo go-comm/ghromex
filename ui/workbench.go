@@ -160,6 +160,7 @@ type Workbench struct {
 	statusRight     engine.HTMLElement // 糖消息元素，可为 nil（无消息）
 	statusRightText string             // 糖消息文本：跨 SetStatusSegments 重建保留
 	rightVisible    int                // 已生成的右钉段数（糖消息不计）
+	lastRightSeg    engine.HTMLElement // 最右一个右钉段（贴边位归它，可为 nil）
 	statusSegs      []statusSegView
 	spacerBottom    engine.HTMLElement
 
