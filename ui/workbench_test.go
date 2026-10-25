@@ -109,6 +109,18 @@ func TestInstallBuildsChrome(t *testing.T) {
 	if sh.statusLeft.Text() != "就绪" {
 		t.Fatalf("状态栏文本 = %q", sh.statusLeft.Text())
 	}
+
+	// 1px 分隔线：外壳复位块会把 height 归零，分隔线必须在复位之后重新给
+	// 回 1px，否则整条线消失（三栏各一条）。
+	if hs := doc.GetElementsByClassName("system-ui-hairline"); len(hs) != 3 {
+		t.Fatalf("分隔线数量 = %d，期望 3", len(hs))
+	} else {
+		for i, h := range hs {
+			if b := boxOf(h); b.h != 1 {
+				t.Errorf("第 %d 条分隔线高 %dpx，期望 1px", i, b.h)
+			}
+		}
+	}
 }
 
 // Install 复位 body：工作台画布没有 UA 外边距，颜色字体跟随主题——页面
@@ -808,5 +820,96 @@ func TestChromeIgnoresPageTextAlign(t *testing.T) {
 	// 状态栏左右各 12px 内边距：首段（is-first 收掉左内边距）落在 12。
 	if b := boxOf(doc.QuerySelector(".system-ui-status-seg")); b.x != 12 {
 		t.Errorf("状态段 x = %d, want 12（被页面 text-align 挤到中间了）", b.x)
+	}
+}
+
+// TestChromeIgnoresHostilePageCSS 页面写「敌意」全局规则时，外壳三栏的
+// 几何与像素都必须与干净页面完全一致。
+//
+// 引擎没有 shadow DOM，外壳是装进页面文档的普通元素，页面作者样式与组件
+// 样式同源：body 的继承属性能漏进外壳，div/span 的元素规则能直接命中外壳
+// 子元素。这里把常见写法一次跑全，用「三栏像素带对比」兜住字号/字重/颜色/
+// 下划线/几何——只要页面 CSS 漏进外壳，带内就有像素不同。
+func TestChromeIgnoresHostilePageCSS(t *testing.T) {
+	type shot struct {
+		doc engine.HTMLDocument
+		buf *engine.BufferGraphics
+	}
+	render := func(css string) shot {
+		t.Helper()
+		vp, buf := engine.NewBufferedViewport(640, 480)
+		doc, err := engine.OpenDocument(vp,
+			`<!doctype html><html><head><style>`+css+`</style></head>`+
+				`<body><div>内容</div><span>行内</span></body></html>`)
+		if err != nil {
+			t.Fatalf("打开文档失败: %v", err)
+		}
+		Install(doc, Spec{
+			Menus:          []Menu{{Title: "文件", Items: []Action{Item("保存", "Ctrl+S", nil)}}},
+			Tools:          []Action{Tool("保存", nil), Tool("打开", nil)},
+			StatusSegments: []StatusSegment{{Key: "page", Text: "就绪"}},
+			StatusRight:    "右侧",
+		})
+		doc.Refresh()
+		engine.RenderNode(buf, doc)
+		return shot{doc: doc, buf: buf}
+	}
+
+	base := render(`body{margin:0}`)
+	probes := []string{
+		".system-ui-menubar", ".system-ui-menu", ".system-ui-toolbar",
+		".system-ui-tool", ".system-ui-status", ".system-ui-status-seg",
+		".system-ui-status-right", ".system-ui-spacer-top",
+	}
+	// 三栏像素带：fixed 栏不透明，页面内容透不出来，同一套外壳在任何页面上
+	// 这三段都应逐像素一致。
+	bands := []string{".system-ui-menubar", ".system-ui-toolbar", ".system-ui-status"}
+
+	cases := []struct{ name, css string }{
+		{"继承属性", `body{margin:0;text-align:center;font-size:28px;font-weight:bold;` +
+			`color:#ff0000;line-height:40px;text-decoration:underline;` +
+			`white-space:pre;pointer-events:none}`},
+		{"div盒规则", `body{margin:0} div{margin:8px;padding:20px;border:2px solid #00ff00}`},
+		{"div文字规则", `body{margin:0} div{font-size:28px;font-weight:bold;color:#ff0000;` +
+			`line-height:40px;text-align:center;text-decoration:underline;white-space:pre}`},
+		{"span文字规则", `body{margin:0} span{font-size:20px;font-weight:bold;color:#0000ff;text-decoration:underline}`},
+		{"div尺寸", `body{margin:0} div{width:120px;height:40px}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := render(tc.css)
+
+			// 先比几何：失败信息比「某像素不同」直观。
+			for _, sel := range probes {
+				wantEl, gotEl := base.doc.QuerySelector(sel), got.doc.QuerySelector(sel)
+				if wantEl == nil || gotEl == nil {
+					t.Fatalf("%s 不存在（want=%v got=%v）", sel, wantEl != nil, gotEl != nil)
+				}
+				if w, g := boxOf(wantEl), boxOf(gotEl); w != g {
+					t.Errorf("%s 框 = %+v，干净页面是 %+v（页面 CSS 漏进外壳）", sel, g, w)
+				}
+			}
+			// 再比像素带：字号/字重/颜色/下划线这些几何看不出来的也算上。
+			for _, sel := range bands {
+				b := boxOf(base.doc.QuerySelector(sel))
+				for y := b.y; y < b.y+b.h; y++ {
+					for x := b.x; x < b.x+b.w; x++ {
+						r1, g1, b1, a1, ok1 := base.buf.ColorAt(x, y)
+						r2, g2, b2, a2, ok2 := got.buf.ColorAt(x, y)
+						if !ok1 || !ok2 || r1 != r2 || g1 != g2 || b1 != b2 || a1 != a2 {
+							t.Fatalf("%s 像素 (%d,%d) 不同：干净=%v 页面CSS=%v（页面 CSS 漏进外壳）",
+								sel, x, y, []uint8{r1, g1, b1, a1}, []uint8{r2, g2, b2, a2})
+						}
+					}
+				}
+			}
+			// pointer-events:none 是最狠的一条：漏进去会让整个外壳点不动。
+			if tc.name == "继承属性" {
+				b := boxOf(got.doc.QuerySelector(".system-ui-tool"))
+				if engine.ElementAt(got.doc, b.x+b.w/2, b.y+b.h/2) == nil {
+					t.Fatal("页面 pointer-events:none 漏进外壳：工具栏按钮点不中")
+				}
+			}
+		})
 	}
 }

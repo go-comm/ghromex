@@ -45,11 +45,34 @@
 - 文档与对照页：`examples/stylebook` 表格章节升为「支持」并补 `display:table`
   对照节、colspan/rowspan、border-spacing 6px、vertical-align；README 同步。
 
-**修复**：外壳三栏（菜单栏/工具栏/状态栏）与控件条显式复位 `text-align: left`。
-外壳装在页面文档里，`text-align` 又是继承属性——页面 body 写 `text-align:
-center`（提示页、落地页很常见）时，整排工具按钮会跟着居中，示例浏览器打开
-外部链接（提示页）即触发「顶部变居中」。新增 `TestChromeIgnoresPageTextAlign`
-（三栏几何守卫），浏览器导航测试补提示页上的按钮位置断言。
+**修复**：外壳对页面 CSS 免疫。外壳三栏（菜单栏/工具栏/状态栏）与控件条装在
+页面文档里，页面作者样式与组件样式同源，页面规则会直接漏进外壳：
+
+- 继承属性：页面 `body` 写 `text-align:center`（提示页、落地页很常见）时整排
+  工具按钮跟着居中——示例浏览器打开外部链接（提示页）即触发「顶部变居中」；
+  `font-size` / `font-weight` / `color` / `line-height` / `text-decoration` /
+  `white-space` / `pointer-events:none`（最后一条会让整个外壳点不动）同理。
+- 全局元素规则：页面 `div{margin:8px;padding:20px;border:2px}` 会把 fixed 栏
+  撑大、按钮顶偏、分隔线描边；`div{width/height}` 会改菜单/占位块尺寸；
+  `div`/`span` 的字号/字重/颜色/下划线/居中/`pre` 会改外壳文字观感（引擎宽度
+  测量忽略字重，几何看不出来，只有像素能抓）。
+
+修法：`ui/theme.go` 给外壳/控件类名加两组复位——几何（`margin/padding/
+border-width/width/height`）与文字口径（`font-weight/text-align/text-decoration/
+white-space`），三栏容器另复位全部继承属性。复位块写在组件规则之前，组件
+自己需要的边距/字号（按钮 padding、状态轨道 `padding-right`、图标按钮居中）
+由后面的同名规则覆盖，正常观感不变；1px 分隔线的 `height` 被复位块归零，
+所以分隔线规则移到复位块之后。新增 `TestChromeIgnoresHostilePageCSS`：
+五类敌意页面（继承属性 / div 盒规则 / div 文字规则 / span 文字规则 / div 尺寸）
+与干净页面比三栏几何 + **三栏像素带**逐像素一致，并断言 `pointer-events:none`
+下工具栏仍可命中；去掉复位后该测试报 `menubar 框 = {0 0 684 76}`、
+`菜单 框 = {0 0 144 32}` 等。`TestInstallBuildsChrome` 补三条分隔线 1px 守卫，
+浏览器导航测试补提示页上的按钮位置断言。
+
+已知边界（引擎没有 shadow DOM，无法完全隔离）：页面直接写 `!important`、
+或写与组件同名的类规则（`.system-ui-btn{...}`）时仍会覆盖；页面用元素规则
+给外壳内**原生控件**（`input`/`select`）设样式时，组件已声明大部分属性，
+但未声明的（如 `line-height`）仍可能漏入。
 
 ## v0.3.0 — 2026-10-25
 

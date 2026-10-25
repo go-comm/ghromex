@@ -581,16 +581,87 @@ html { background-color: $bg$; }
 
 /* ===== 工作台：菜单栏 / 工具栏 / 状态栏 ===== */
 
+/* 外壳盒子的几何复位。
+   页面若写全局元素规则（div { margin: 8px; padding: 20px; border: 2px }），
+   会命中外壳里的 div/span——fixed 的栏被 padding 撑大、按钮被 margin 顶偏、
+   分隔线被描边；div 的 width/height 还会改菜单/占位块尺寸（引擎里 width/height
+   的 auto 就是「未设」，所以能靠 auto 复位）。这里按类名把盒模型归零，外壳的
+   几何只由外壳自己的规则决定。各组件真正需要的边距/内边距/边框/尺寸都写在
+   **这条之后**的同名规则里（菜单项 padding、分隔线 margin、状态轨道
+   padding-right、输入框宽度等），源码顺序在后，照常生效。
+   注意：不要用后代选择器统一复位（特异度会压掉组件自己的 padding）。 */
+.system-ui-hairline,
+.system-ui-menubar,
+.system-ui-menu,
+.system-ui-menu-underline,
+.system-ui-menu-pop,
+.system-ui-menu-item,
+.system-ui-menu-sep,
+.system-ui-menu-icon,
+.system-ui-menu-shortcut,
+.system-ui-toolbar,
+.system-ui-btn,
+.system-ui-tool,
+.system-ui-tool-slot,
+.system-ui-sep,
+.system-ui-icon,
+.system-ui-label,
+.system-ui-status,
+.system-ui-status-track,
+.system-ui-status-seg,
+.system-ui-status-sep,
+.system-ui-status-right,
+.system-ui-status-msg,
+.system-ui-spacer-top,
+.system-ui-spacer-bottom,
+.system-ui-bar,
+.system-ui-input,
+.system-ui-select,
+.system-ui-textarea,
+.system-ui-check {
+	margin: 0; padding: 0; border-width: 0;
+	width: auto; height: auto;
+}
+
+/* 文字口径复位（与上面的几何复位同因）。
+   这些属性组件大多靠**继承**拿值，自己的规则里没写，所以页面 div/span
+   规则直接命中外壳子元素时就会生效：body 或 div 写 font-weight:bold 会让
+   菜单/按钮文字变粗（引擎的宽度测量忽略字重，几何看不出来，只有像素能抓），
+   写 text-align:center 会让菜单项居中，写下划线/white-space:pre 会改观感。
+   这里按类名钉回默认值；组件需要别的值（图标按钮 text-align:center、菜单
+   标签 13px 等）都由后面的规则覆盖。 */
+.system-ui-menu,
+.system-ui-menu-pop,
+.system-ui-menu-item,
+.system-ui-menu-shortcut,
+.system-ui-menu-icon,
+.system-ui-btn,
+.system-ui-tool-slot,
+.system-ui-label,
+.system-ui-icon {
+	font-weight: normal; text-align: left;
+	text-decoration: none; white-space: normal;
+}
+
+/* 1px 分隔线写在复位块**之后**：复位块把 height 归零，这里再给回 1px
+   （写在前面会被 height: auto 覆盖掉，分隔线整条消失）。 */
 .system-ui-hairline { height: 1px; background-color: $border$; pointer-events: none; }
 
-/* 外壳三栏（菜单栏/工具栏/状态栏）都装在**页面文档**里，必须挡掉页面
-   常见的继承属性：text-align 被页面 body 写成 center 时（提示页、落地页
-   很常见），整排按钮/分段会跟着居中，看上去像工具栏「漂到中间」。
-   这里逐个复位为 left，外壳的对齐只由外壳自己的规则决定。 */
+/* 外壳三栏（菜单栏/工具栏/状态栏）与控件条都装在**页面文档**里，除了上面的
+   盒模型/文字口径复位，容器自己还要挡掉**继承属性**：
+   - text-align 被页面 body 写成 center 时（提示页、落地页很常见），整排
+     按钮/分段会跟着居中，看上去像工具栏「漂到中间」；
+   - font-size/font-weight/color/line-height/text-decoration/white-space/
+     pointer-events 同样是继承属性：页面把 body 写大字号、加粗、下划线、
+     pre、pointer-events:none，都会原样漏进外壳（最后一条会让整个外壳点不动）。
+   子元素（按钮/输入框/分段/菜单标签）都各自声明了字号与颜色，容器的复位
+   不会改变正常观感，只把「页面的意外声明」挡在门外。 */
 .system-ui-menubar {
 	position: fixed; left: 0; top: 0; width: 100%; height: $menuH$px;
 	background-color: $surface$; z-index: 1000; font-family: $font$;
-	text-align: left;
+	display: block;
+	font-size: 13px; font-weight: normal; line-height: $menuH$px; color: $text$;
+	text-align: left; text-decoration: none; white-space: normal; pointer-events: auto;
 }
 .system-ui-menubar .system-ui-hairline { position: absolute; left: 0; bottom: 0; width: 100%; }
 
@@ -645,7 +716,9 @@ html { background-color: $bg$; }
 	padding: $toolPadUp$px 8px $toolPadDown$px; box-sizing: border-box;
 	background-color: $surfaceAlt$; z-index: 999;
 	font-family: $font$; line-height: $toolCtrlH$px;
-	text-align: left;
+	display: block;
+	font-size: 13px; font-weight: normal; color: $text$;
+	text-align: left; text-decoration: none; white-space: normal; pointer-events: auto;
 }
 .system-ui-toolbar .system-ui-hairline { position: absolute; left: 0; bottom: 0; width: 100%; }
 
@@ -760,9 +833,21 @@ html { background-color: $bg$; }
 	line-height: $statusH$px; padding: 0 12px; box-sizing: border-box;
 	font-size: 12px; color: $muted$; background-color: $surface$;
 	z-index: 1000; font-family: $font$;
-	text-align: left;
+	display: block; font-weight: normal;
+	text-align: left; text-decoration: none; white-space: normal; pointer-events: auto;
 }
 .system-ui-status .system-ui-hairline { position: absolute; left: 0; top: 0; width: 100%; }
+/* 状态栏内的文字口径写死在**每个盒子**上，而不是只靠 .system-ui-status 继承：
+   分段/分隔线是 span，页面写 span { font-size: 20px; color: red } 会直接命中
+   它们（元素选择器优先于继承）。显式 12px + muted 让分段口径不受页面影响。 */
+.system-ui-status-track,
+.system-ui-status-seg,
+.system-ui-status-sep,
+.system-ui-status-right,
+.system-ui-status-msg {
+	font-size: 12px; font-weight: normal; color: $muted$;
+	text-align: left; text-decoration: none;
+}
 /* 左侧分段轨道：默认占满整行；有右侧消息时由 .has-right 预留固定宽度。
    white-space:pre 防止分段在空格处折行（引擎没有 nowrap）。 */
 .system-ui-status-track {
@@ -986,7 +1071,9 @@ html { background-color: $bg$; }
 	background-color: $surfaceAlt$; border-bottom: 1px solid $border$;
 	font-family: $font$; font-size: 13px; line-height: $btnH$px;
 	white-space: nowrap;
-	text-align: left;
+	display: block;
+	font-weight: normal; color: $text$;
+	text-align: left; text-decoration: none; pointer-events: auto;
 }
 .system-ui-bar .system-ui-input,
 .system-ui-bar .system-ui-select,
