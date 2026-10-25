@@ -91,10 +91,15 @@ div 文字规则 / span 文字规则 / div 尺寸 / div+span 隐藏）与干净�
 - 回归测试：`TestTextareaNormalizesNewlines`（解析 `a\r\nb\rc` → `a\nb\nc`
   且绘制为三行、`SetValue("x\r\ny")` 的值与光标 2,2、直接写属性 `p\r\nq`
   绘制不出 `\r`）；`TestPasteLineBreakHandling` 补 textarea 粘贴 CRLF 断言。
+- 示例 notepad 补文件层换行保持：打开时检测原文件风格（CRLF/LF/孤立 CR，取
+  多数派，平票取先出现的），编辑区内部统一 LF，保存时按检测结果写回；新建
+  文档用平台默认（Windows CRLF，其它 LF）。「打开 CRLF 文件 → 编辑 → 保存」
+  不再把用户文件悄悄改成 LF（`examples/notepad/eol.go`，新增
+  `TestSavePreservesLineEndings` / `TestDetectEOL`）。
 
 已知边界：单行 `input` 的 `\r`/`\n` 未做归一（Chrome 直接 strip；粘贴路径
 已折成空格）；直接 `SetAttribute` 写入的值仍原样保留 `\r`（只是不画出来），
-`GetValue` 如实返回；notepad 读入 CRLF 文件后保存写的是 LF。
+`GetValue` 如实返回；notepad 对混排文件按多数派统一，不做逐行保留。
 
 ## v0.3.0 — 2026-10-25
 

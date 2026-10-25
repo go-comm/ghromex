@@ -210,6 +210,7 @@ type notepad struct {
 	replaceIn *ui.TextInputView // 替换内容输入框
 
 	path         string // 当前文件路径（空 = 未命名）
+	eol          string // 当前文件的换行风格（保存时按它写回；编辑区内部只有 '\n'）
 	cur          string // 编辑区最近一次的文本（撤销快照与状态栏都用它）
 	undo         []string
 	redo         []string
@@ -244,6 +245,7 @@ func (n *notepad) bind() {
 	n.font = baseFont
 	n.showStatus = true
 	n.matchAt = -1
+	n.eol = defaultEOL() // 未命名文档：按平台默认（Windows CRLF，其它 LF）
 
 	n.workbench = ui.Install(n.doc, n.buildSpec())
 	if n.win != nil {
@@ -489,6 +491,7 @@ func (n *notepad) newFile() {
 	n.redo = nil
 	n.path = ""
 	n.dirty = false
+	n.eol = defaultEOL() // 新文档回到平台默认换行风格
 	if n.workbench != nil {
 		n.workbench.Refresh()
 	}
@@ -602,6 +605,8 @@ func (n *notepad) loadFile(path string) {
 		n.message("打开失败：" + err.Error())
 		return
 	}
+	// 记下原文件的换行风格，保存时按它写回；编辑区内部统一成 LF。
+	n.eol = detectEOL(string(data))
 	n.editor.SetValue(string(data))
 	n.undo = nil
 	n.redo = nil
@@ -648,7 +653,9 @@ func (n *notepad) saveAs() {
 
 // writeFile 把编辑区内容写到 path，并把它设为当前文件。
 func (n *notepad) writeFile(path string) {
-	if err := os.WriteFile(path, []byte(n.cur), 0o644); err != nil {
+	// 编辑区内部是 LF；按打开时检测到的风格写回（新文档用平台默认），
+	// 这样保存不会把用户的 CRLF 文件悄悄改成 LF。
+	if err := os.WriteFile(path, []byte(withEOL(n.cur, n.eol)), 0o644); err != nil {
 		n.message("保存失败：" + err.Error())
 		return
 	}

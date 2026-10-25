@@ -415,6 +415,101 @@ func TestOpenAndSaveFile(t *testing.T) {
 	}
 }
 
+// 换行风格：编辑区内部统一 LF，文件层按打开时检测到的风格写回。
+// Windows 文本文件是 CRLF，若保存时直接写内部 LF，用户的文件就被悄悄改了。
+func TestSavePreservesLineEndings(t *testing.T) {
+	np := newTestNotepad(t)
+	dir := t.TempDir()
+
+	// CRLF 文件：打开 → LF；编辑保存 → 仍 CRLF。
+	crlf := filepath.Join(dir, "crlf.txt")
+	if err := os.WriteFile(crlf, []byte("a\r\nb\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	np.loadFile(crlf)
+	if got := np.editor.Value(); got != "a\nb\n" {
+		t.Fatalf("打开 CRLF 文件后编辑区 = %q, want %q", got, "a\nb\n")
+	}
+	if np.eol != eolCRLF {
+		t.Fatalf("检测到的换行风格 = %q, want CRLF", np.eol)
+	}
+	np.editor.SetValue("x\ny\n")
+	np.saveFile()
+	data, err := os.ReadFile(crlf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "x\r\ny\r\n" {
+		t.Fatalf("保存后文件 = %q, want %q（CRLF 被改成了 LF）", data, "x\r\ny\r\n")
+	}
+
+	// 再打开一次：内容与行数不变（写回的 CRLF 又归一成 LF，不会多出 \r）。
+	np.loadFile(crlf)
+	if got := np.editor.Value(); got != "x\ny\n" {
+		t.Fatalf("重开 CRLF 文件后编辑区 = %q, want %q", got, "x\ny\n")
+	}
+
+	// LF 文件保持 LF。
+	lf := filepath.Join(dir, "lf.txt")
+	if err := os.WriteFile(lf, []byte("p\nq\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	np.loadFile(lf)
+	if np.eol != eolLF {
+		t.Fatalf("LF 文件检测 = %q, want LF", np.eol)
+	}
+	np.saveFile()
+	data, err = os.ReadFile(lf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "p\nq\n" {
+		t.Fatalf("LF 文件保存后 = %q, want %q", data, "p\nq\n")
+	}
+
+	// 混排按多数派：2×CRLF + 1×LF → CRLF。
+	mixed := filepath.Join(dir, "mixed.txt")
+	if err := os.WriteFile(mixed, []byte("a\r\nb\r\nc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	np.loadFile(mixed)
+	if np.eol != eolCRLF {
+		t.Fatalf("混排文件检测 = %q, want CRLF（多数派）", np.eol)
+	}
+
+	// 新建文档回到平台默认。
+	np.newFile()
+	if np.eol != defaultEOL() {
+		t.Fatalf("新建文档换行风格 = %q, want %q", np.eol, defaultEOL())
+	}
+}
+
+// detectEOL / withEOL 的口径：多数派、平票取先出现、无换行退回默认。
+func TestDetectEOL(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"a\r\nb", eolCRLF},
+		{"a\nb", eolLF},
+		{"a\rb", eolCR},
+		{"a\r\nb\r\nc\n", eolCRLF}, // 多数派
+		{"a\nb\nc\r\n", eolLF},     // 多数派
+		{"a\nb\r\n", eolLF},        // 平票取先出现
+		{"abc", defaultEOL()},      // 没有换行
+		{"", defaultEOL()},
+	}
+	for _, c := range cases {
+		if got := detectEOL(c.in); got != c.want {
+			t.Errorf("detectEOL(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// withEOL：内部 LF → 目标风格；顺带把混入的 '\r' 折平。
+	if got := withEOL("a\nb\n", eolCRLF); got != "a\r\nb\r\n" {
+		t.Errorf("withEOL LF→CRLF = %q", got)
+	}
+	if got := withEOL("a\r\nb\rc", eolLF); got != "a\nb\nc" {
+		t.Errorf("withEOL 归一 = %q, want %q", got, "a\nb\nc")
+	}
+}
+
 // 撤销：每次文本变化压一条快照，撤销弹栈并写回。
 func TestUndoRestoresPreviousText(t *testing.T) {
 	np := newTestNotepad(t)
