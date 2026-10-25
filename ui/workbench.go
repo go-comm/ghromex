@@ -124,6 +124,8 @@ type Spec struct {
 	//
 	// StatusSegments 非空时优先使用分段；Status 只在没有分段时作为
 	// 单段状态栏的快捷写法（等价于一个 Key 为 "status" 的段）。
+	// StatusRight 是右侧消息的快捷写法，等价于一个 AnchorRight、
+	// Key 为保留键 "status-right" 的段。
 	Status         string
 	StatusRight    string
 	StatusSegments []StatusSegment
@@ -151,12 +153,15 @@ type Workbench struct {
 	toolbar engine.HTMLElement
 	tools   []*toolView
 
-	status       engine.HTMLElement
-	statusTrack  engine.HTMLElement
-	statusLeft   engine.HTMLElement
-	statusRight  engine.HTMLElement
-	statusSegs   []statusSegView
-	spacerBottom engine.HTMLElement
+	status          engine.HTMLElement
+	statusTrack     engine.HTMLElement
+	statusLeft      engine.HTMLElement
+	statusRightBox  engine.HTMLElement // 右侧固定区容器：右钉段 + 糖消息
+	statusRight     engine.HTMLElement // 糖消息元素，可为 nil（无消息）
+	statusRightText string             // 糖消息文本：跨 SetStatusSegments 重建保留
+	rightVisible    int                // 已生成的右钉段数（糖消息不计）
+	statusSegs      []statusSegView
+	spacerBottom    engine.HTMLElement
 
 	keys []keyBind
 	open *menuView

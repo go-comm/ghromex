@@ -80,7 +80,7 @@ type Theme struct {
 	MenuHeight       int // 菜单栏高度
 	ToolHeight       int // 工具栏高度
 	StatusHeight     int // 状态栏高度
-	StatusRightWidth int // 状态栏右侧消息预留宽度
+	StatusRightWidth int // 状态栏右侧固定区（右钉段+糖消息）预留宽度
 	ButtonHeight     int // 标准表单档控件高度（按钮/输入框/下拉），默认 32
 	// ToolControlHeight 是工具栏内交互控件（图标/文字按钮、槽位里的输入框
 	// 与下拉）的统一高度：条内所有控件同高、同用 vertical-align: middle
@@ -774,13 +774,22 @@ html { background-color: $bg$; }
 	display: inline-block; width: 1px; height: 12px; margin: 6px 0;
 	background-color: $border$; vertical-align: top;
 }
+/* 右侧固定区容器：内装 AnchorRight 段（.system-ui-status-seg，段间带
+   分隔线）与糖消息（.system-ui-status-msg，贴右缘、不参与分隔线）。
+   text-align:right 让行内子段整体靠右堆叠；white-space:pre 与左轨道
+   同口径，防分段折行（引擎没有 nowrap）。 */
 .system-ui-status-right {
 	position: absolute; right: 12px; top: 0;
 	width: $statusRightW$px; height: $statusH$px; line-height: $statusH$px;
 	text-align: right; overflow: hidden; color: $muted$;
+	white-space: pre;
 	display: none;
 }
 .system-ui-status.has-right .system-ui-status-right { display: block; }
+.system-ui-status-msg {
+	display: inline-block; height: $statusH$px; line-height: $statusH$px;
+	overflow: hidden; vertical-align: top;
+}
 
 /* 占位块：fixed 的栏不占文档流，页面内容要靠这两块让出空间。
    放在 body 首尾而不是给 body 加 padding，是为了不覆盖应用自己的

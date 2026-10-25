@@ -310,6 +310,80 @@ func TestStatusSegments(t *testing.T) {
 	}
 }
 
+// 右钉段：段模型统一表达状态栏右区——进右区容器、参与 has-right 预留、
+// 走同一个 SetStatusSegment 更新路径；空文本右段视为无消息不占位。
+func TestStatusRightSegment(t *testing.T) {
+	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
+	sh := Install(doc, Spec{
+		StatusSegments: []StatusSegment{
+			{Key: "file", Text: "未命名", Width: 220},
+			{Key: "zoom", Text: "100%", AnchorRight: true},
+		},
+	})
+	doc.Refresh()
+
+	status := doc.QuerySelector(".system-ui-status")
+	box := doc.QuerySelector(".system-ui-status-right")
+	if box == nil {
+		t.Fatal("右侧固定区容器不存在")
+	}
+	if !hasWord(status.GetAttribute("class"), "has-right") {
+		t.Fatal("有右钉段时应带 has-right 类")
+	}
+	if got := textsOf(box.Children()); len(got) != 1 || got[0] != "100%" {
+		t.Fatalf("右区内容 = %v, want [100%%]", got)
+	}
+	track := doc.QuerySelector(".system-ui-status-track")
+	if got := textsOf(track.Children()); len(got) != 1 || got[0] != "未命名" {
+		t.Fatalf("左轨道 = %v, want [未命名]", got)
+	}
+
+	// 统一更新路径：右钉段与左段一样按 Key 只改文字。
+	if !sh.SetStatusSegment("zoom", "125%") {
+		t.Fatal("SetStatusSegment(zoom) 应找到右钉段")
+	}
+	if got, ok := sh.StatusSegment("zoom"); !ok || got != "125%" {
+		t.Fatalf("StatusSegment(zoom) = %q, %v", got, ok)
+	}
+
+	// 糖消息与自建右钉段共存：都进右区，糖排最右。
+	sh.SetStatusRight("已保存")
+	if got := textsOf(box.Children()); len(got) != 2 ||
+		got[0] != "125%" || got[1] != "已保存" {
+		t.Fatalf("共存时右区 = %v, want [125%% 已保存]", got)
+	}
+	// 糖收起后，右钉段继续撑住 has-right。
+	sh.SetStatusRight("")
+	if !hasWord(status.GetAttribute("class"), "has-right") {
+		t.Fatal("糖消息收起后右钉段应继续撑住 has-right")
+	}
+	if got := textsOf(box.Children()); len(got) != 1 || got[0] != "125%" {
+		t.Fatalf("糖收起后右区 = %v, want [125%%]", got)
+	}
+
+	// 空文本右钉段重建后不生成、不留占位，类名随之收起。
+	sh.SetStatusSegments([]StatusSegment{
+		{Key: "file", Text: "未命名"},
+		{Key: "zoom", Text: "", AnchorRight: true},
+	})
+	if hasWord(status.GetAttribute("class"), "has-right") {
+		t.Fatal("右钉段全为空时应移除 has-right")
+	}
+	if len(box.Children()) != 0 {
+		t.Fatalf("空文本右钉段仍生成: %d 个子节点", len(box.Children()))
+	}
+
+	// 糖消息跨 SetStatusSegments 重建保留。
+	sh.SetStatusRight("完成")
+	sh.SetStatusSegments([]StatusSegment{{Key: "file", Text: "未命名"}})
+	if got := textsOf(box.Children()); len(got) != 1 || got[0] != "完成" {
+		t.Fatalf("重建后糖消息 = %v, want [完成]", got)
+	}
+	if !hasWord(status.GetAttribute("class"), "has-right") {
+		t.Fatal("重建后糖消息应恢复 has-right")
+	}
+}
+
 func TestStatusLegacyAPI(t *testing.T) {
 	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
 	sh := Install(doc, Spec{Status: "就绪"})

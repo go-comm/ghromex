@@ -5,6 +5,16 @@
 
 ## 未发布
 
+- **ui**：状态栏统一到段模型——`StatusSegment` 新增 `AnchorRight`，右钉段
+  与左段走同一套构建/更新路径（进右侧固定区、参与 `has-right` 预留、
+  `SetStatusSegment`/`StatusSegment` 按 Key 读写），空文本右钉段视为无
+  消息不占位（左段空文本仍占位）。`Spec.StatusRight` / `SetStatusRight`
+  降为兼容糖：等价保留键 `"status-right"` 的右钉段，跨重建保留、固定排
+  在右区最右；左轨道与右区的分隔线、`is-first`、幂等更新口径不变。
+  新增 `TestStatusRightSegment` 守卫：右区生成与统一更新路径、糖消息与
+  自建右钉段共存互不拆台、空文本收起、糖跨 `SetStatusSegments` 重建保留。
+  实测 kit 状态栏右缘 12px，与旧版像素口径一致。
+
 - **ui**：禁用输入控件退回「下沉」口径——`:disabled` 底色从 `SurfaceAlt`
   改回画布档 `Bg`、描边退到弱档 `Border`。上一笔深色层次重排把
   `SurfaceAlt` 升格成悬浮工具栏的亮档后，禁用字段比可用的还亮，方向

@@ -53,18 +53,22 @@
 //
 // # 状态栏
 //
-// 左侧可以分段，段有 Key、固定/自适应宽度、段内对齐和隐藏态；右侧消息独立
-// 更新，非空时按 Theme.StatusRightWidth 预留宽度。高频更新只改文字：
+// 整条状态栏只有一种结构——分段：段有 Key、固定/自适应宽度、段内对齐和
+// 隐藏态，默认排进左侧轨道；AnchorRight 的段钉在右侧固定区（按
+// Theme.StatusRightWidth 预留宽度），适合贴右的提示/计数。高频更新只改
+// 文字：
 //
 //	spec.StatusSegments = []ui.StatusSegment{
 //		{Key: "file", Text: "未命名", Width: 220},
 //		{Key: "pos", Text: "行 1，列 1", Width: 140},
 //		{Key: "chars", Text: "0 个字符"},
+//		{Key: "hint", Text: "Ctrl+S 保存", AnchorRight: true},
 //	}
 //	sh.SetStatusSegment("pos", "行 2，列 3")
-//	sh.SetStatusRight("已保存")
 //
-// Spec.Status / SetStatus 是单段兼容写法。
+// Spec.Status / SetStatus 是左侧单段兼容写法；Spec.StatusRight /
+// SetStatusRight 是右侧消息兼容糖，等价于保留键 "status-right" 的
+// 右钉段（固定排在右区最右）。
 //
 // # 页面控件
 //

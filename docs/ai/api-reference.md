@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-25 11:59
+> 生成时间: 2026-10-25 20:17
 
 ---
 
@@ -2323,18 +2323,19 @@ body 原样的页面（演示 UA 样式、靠 body padding 给固定栏让位）
 
 # 状态栏
 
-左侧可以分段，段有 Key、固定/自适应宽度、段内对齐和隐藏态；右侧消息独立 更新，非空时按 Theme.StatusRightWidth
-预留宽度。高频更新只改文字：
+整条状态栏只有一种结构——分段：段有 Key、固定/自适应宽度、段内对齐和 隐藏态，默认排进左侧轨道；AnchorRight 的段钉在右侧固定区（按
+Theme.StatusRightWidth 预留宽度），适合贴右的提示/计数。高频更新只改 文字：
 
     spec.StatusSegments = []ui.StatusSegment{
     	{Key: "file", Text: "未命名", Width: 220},
     	{Key: "pos", Text: "行 1，列 1", Width: 140},
     	{Key: "chars", Text: "0 个字符"},
+    	{Key: "hint", Text: "Ctrl+S 保存", AnchorRight: true},
     }
     sh.SetStatusSegment("pos", "行 2，列 3")
-    sh.SetStatusRight("已保存")
 
-Spec.Status / SetStatus 是单段兼容写法。
+Spec.Status / SetStatus 是左侧单段兼容写法；Spec.StatusRight / SetStatusRight
+是右侧消息兼容糖，等价于保留键 "status-right" 的 右钉段（固定排在右区最右）。
 
 # 页面控件
 
@@ -2783,6 +2784,8 @@ type Spec struct {
 	//
 	// StatusSegments 非空时优先使用分段；Status 只在没有分段时作为
 	// 单段状态栏的快捷写法（等价于一个 Key 为 "status" 的段）。
+	// StatusRight 是右侧消息的快捷写法，等价于一个 AnchorRight、
+	// Key 为保留键 "status-right" 的段。
 	Status         string
 	StatusRight    string
 	StatusSegments []StatusSegment
@@ -2800,11 +2803,18 @@ type StatusSegment struct {
 	Width  int              // 0 = 自适应；>0 = 固定宽度（含 padding，单位 px）
 	Align  engine.TextAlign // 段内对齐，零值即左对齐
 	Hidden bool             // 为 true 时不生成该段，也不生成它前面的分隔线
-}
-    StatusSegment 是状态栏左侧的一段文字。
 
-    段按切片顺序从左到右排列，段与段之间自动加 1px 分隔线。固定 Width 的 段适合「文件名 / 行列 /
-    字符数」这类需要稳定列宽的内容；Width 为 0 的 段按内容自适应，文本变化会推动后面的段。
+	// AnchorRight 把该段钉在状态栏右缘的固定区，不进左侧轨道。
+	// 空文本的右钉段视为「无消息」：不生成、不留占位、不参与预留
+	// （左段空文本仍占位）；右钉段跨重建保留的能力不受影响——
+	// SetStatusSegment 按 Key 照常只改文字。
+	AnchorRight bool
+}
+    StatusSegment 是状态栏的一段文字。
+
+    整条状态栏只有一种结构——段。默认段进左侧轨道，按切片顺序从左到右 排列，段与段之间自动加 1px 分隔线；AnchorRight 为 true
+    的段进右侧 固定区（钉在状态栏右缘，区域宽度由 Theme.StatusRightWidth 统一预留）， 多个右钉段在区内依次排布、同样带分隔线。固定
+    Width 的段适合 「文件名 / 行列 / 字符数」这类需要稳定列宽的内容；Width 为 0 的段 按内容自适应，文本变化会推动后面的段。
 
 type TextAreaView struct {
 	// Has unexported fields.
@@ -2933,7 +2943,7 @@ type Theme struct {
 	MenuHeight       int // 菜单栏高度
 	ToolHeight       int // 工具栏高度
 	StatusHeight     int // 状态栏高度
-	StatusRightWidth int // 状态栏右侧消息预留宽度
+	StatusRightWidth int // 状态栏右侧固定区（右钉段+糖消息）预留宽度
 	ButtonHeight     int // 标准表单档控件高度（按钮/输入框/下拉），默认 32
 	// ToolControlHeight 是工具栏内交互控件（图标/文字按钮、槽位里的输入框
 	// 与下拉）的统一高度：条内所有控件同高、同用 vertical-align: middle
@@ -3017,19 +3027,23 @@ func (s *Workbench) SetStatus(text string)
     时更新最左一段。新代码建议直接用 SetStatusSegment。
 
 func (s *Workbench) SetStatusRight(text string)
-    SetStatusRight 更新状态栏右侧文本（提示/计数/快捷键）。
+    SetStatusRight 更新状态栏右侧消息（提示/计数/快捷键）。
 
-    右侧消息固定宽度、右对齐；有消息时左侧轨道自动预留 Theme.StatusRightWidth，没有消息时收起预留。
+    这是右钉段的兼容糖：模型上等价于 Key 为保留键 "status-right" 的 AnchorRight
+    段，固定排在右区最右、不参与段分隔线。有消息时左侧轨道 按 Theme.StatusRightWidth 预留宽度，置空收起预留。文字没变时不写
+    DOM，高频调用代价低；新代码若要右侧多段，直接在 StatusSegments 里 放 AnchorRight 段。
 
 func (s *Workbench) SetStatusSegment(key, text string) bool
     SetStatusSegment 按 Key 更新一段文字；找不到 Key 时返回 false。
 
-    只改文本，不重建段结构：适合光标位置、字符数这类高频更新。
+    只改文本，不重建段结构：适合光标位置、字符数这类高频更新。保留键 "status-right" 转交 SetStatusRight（右区显隐要同步
+    has-right 类， 通用段路径不碰类名）。
 
 func (s *Workbench) SetStatusSegments(segs []StatusSegment)
-    SetStatusSegments 重建左侧全部分段。
+    SetStatusSegments 重建状态栏全部分段（左侧轨道 + 右侧固定区）。
 
-    结构变化（增删段、改宽度/对齐/隐藏）走这里；只改文字用 SetStatusSegment，避免每次光标移动都重建 DOM。
+    结构变化（增删段、改宽度/对齐/隐藏、改钉边侧）走这里；只改文字用 SetStatusSegment，避免每次光标移动都重建
+    DOM。AnchorRight 段进右区， 空文本视为无消息不生成；糖消息（SetStatusRight）跨重建保留，固定排在 右区最右。
 
 func (s *Workbench) SetStatusVisible(visible bool)
     SetStatusVisible 显示或隐藏状态栏，同时收起/恢复底部占位。
