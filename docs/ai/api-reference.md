@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-25 02:30
+> 生成时间: 2026-10-25 11:59
 
 ---
 
@@ -590,6 +590,9 @@ SDL 的软件光栅器把 DrawColor/DrawText **记进命令表**，真正填像�
 
     GHROMEX_BENCH=1 go run ./examples/portal
     GHROMEX_BENCH=1 GHROMEX_BENCH_FRAMES=600 go run ./examples/portal
+    GHROMEX_GPU=1 GHROMEX_BENCH=1 go run ./examples/portal   # 量加速路径
+
+默认内存渲染（软件渲染器）；下面第二段加速路径的样本要显式 GHROMEX_GPU=1。
 
 输出示例（软件路径，dummy 驱动，1280×820）：
 

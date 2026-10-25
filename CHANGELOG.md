@@ -12,6 +12,15 @@
   `TestDisabledFieldSinks`：禁用底色 = Bg 且不撞悬浮档，描边 = 弱档
   Border（深色 `Field==Bg`，中心点区分不了规则失效，靠描边色兜底）。
 
+- **backend**：渲染路径**默认改为内存渲染**——建窗直接用 SDL 软件渲染器
+  （像素全部落在系统内存的窗口表面，跨驱动/远程桌面表现一致，回读截图
+  不受 GPU 纹理上限约束）。走 GPU 加速（accelerated + vsync）需显式
+  `GHROMEX_GPU=1`；`GHROMEX_SOFTWARE=1` 与 `SDL_VIDEO_DRIVER=dummy` 两个
+  强制口优先级不变（`GHROMEX_GPU=1` 也压不过）。渲染器选择与归因描述收成
+  可测试的纯函数 `planRenderer` / `rendererDescFor`（描述四态：显式加速 /
+  强制软件 / GPU 创建失败回退 / 默认内存渲染），并补护栏测试。诊断输出
+  口径随之更新：默认打印 `renderer=software (driver=software; 默认内存渲染)`。
+
 - **ui**：深色主题空间层次重排——新增 `Field` 令牌（输入控件底色），
   input/select/textarea/中性按钮底色从 `Surface` 迁到 `Field`。深色下
   Field=#0F172A 沉到画布档（一眼看出哪里能打字）、SurfaceAlt 提到

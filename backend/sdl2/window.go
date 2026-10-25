@@ -38,7 +38,8 @@ type Window struct {
 	closed bool
 
 	// rendererDesc 记录渲染路径的描述（供诊断/基准工具归因）：
-	// "accelerated(GPU, driver=direct3d11)" /
+	// "software (driver=software; 默认内存渲染)"（默认）/
+	// "accelerated(GPU, driver=direct3d11; GHROMEX_GPU=1)" /
 	// "software (driver=software; 强制软件：GHROMEX_SOFTWARE/dummy)" 等。
 	// 建窗时算一次存下来，别处要显示时直接取（driver 名要现查，开销不小）。
 	rendererDesc string
@@ -114,23 +115,17 @@ func NewWindowWithOptions(o WindowOptions) (*Window, error) {
 		return nil, fmt.Errorf("SDL_CreateWindow: %s", lastError())
 	}
 
-	// GPU（accelerated + vsync）优先：硬件后端缩放/合成表现好、功耗低。
-	// 创建失败（无 GPU、驱动不可用）自动回退软件渲染器——"software" 把像素
-	// 直接落在窗口表面，跨驱动/远程桌面环境表现一致，且支持
-	// SDL_RenderReadPixels 回读（Screenshot 依赖它）。
-	// 两类环境直接用软件：GHROMEX_SOFTWARE=1 逃生口（部分虚拟显示驱动能创建
-	// accelerated 渲染器却"窗口能开、像素不出"，自动回退不会触发）；
-	// dummy 无头自检要保持确定性回读行为，不尝试 GPU。
-	//
-	// GHROMEX_SOFTWARE 按布尔解析（1/true/yes/on 才算开）：只判"非空"的
-	// 时候，GHROMEX_SOFTWARE=0 也会强制软件渲染——用户明明要求走 GPU，却拿到
-	// 软件路径，且输出里看不出是谁强制的。
-	softwareOnly := envBool("GHROMEX_SOFTWARE") ||
-		os.Getenv("SDL_VIDEO_DRIVER") == "dummy"
+	// 渲染器路径的选择与描述组包都收在 env.go（planRenderer/rendererDescFor），
+	// 这里只执行：默认内存渲染，GHROMEX_GPU=1 才尝试加速，强制口与回退见
+	// planRenderer 的注释。
+	wantGPU, forced := planRenderer(
+		os.Getenv("GHROMEX_GPU"),
+		os.Getenv("GHROMEX_SOFTWARE"),
+		os.Getenv("SDL_VIDEO_DRIVER"))
 	gpu := false
 	var gpuErr string
 	var renderer uintptr
-	if !softwareOnly {
+	if wantGPU {
 		clearError()
 		renderer = sdlCreateRenderer(hwnd, ^uintptr(0), rendererAccelerated|rendererPresentVsync)
 		if renderer != 0 {
@@ -152,19 +147,7 @@ func NewWindowWithOptions(o WindowOptions) (*Window, error) {
 	// 渲染路径的描述**总是**算出来存下（基准工具/诊断要拿它归因，不该
 	// 依赖 GHROMEX_DEBUG）；打印才受 drawDebug 控制。
 	driver := RendererDriver(renderer)
-	rendererDesc := ""
-	switch {
-	case gpu:
-		rendererDesc = fmt.Sprintf("accelerated(GPU, driver=%s)", driver)
-	case softwareOnly:
-		// 强制软件与"GPU 不可用已回退"是两回事，排查方向不同：前者是
-		// 配置（把开关去掉即可），后者是环境（换驱动/显卡）。
-		rendererDesc = fmt.Sprintf(
-			"software (driver=%s; 强制软件：GHROMEX_SOFTWARE/dummy)", driver)
-	default:
-		rendererDesc = fmt.Sprintf(
-			"software (driver=%s; GPU 不可用，已回退)", driver)
-	}
+	rendererDesc := rendererDescFor(gpu, forced, gpuErr != "", driver)
 	if drawDebug {
 		// 驱动名要能查：软件路径的瓶颈是填充率，GPU 路径的瓶颈通常在
 		// 纹理上传/draw call/swap 间隔——两者的排查方向完全不同，先确认

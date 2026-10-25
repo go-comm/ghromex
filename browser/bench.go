@@ -33,6 +33,9 @@
 //
 //	GHROMEX_BENCH=1 go run ./examples/portal
 //	GHROMEX_BENCH=1 GHROMEX_BENCH_FRAMES=600 go run ./examples/portal
+//	GHROMEX_GPU=1 GHROMEX_BENCH=1 go run ./examples/portal   # 量加速路径
+//
+// 默认内存渲染（软件渲染器）；下面第二段加速路径的样本要显式 GHROMEX_GPU=1。
 //
 // 输出示例（软件路径，dummy 驱动，1280×820）：
 //

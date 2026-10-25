@@ -19,7 +19,7 @@
 - 应用层底座：`SetOnChanged` 变更回调（内容或**视口尺寸**变化都会通知——窗口缩放不改文档内容，只靠内容变更收不到信号）；失焦只停画、**不丢编辑状态**（光标与选区保留，页内菜单动作可作用于失焦的编辑区）；`CaretPosition` 查光标行列；`clipboard.Text` / `clipboard.SetText`（`runtime/clipboard`）读写系统剪贴板；`browser.RequestClose` 关窗
 - 事件冒泡：命中测试找到最深元素，沿父链依次派发 `click` / `change` / `wheel`，随后执行引擎默认动作（select 展开/选中、勾选切换、链接导航）
 - 滚动与裁剪：`overflow(visible/hidden/clip/scroll/auto，单值两轴、两值 x y、overflow-x/overflow-y 分轴)` 滚动容器（滚轮驱动、子树平移 + padding 盒裁剪，被裁内容不可命中）、**圆角裁剪按 border-radius 的形状**（`overflow:hidden` 的圆角盒，溢出到角外的子元素按圆角裁掉，角上透出盒后底色）、文档级页面滚动（根元素以视口为滚动盒，长页面/宽页面均可滚）、`wheel` 事件（`OnWheel` 注册、`MouseEvent.DeltaX/DeltaY` 像素位移、冒泡派发）、Shift+滚轮 转横向滚动、textarea 滚轮滚动（与光标跟随同夹紧口径，全量吸收纵向滚轮、撞边界不带动页面）；裁剪经 `Graphics` 可选 `Clipper`（`PushClip`/`PopClip`，逐层求交）落地：`BufferGraphics` 像素断言、SDL2 `SDL_RenderSetClipRect`，SVG 导出同步生成 `clipPath`
-- 可插拔图形后端：`engine.Graphics` 接口（DrawText / DrawColor / DrawImage / MeasureText），内置 `FakeGraphics`（计数）、`BufferGraphics`（软件光栅化到 RGBA 缓冲，可 `DumpPNG`）供无显示器测试；圆角抗锯齿走**角标精灵**（可选扩展 `SpriteDrawer`：整块圆角一次 blit，替掉逐像素的半透明小方块）——绘制调用数是 GPU 路径上的主要开销，portal 页一帧从 31840 次降到 2500 次、单帧绘制 149ms → 8.7ms（软件渲染器实测），滚动动画才不会被切成几帧；精灵的像素（引擎侧）与纹理（后端侧）都按「条数 + 像素」双上限、LRU 淘汰——键里含颜色，页面逐帧改色（动画）会不断产生新精灵，不设上限就是内存/显存泄漏；**填充率**同样要命：SDL 的绘制混合模式一旦开着，每块不透明填充都走逐像素混合（软件光栅器 2.1ns/像素，直接写像素只要 0.2ns），门户页一帧要填 1700 万像素——2560×1440 的窗体下单帧 37ms，**最大化后滚动只剩 27fps**（小窗体看不出来）。按填充的 alpha 临时切换混合模式（画完复原，贴图拷贝还要混合）后，门户页整帧（软件光栅器，含呈现）：800×600 1.35ms、1280×820 1.95ms、1920×1080 2.84ms、2560×1440 **4.07ms**（原 37ms，9 倍）、3840×2160 7.11ms；画面逐像素不变。清屏也不再重复铺白底（画布背景不透明时白底那层完全被盖住）。**诊断**：`GHROMEX_DEBUG=1` 会打印渲染路径与驱动名（`renderer=accelerated(GPU, driver=direct3d)` / `renderer=software (driver=software)`）——软件路径的瓶颈是填充率，GPU 路径通常在纹理上传/draw call/swap 间隔（GPU 路径实测：1280×820 到 4K 的整帧都是 16.6ms = vsync 周期，稳在 60fps；其中 GPU 真实工作只有 1.3~3ms，其余 13.5~14.5ms 是等 vsync）。**这些数字的口径与分段拆解见「性能实测」**——不同口径的数不能并排比
+- 可插拔图形后端：`engine.Graphics` 接口（DrawText / DrawColor / DrawImage / MeasureText），内置 `FakeGraphics`（计数）、`BufferGraphics`（软件光栅化到 RGBA 缓冲，可 `DumpPNG`）供无显示器测试；圆角抗锯齿走**角标精灵**（可选扩展 `SpriteDrawer`：整块圆角一次 blit，替掉逐像素的半透明小方块）——绘制调用数是 GPU 路径上的主要开销，portal 页一帧从 31840 次降到 2500 次、单帧绘制 149ms → 8.7ms（软件渲染器实测），滚动动画才不会被切成几帧；精灵的像素（引擎侧）与纹理（后端侧）都按「条数 + 像素」双上限、LRU 淘汰——键里含颜色，页面逐帧改色（动画）会不断产生新精灵，不设上限就是内存/显存泄漏；**填充率**同样要命：SDL 的绘制混合模式一旦开着，每块不透明填充都走逐像素混合（软件光栅器 2.1ns/像素，直接写像素只要 0.2ns），门户页一帧要填 1700 万像素——2560×1440 的窗体下单帧 37ms，**最大化后滚动只剩 27fps**（小窗体看不出来）。按填充的 alpha 临时切换混合模式（画完复原，贴图拷贝还要混合）后，门户页整帧（软件光栅器，含呈现）：800×600 1.35ms、1280×820 1.95ms、1920×1080 2.84ms、2560×1440 **4.07ms**（原 37ms，9 倍）、3840×2160 7.11ms；画面逐像素不变。清屏也不再重复铺白底（画布背景不透明时白底那层完全被盖住）。**诊断**：`GHROMEX_DEBUG=1` 会打印渲染路径与驱动名（默认 `renderer=software (driver=software; 默认内存渲染)`；`GHROMEX_GPU=1` 时 `renderer=accelerated(GPU, driver=direct3d; GHROMEX_GPU=1)`）——软件路径的瓶颈是填充率，GPU 路径通常在纹理上传/draw call/swap 间隔（GPU 路径实测：1280×820 到 4K 的整帧都是 16.6ms = vsync 周期，稳在 60fps；其中 GPU 真实工作只有 1.3~3ms，其余 13.5~14.5ms 是等 vsync）。**这些数字的口径与分段拆解见「性能实测」**——不同口径的数不能并排比
 - 元素注册表：`CustomElements().Define(tag, proto)` + `CloneElement` 注册自定义标签，解析时克隆原型生成独立实例
 - 无头运行：`-dump-svg` 导出布局结果；`NewBufferedViewport` / `OpenBufferedDocument`（视口 + 软件光栅化缓冲）可在 CI 中像素级断言渲染结果；真实窗口的最终观感用 `Window.Screenshot()` 回读窗口像素（应用自行编码 PNG，见 `examples/snip`）
 
@@ -767,7 +767,7 @@ Present、中间不画任何东西）就能把这部分单独量出来——空 
 | ≤1080p、静态为主 | 软件够用 | 真实工作 2.1~4.9ms（入队+填充拷贝），60fps 预算 16.6ms 里有 3 倍以上余量 |
 | 4K+ / 大图 / 大量半透明 | 加速路径 | 软件路径的「填充+拷贝」4K 已到 4.40ms，且其中约 2.1ms 是躲不掉的整屏 blit（见上一节的上限分析）——面积越大这笔越贵，与页面轻重无关；加速路径的 CPU 侧只花 1.1ms（填充在 GPU 上异步完成） |
 | 频繁截图回读 | 软件更简单 | 加速路径要等 GPU 排空队列（stall） |
-| 虚拟机 / 无 GPU | 软件 | 加速路径创建失败自动回退（`GHROMEX_SOFTWARE`） |
+| 虚拟机 / 无 GPU | 软件（默认） | 本来就不尝试 GPU；只有显式 `GHROMEX_GPU=1` 才创建加速路径（创建失败自动回退软件） |
 | 显存紧张的机器 | 软件 | 纹理与交换链都进系统内存 |
 | 电池 / 功耗 | **需实测** | 软件路径把填充与拷贝全压在 CPU 上（2~6ms/帧），功耗未必低于唤醒独显 + 等 vsync，取决于电源策略与驱动 |
 
@@ -780,7 +780,8 @@ Present、中间不画任何东西）就能把这部分单独量出来——空 
 | `GHROMEX_HINT=档位` | 灰度文本 hinting：`normal`（默认，与 Chrome 灰度轮廓最同构）/`light`（更柔）/`mono`/`none`；LCD 打开时强制 LIGHT_SUBPIXEL，本变量仅影响灰度路径；运行中切换亦生效（face 与纹理按档位重建）；需 SDL2_ttf 导出 `TTF_SetFontHinting`，缺失时固定为 FreeType 默认 hinting |
 | `GHROMEX_CONTRAST=k` | 灰度字形 tone 曲线强度（>1 生效、上限 3，默认关）：以 0.5 为枢轴把覆盖度推两端，边缘更实、毛边更净；k 越大墨色越重、竖边台阶感越明显，可与 `GHROMEX_HINT` 联调（如 `light+1.3`、`none+1.5`），仅影响 blended（灰度）路径 |
 | `GHROMEX_BASELINE_ADJ=px` | 全局文本基线补偿（正数=下移），与 Chrome/DirectWrite 对照时的微调：只挪基线、不排行盒高度，故不影响行距与盒尺寸；默认 0。引擎行盒高度取自字体 hhea/OS2 度量（与 Chrome 同源），残差只来自两侧的取整（同一字号约 0.5~1px）。运行时改需重排一次（环境变量在首帧即生效） |
-| `GHROMEX_SOFTWARE=1` | 强制软件渲染器（默认 GPU 加速，创建失败自动回退软件；用于 GPU 可创建但不出像素的虚拟显示环境）。开关按布尔解析：`1/true/yes/on` 为开，`0/false/no/off` 与未设置都表示“不强制”（走自动选择） |
+| `GHROMEX_GPU=1` | 开启 GPU 加速渲染器（accelerated + vsync）。**默认是内存渲染（SDL 软件渲染器，像素全在系统内存）**，不设此变量就不创建加速路径。开关按布尔解析：`1/true/yes/on` 为开，`0/false/no/off` 与未设置都表示“不开” |
+| `GHROMEX_SOFTWARE=1` | 强制软件渲染器（优先级最高，`GHROMEX_GPU=1` 也压不过；默认即内存渲染，本开关的用途是钉死路径、排除加速干扰，如 GPU 可创建但不出像素的虚拟显示环境）。开关按布尔解析：`1/true/yes/on` 为开，`0/false/no/off` 与未设置都表示“不强制” |
 | `GHROMEX_FONT=路径` | 指定 standard 字体（默认 Arial，即 sans-serif） |
 | `GHROMEX_CJK_FONT=路径` | 指定 CJK fallback 字体（默认微软雅黑） |
 | `SDL_VIDEO_DRIVER=dummy` | 无显示器运行（配合 `Window.Screenshot()` 做回读断言） |
