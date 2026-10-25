@@ -387,7 +387,7 @@ func (n *notepad) editorValue() string {
 }
 
 // updateStatus 刷新状态栏：文件类型（带未保存标记）、光标位置、字符数、
-// 选中字数。各段独立更新，右侧消息不随每次光标移动被覆盖。
+// 选中字数、换行风格。各段独立更新，右侧消息不随每次光标移动被覆盖。
 // 选区变化也会走到这里：引擎 setSelection 触发文档变更通知（见 onChanged）。
 func (n *notepad) updateStatus() {
 	name := fileType(n.path)
@@ -407,6 +407,7 @@ func (n *notepad) updateStatus() {
 		n.workbench.SetStatusSegment("pos", pos)
 		n.workbench.SetStatusSegment("chars", strconv.Itoa(len([]rune(n.cur)))+" 个字符")
 		n.workbench.SetStatusSegment("sel", sel)
+		n.workbench.SetStatusSegment("eol", eolName(n.eol))
 	}
 	n.updateTitle()
 }

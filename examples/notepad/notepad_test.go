@@ -433,6 +433,22 @@ func TestSavePreservesLineEndings(t *testing.T) {
 	if np.eol != eolCRLF {
 		t.Fatalf("检测到的换行风格 = %q, want CRLF", np.eol)
 	}
+	if got, ok := np.workbench.StatusSegment("eol"); !ok || got != "CRLF" {
+		t.Fatalf("状态栏换行标记 = %q, ok=%v，want CRLF", got, ok)
+	}
+	// 标记必须落在右区（消息）左侧，不能被右区压住/裁掉。
+	np.doc.Refresh()
+	segs := np.doc.QuerySelectorAll(".system-ui-status-seg")
+	right := np.doc.QuerySelector(".system-ui-status-right")
+	if len(segs) == 0 || right == nil {
+		t.Fatal("状态栏结构不完整")
+	}
+	eolBox := segs[len(segs)-1].GetBoundingClientRect()
+	rightBox := right.GetBoundingClientRect()
+	if eolBox.Right().Pixel() > rightBox.Left().Pixel() {
+		t.Fatalf("换行标记被右区压住：eol 右缘 %d > 右区左缘 %d",
+			eolBox.Right().Pixel(), rightBox.Left().Pixel())
+	}
 	np.editor.SetValue("x\ny\n")
 	np.saveFile()
 	data, err := os.ReadFile(crlf)
@@ -458,6 +474,9 @@ func TestSavePreservesLineEndings(t *testing.T) {
 	if np.eol != eolLF {
 		t.Fatalf("LF 文件检测 = %q, want LF", np.eol)
 	}
+	if got, _ := np.workbench.StatusSegment("eol"); got != "LF" {
+		t.Fatalf("LF 文件状态栏标记 = %q, want LF", got)
+	}
 	np.saveFile()
 	data, err = os.ReadFile(lf)
 	if err != nil {
@@ -481,6 +500,9 @@ func TestSavePreservesLineEndings(t *testing.T) {
 	np.newFile()
 	if np.eol != defaultEOL() {
 		t.Fatalf("新建文档换行风格 = %q, want %q", np.eol, defaultEOL())
+	}
+	if got, _ := np.workbench.StatusSegment("eol"); got != eolName(defaultEOL()) {
+		t.Fatalf("新建文档状态栏标记 = %q, want %q", got, eolName(defaultEOL()))
 	}
 }
 
@@ -507,6 +529,12 @@ func TestDetectEOL(t *testing.T) {
 	}
 	if got := withEOL("a\r\nb\rc", eolLF); got != "a\nb\nc" {
 		t.Errorf("withEOL 归一 = %q, want %q", got, "a\nb\nc")
+	}
+	// 状态栏短名。
+	for eol, want := range map[string]string{eolCRLF: "CRLF", eolLF: "LF", eolCR: "CR"} {
+		if got := eolName(eol); got != want {
+			t.Errorf("eolName(%q) = %q, want %q", eol, got, want)
+		}
 	}
 }
 

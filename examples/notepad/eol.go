@@ -64,6 +64,18 @@ func detectEOL(s string) string {
 	return best
 }
 
+// eolName 返回状态栏用的换行风格短名（与 VS Code 的状态栏标记同款）。
+func eolName(eol string) string {
+	switch eol {
+	case eolCRLF:
+		return "CRLF"
+	case eolCR:
+		return "CR"
+	default:
+		return "LF"
+	}
+}
+
 // withEOL 把内部统一的 LF 文本按 eol 写回文件。写之前再折一次换行，保证
 // 即使调用方塞进了 '\r'（理论上不会：SetValue/粘贴/解析都已归一），落盘的
 // 也是单一风格。
