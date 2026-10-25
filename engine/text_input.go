@@ -258,6 +258,10 @@ func OnDocumentPaste(doc HTMLDocument, text string) bool {
 	}
 	if !strings.EqualFold(b.tagName, "textarea") {
 		text = stripLineBreaks(text)
+	} else {
+		// textarea 保留换行，但换行符本身要归一：Windows 剪贴板/文件里
+		// 是 CRLF，'\r' 留在 value 里会被当字形画出来（行尾方块）。
+		text = normalizeNewlines(text)
 	}
 	if text == "" {
 		return false
@@ -304,6 +308,17 @@ func stripControlChars(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// normalizeNewlines 把 Windows/旧 Mac 换行统一成 '\n'：CRLF 与孤立 CR
+// 都折成一个 LF。HTML 规范在解析前就做这一步；textarea 的 value 是纯
+// 文本，混进 '\r' 会被当成字形画出来（行尾多一个方块），并且让光标/选区
+// 的 rune 下标与折行区间错位。
+func normalizeNewlines(s string) string {
+	if !strings.ContainsRune(s, '\r') {
+		return s
+	}
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
 }
 
 // stripLineBreaks 把多行文本折成单行：每个换行符折成一个空格，连续

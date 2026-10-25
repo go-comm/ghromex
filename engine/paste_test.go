@@ -99,6 +99,12 @@ func TestPasteLineBreakHandling(t *testing.T) {
 	if v := ta.GetAttribute("value"); v != "a\nb" {
 		t.Fatalf("textarea 粘贴后 value = %q, want %q", v, "a\nb")
 	}
+	// textarea 的 CRLF/孤立 CR 归一成 '\n'（Windows 剪贴板），不留下 '\r'
+	engine.OnDocumentKeyDownMods(doc, 'a', engine.ModCtrl)
+	engine.OnDocumentPaste(doc, "c\r\nd\re")
+	if v := ta.GetAttribute("value"); v != "c\nd\ne" {
+		t.Fatalf("textarea 粘贴 CRLF 后 value = %q, want %q", v, "c\nd\ne")
+	}
 }
 
 // password 可粘贴：值是明文，绘制/SVG 一律按 ● 掩码。

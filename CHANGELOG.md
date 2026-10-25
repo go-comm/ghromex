@@ -78,6 +78,24 @@ div 文字规则 / span 文字规则 / div 尺寸 / div+span 隐藏）与干净�
 给外壳内**原生控件**（`input`/`select`）设样式时，组件已声明大部分属性，
 但未声明的（如 `line-height`）仍可能漏入。
 
+**修复**：textarea 里的 `\r` 不再被当成字形画出来。Windows 文本文件与剪贴板
+用 CRLF，`\r` 混进 value 后折行逻辑只认 `\n`，于是每行末尾多画一个方块，
+光标列数、选区宽度也各多 1：
+
+- 写入路径归一（与 HTML 预处理同口径）：解析 `<textarea>` 原始文本、`SetValue`、
+  粘贴三条入口都先把 CRLF / 孤立 CR 折成 `\n`（`\r\n` 与 `\r` 都算一个换行），
+  紧跟开标签的首个换行仍按规范忽略。
+- 折行兜底：`SetAttribute("value", …)` 是底层逃生口，值原样保留，但
+  `wrapTextarea` 不再把 `\r` 当字符——CRLF 的 `\r` 跳过（交给后面的 `\n`
+  断行），孤立 CR 与 `\n` 同义断行。
+- 回归测试：`TestTextareaNormalizesNewlines`（解析 `a\r\nb\rc` → `a\nb\nc`
+  且绘制为三行、`SetValue("x\r\ny")` 的值与光标 2,2、直接写属性 `p\r\nq`
+  绘制不出 `\r`）；`TestPasteLineBreakHandling` 补 textarea 粘贴 CRLF 断言。
+
+已知边界：单行 `input` 的 `\r`/`\n` 未做归一（Chrome 直接 strip；粘贴路径
+已折成空格）；直接 `SetAttribute` 写入的值仍原样保留 `\r`（只是不画出来），
+`GetValue` 如实返回；notepad 读入 CRLF 文件后保存写的是 LF。
+
 ## v0.3.0 — 2026-10-25
 
 ui 组件库成型，notepad 与 browser 两个示例改到全程只用 `ui` 控件，新增

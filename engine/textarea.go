@@ -121,6 +121,21 @@ func wrapTextarea(g Graphics, value string, maxW, fontPx int, bold bool, family 
 
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
+		if r == '\r' {
+			// 兜底：value 由 SetAttribute 直接写入时可能没经过归一（正常路径
+			// SetValue/粘贴/解析都会先折成 '\n'）。CRLF 的 '\r' 交给后面的
+			// '\n' 断行；孤立 CR 与 '\n' 同义。两种都不进行文本，避免把
+			// 控制字符当字形画出来（行尾方块）。
+			if i+1 < len(runes) && runes[i+1] == '\n' {
+				continue
+			}
+			push(string(cur), start, i, curW)
+			start = i + 1
+			cur = cur[:0]
+			curW = 0
+			lastSpace = -1
+			continue
+		}
 		if r == '\n' {
 			// 行尾符记在本行 end 处；下一行从其后开始（循环的 i++ 消费它）
 			push(string(cur), start, i, curW)

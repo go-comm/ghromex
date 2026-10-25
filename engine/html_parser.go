@@ -237,7 +237,10 @@ func parseInto(htmlNode HTMLElement, headEl, bodyEl HTMLElement, src string, doc
 					i += end + 1
 				}
 			}
-			text = strings.TrimPrefix(text, "\r\n")
+			// 换行归一（HTML 预处理步骤）：CRLF/孤立 CR 折成 LF。不归一的话
+			// 行尾 '\r' 会被折行逻辑当字形画出来（多一个方块），光标列数也多 1。
+			text = normalizeNewlines(text)
+			// 紧跟开标签的首个换行按规范忽略。
 			text = strings.TrimPrefix(text, "\n")
 			// 元素创建/属性回填在下方「普通元素」段，此处提前建一次
 			// （textarea 无子节点，跳过那段不会影响结构）。

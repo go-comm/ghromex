@@ -194,3 +194,45 @@ func TestTextareaSetValue(t *testing.T) {
 		t.Fatalf("末尾追加失败: %q", v)
 	}
 }
+
+// \r 处理：textarea 的换行一律归一成 '\n'。
+//
+// 症状：Windows 文本文件/剪贴板是 CRLF，'\r' 混进 value 后折行逻辑只认
+// '\n'，于是 '\r' 被当成一个字形画在行尾（屏幕上多一个方块），光标列数、
+// 选区宽度也跟着多 1。解析（原始文本元素）、SetValue、粘贴三条入口都要
+// 归一；直接 SetAttribute 写属性是底层逃生口，值保持原样，但绘制也不能
+// 把 '\r' 当字形（折行兜底）。
+func TestTextareaNormalizesNewlines(t *testing.T) {
+	// 1) 解析：HTML 原始文本元素里的 CRLF / 孤立 CR。
+	doc := openDoc(t, 400, 300,
+		"<!doctype html><html><body>"+
+			"<textarea id=\"t\" style=\"display:block;width:100px;height:60px\">a\r\nb\rc</textarea>"+
+			"</body></html>")
+	ta := mustEl(t, doc, "#t")
+	if v := ta.GetAttribute("value"); v != "a\nb\nc" {
+		t.Fatalf("解析后 value = %q, want %q（CRLF/CR 未归一）", v, "a\nb\nc")
+	}
+	buf := engine.NewBufferGraphics(400, 300)
+	engine.RenderNode(buf, ta)
+	if got := strings.Join(buf.Texts, "|"); got != "a|b|c" {
+		t.Fatalf("绘制文本 = %q, want %q（'\\r' 被当成字形画出来了）", got, "a|b|c")
+	}
+
+	// 2) SetValue：值与光标都按归一后的文本算（末尾 = 第 2 行第 2 列）。
+	engine.SetValue(ta, "x\r\ny")
+	if v := engine.GetValue(ta); v != "x\ny" {
+		t.Fatalf("SetValue 后 value = %q, want %q", v, "x\ny")
+	}
+	if line, col, ok := engine.CaretPosition(ta); !ok || line != 2 || col != 2 {
+		t.Fatalf("SetValue 后光标 = %d,%d ok=%v，want 2,2", line, col, ok)
+	}
+
+	// 3) 直接写属性：value 原样保留（底层逃生口），但绘制不出现 '\r'。
+	ta.SetAttribute("value", "p\r\nq")
+	doc.Refresh()
+	buf2 := engine.NewBufferGraphics(400, 300)
+	engine.RenderNode(buf2, ta)
+	if got := strings.Join(buf2.Texts, "|"); got != "p|q" {
+		t.Fatalf("直接写属性后绘制 = %q, want %q", got, "p|q")
+	}
+}

@@ -33,6 +33,12 @@ func SetValue(el HTMLElement, value string) {
 	if b == nil {
 		return
 	}
+	if strings.EqualFold(b.tagName, "textarea") {
+		// 值里的换行统一成 '\n'：Windows 文本文件/剪贴板是 CRLF，'\r'
+		// 留着会被 textarea 当字形画出来（每行末尾一个方块），光标与
+		// 折行区间的 rune 下标也会和显示对不上。
+		value = normalizeNewlines(value)
+	}
 	b.SetAttribute("value", value)
 	b.caret = len([]rune(value))
 	b.selAnchor = b.caret // 程序化设值后无选区，光标在末尾
