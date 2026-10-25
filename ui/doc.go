@@ -68,7 +68,9 @@
 //
 // Spec.Status / SetStatus 是左侧单段兼容写法；Spec.StatusRight /
 // SetStatusRight 是右侧消息兼容糖，等价于保留键 "status-right" 的
-// 右钉段（固定排在右区最右）。
+// 右钉段（固定排在右区最右）。带 Action 的段是可点项（VSCode 式
+// 状态栏项）：悬停/按下换中性底色，点击与菜单项、工具栏按钮走同一条
+// 命令分发（ErrQuit 退出、失败原因写进状态栏）；Title 给悬停提示。
 //
 // # 页面控件
 //

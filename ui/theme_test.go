@@ -391,6 +391,51 @@ func TestDisabledFieldSinks(t *testing.T) {
 	}
 }
 
+// 可点状态段的悬停底色是主题令牌：像素区分「has-action 规则真生效」
+// 与「只挂了类名没样式」。
+func TestStatusSegActionHover(t *testing.T) {
+	th := Light()
+	vp, buf := engine.NewBufferedViewport(240, 90)
+	doc, err := engine.OpenDocument(vp, `<div>内容</div>`)
+	if err != nil {
+		t.Fatalf("打开文档失败: %v", err)
+	}
+	Install(doc, Spec{Theme: &th, StatusSegments: []StatusSegment{
+		{Key: "go", Text: "点我", Width: 100,
+			Action: Action{Run: func() error { return nil }}},
+	}})
+	doc.Refresh()
+	segs := doc.QuerySelectorAll(".system-ui-status-seg")
+	if len(segs) != 1 {
+		t.Fatalf("状态段数 = %d, want 1", len(segs))
+	}
+	box := segs[0].GetBoundingClientRect()
+	// 取段盒右侧空白区（文字靠左且首段收内边距），避开字形。
+	x := (box.Left().Pixel()+box.Right().Pixel())/2 + 30
+	y := (box.Top().Pixel() + box.Bottom().Pixel()) / 2
+	sr, sg, sb := mustRGB(t, th.Surface)
+
+	engine.RenderNode(buf, doc)
+	if r, g, b, _, ok := buf.ColorAt(x, y); !ok || r != sr || g != sg || b != sb {
+		t.Fatalf("悬停前底色 = #%02X%02X%02X，期望 Surface %s", r, g, b, th.Surface)
+	}
+	// 悬停：has-action 段换 $hover$ 底色。
+	engine.OnDocumentMouseMove(doc, x, y)
+	doc.Refresh()
+	engine.RenderNode(buf, doc)
+	hr, hg, hb := mustRGB(t, th.Hover)
+	if r, g, b, _, ok := buf.ColorAt(x, y); !ok || r != hr || g != hg || b != hb {
+		t.Fatalf("悬停底色 = #%02X%02X%02X，期望 Hover %s", r, g, b, th.Hover)
+	}
+	// 移开：回 Surface。
+	engine.OnDocumentMouseMove(doc, x, 5)
+	doc.Refresh()
+	engine.RenderNode(buf, doc)
+	if r, g, b, _, ok := buf.ColorAt(x, y); !ok || r != sr || g != sg || b != sb {
+		t.Fatalf("移开后底色 = #%02X%02X%02X，期望 Surface %s", r, g, b, th.Surface)
+	}
+}
+
 func mustRGB(t *testing.T, s string) (uint8, uint8, uint8) {
 	t.Helper()
 	s = strings.TrimPrefix(s, "#")

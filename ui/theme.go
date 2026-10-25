@@ -774,6 +774,10 @@ html { background-color: $bg$; }
    right:12px 盒缘——与左区 is-first、糖消息同一边距口径。糖消息
    在场时该类不加，保留的 10px 内边距充当两者间隙。 */
 .system-ui-status-seg.is-last { padding-right: 0; }
+/* 可点段（VSCode 式状态栏项）：悬停/按下换中性底色，与工具栏按钮
+   同款令牌；纯文本段不挂 has-action，hover 不亮、零交互成本。 */
+.system-ui-status-seg.has-action:hover { background-color: $hover$; }
+.system-ui-status-seg.has-action:active { background-color: $press$; }
 .system-ui-status-sep {
 	display: inline-block; width: 1px; height: 12px; margin: 6px 0;
 	background-color: $border$; vertical-align: top;

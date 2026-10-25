@@ -36,6 +36,17 @@ type StatusSegment struct {
 	// 超出被裁）。要多项稳定共存，逐段定宽即可。零值对齐按右区口径
 	// 视为右对齐；糖消息缺位时最右一段收掉右内边距贴 right:12px 盒缘。
 	AnchorRight bool
+
+	// Title 是该段的悬停提示（原生 title 气泡）；定宽段文字被裁时
+	// 尤其有用。
+	Title string
+
+	// Action 的 Run 非空时该段是可点项（VSCode 式状态栏项）：悬停/
+	// 按下换中性底色，点击走与菜单项、工具栏按钮同一条命令分发——
+	// 关菜单、失焦恢复、ErrQuit 退出、失败原因写进状态栏都由 invoke
+	// 统一处理。改行为用闭包；改文字用 SetStatusSegment，两者互不
+	// 干扰（纯文本段没有事件，零交互成本）。
+	Action Action
 }
 
 // statusSegView 是一个已生成的段句柄。
@@ -124,6 +135,16 @@ func (s *Workbench) SetStatusSegments(segs []StatusSegment) {
 		}
 		if style != "" {
 			el.SetAttribute("style", style)
+		}
+		if seg.Action.Run != nil {
+			// 命令与呈现分离：段点击进 invoke，与菜单项/工具栏
+			// 按钮/快捷键同一条分发路径（act 须逐段拷贝出循环）。
+			addClass(el, "has-action")
+			act := seg.Action
+			el.OnClick(func(*engine.MouseEvent) { s.invoke(act) })
+		}
+		if seg.Title != "" {
+			el.SetAttribute("title", seg.Title)
 		}
 		owner.AppendChild(el)
 		s.statusSegs = append(s.statusSegs, statusSegView{key: key, el: el})

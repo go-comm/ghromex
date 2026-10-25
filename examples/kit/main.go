@@ -150,11 +150,17 @@ func buildSpec(status func(string)) ui.Spec {
 		Width:  winW,
 		Height: winH,
 		// 右侧演示多右项：全部显式定宽，右区按 Σ+分隔线自动外扩到
-		// 351px（主题基准 280 装不下），两段之间带分隔线。
+		// 351px（主题基准 280 装不下），两段之间带分隔线。两段同时
+		// 演示可点项（VSCode 式）：悬停高亮，点击走菜单同款命令分发，
+		// 结果由 cmd 写回左侧状态段。
 		StatusSegments: []ui.StatusSegment{
 			{Key: "status", Text: "就绪"},
-			{Key: "keys1", Text: "Ctrl+S 保存", Width: 130, AnchorRight: true},
-			{Key: "keys2", Text: "Ctrl+F 查找 · Ctrl+H 替换", Width: 220, AnchorRight: true},
+			{Key: "keys1", Text: "Ctrl+S 保存", Width: 130, AnchorRight: true,
+				Title:  "执行「保存」（示例不写盘）",
+				Action: ui.Action{Run: cmd("已保存")}},
+			{Key: "keys2", Text: "Ctrl+F 查找 · Ctrl+H 替换", Width: 220, AnchorRight: true,
+				Title:  "打开查找/替换（示例没有实现）",
+				Action: ui.Action{Run: cmd("查找：示例没有实现")}},
 		},
 		Menus: []ui.Menu{
 			{Title: "文件", Items: []ui.Action{

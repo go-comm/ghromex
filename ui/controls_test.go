@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -473,6 +474,71 @@ func TestStatusRightZoneWidth(t *testing.T) {
 	sh.SetStatusSegments([]StatusSegment{{Key: "file", Text: "未命名"}})
 	if got := box.GetAttribute("style"); got != "" {
 		t.Fatalf("右区空置后右区内联 = %q, want 空", got)
+	}
+}
+
+// 可点段（VSCode 式状态栏项）：带 Action 的段挂 has-action 类与 title
+// 提示，坐标命中点击恰好触发一次；纯文本段不挂类、点击不误触。
+func TestStatusSegmentAction(t *testing.T) {
+	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
+	clicked := 0
+	Install(doc, Spec{
+		StatusSegments: []StatusSegment{
+			{Key: "go", Text: "点我", Width: 100, Title: "提示",
+				Action: Action{Run: func() error { clicked++; return nil }}},
+			{Key: "plain", Text: "普通"},
+		},
+	})
+	doc.Refresh()
+	segs := doc.QuerySelectorAll(".system-ui-status-seg")
+	if len(segs) != 2 {
+		t.Fatalf("状态段数 = %d, want 2", len(segs))
+	}
+	if got := segs[0].GetAttribute("class"); !strings.Contains(got, "has-action") {
+		t.Fatalf("可点段类名 = %q, want 含 has-action", got)
+	}
+	if got := segs[1].GetAttribute("class"); strings.Contains(got, "has-action") {
+		t.Fatalf("纯文本段类名 = %q, want 不含 has-action", got)
+	}
+	if got := segs[0].GetAttribute("title"); got != "提示" {
+		t.Fatalf("可点段 title = %q, want 提示", got)
+	}
+	// 点可点段中心：命令恰好跑一次。
+	r := segs[0].GetBoundingClientRect()
+	engine.OnDocumentClick(doc,
+		int(r.Left().Pixel()+50), int((r.Top().Pixel()+r.Bottom().Pixel())/2))
+	if clicked != 1 {
+		t.Fatalf("点击可点段触发 %d 次, want 1", clicked)
+	}
+	// 点纯文本段：不误触。
+	p := segs[1].GetBoundingClientRect()
+	engine.OnDocumentClick(doc,
+		int(p.Left().Pixel()+8), int((p.Top().Pixel()+p.Bottom().Pixel())/2))
+	if clicked != 1 {
+		t.Fatalf("点击纯文本段后触发 %d 次, want 仍为 1", clicked)
+	}
+}
+
+// 可点段命令失败：原因写进状态栏——与菜单/工具栏同一分发口径。
+func TestStatusSegmentActionError(t *testing.T) {
+	doc := newTestDoc(t, 640, 480, `<div>内容</div>`)
+	sh := Install(doc, Spec{
+		StatusSegments: []StatusSegment{
+			{Key: "status", Text: "就绪"},
+			{Key: "go", Text: "点我", Width: 100,
+				Action: Action{Run: func() error { return errors.New("盘满了") }}},
+		},
+	})
+	doc.Refresh()
+	segs := doc.QuerySelectorAll(".system-ui-status-seg")
+	if len(segs) != 2 {
+		t.Fatalf("状态段数 = %d, want 2", len(segs))
+	}
+	r := segs[1].GetBoundingClientRect()
+	engine.OnDocumentClick(doc,
+		int(r.Left().Pixel()+50), int((r.Top().Pixel()+r.Bottom().Pixel())/2))
+	if got, ok := sh.StatusSegment("status"); !ok || got != "盘满了" {
+		t.Fatalf("失败后 Key=status 段 = %q (ok=%v), want 盘满了", got, ok)
 	}
 }
 

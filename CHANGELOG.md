@@ -5,6 +5,16 @@
 
 ## 未发布
 
+- **ui**：状态栏段可带事件（VSCode 式可点项）——`StatusSegment.Action.Run`
+  非空即挂 `has-action` 类（悬停/按下换主题 `$hover$/$press$ 中性底色，与
+  工具栏同款令牌）并绑定点击：走与菜单项、工具栏按钮完全相同的命令分发
+  （关菜单、失焦恢复、ErrQuit 退出、失败原因写进状态栏）。新增 `Title`
+  悬停提示（原生 title 气泡，定宽段文字被裁时尤其有用）。纯文本段不挂类
+  不绑事件，零交互成本。kit 右侧两个右钉段接 `Action` 演示；新增
+  `TestStatusSegmentAction`（类名契约/title/坐标命中恰好触发一次/纯文本段
+  不误触）、`TestStatusSegmentActionError`（失败进状态栏）、
+  `TestStatusSegActionHover`（像素守卫：悬停=Hover 令牌、移开回 Surface）。
+
 - **ui**：状态栏支持多个右项——右钉段全部显式定宽时，右区宽度与左轨道
   垫宽按「Σ段宽+分隔线」自动外扩（原先装不下的部分会被 `overflow:hidden`
   裁掉）；含自适应段则回退 `Theme.StatusRightWidth` 基准预留。贴边口径

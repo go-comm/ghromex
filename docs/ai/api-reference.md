@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-25 20:37
+> 生成时间: 2026-10-25 21:00
 
 ---
 
@@ -2335,7 +2335,8 @@ Theme.StatusRightWidth 预留宽度，右钉段全部定宽时按 Σ 自动外�
     sh.SetStatusSegment("pos", "行 2，列 3")
 
 Spec.Status / SetStatus 是左侧单段兼容写法；Spec.StatusRight / SetStatusRight
-是右侧消息兼容糖，等价于保留键 "status-right" 的 右钉段（固定排在右区最右）。
+是右侧消息兼容糖，等价于保留键 "status-right" 的 右钉段（固定排在右区最右）。带 Action 的段是可点项（VSCode 式
+状态栏项）：悬停/按下换中性底色，点击与菜单项、工具栏按钮走同一条 命令分发（ErrQuit 退出、失败原因写进状态栏）；Title 给悬停提示。
 
 # 页面控件
 
@@ -2814,6 +2815,17 @@ type StatusSegment struct {
 	// 超出被裁）。要多项稳定共存，逐段定宽即可。零值对齐按右区口径
 	// 视为右对齐；糖消息缺位时最右一段收掉右内边距贴 right:12px 盒缘。
 	AnchorRight bool
+
+	// Title 是该段的悬停提示（原生 title 气泡）；定宽段文字被裁时
+	// 尤其有用。
+	Title string
+
+	// Action 的 Run 非空时该段是可点项（VSCode 式状态栏项）：悬停/
+	// 按下换中性底色，点击走与菜单项、工具栏按钮同一条命令分发——
+	// 关菜单、失焦恢复、ErrQuit 退出、失败原因写进状态栏都由 invoke
+	// 统一处理。改行为用闭包；改文字用 SetStatusSegment，两者互不
+	// 干扰（纯文本段没有事件，零交互成本）。
+	Action Action
 }
     StatusSegment 是状态栏的一段文字。
 
