@@ -645,7 +645,7 @@ html { background-color: $bg$; }
 
 /* 1px 分隔线写在复位块**之后**：复位块把 height 归零，这里再给回 1px
    （写在前面会被 height: auto 覆盖掉，分隔线整条消失）。 */
-.system-ui-hairline { height: 1px; background-color: $border$; pointer-events: none; }
+.system-ui-hairline { display: block; height: 1px; background-color: $border$; pointer-events: none; }
 
 /* 外壳三栏（菜单栏/工具栏/状态栏）与控件条都装在**页面文档**里，除了上面的
    盒模型/文字口径复位，容器自己还要挡掉**继承属性**：
@@ -694,6 +694,7 @@ html { background-color: $bg$; }
 .system-ui-menu.is-open .system-ui-menu-pop { display: block; }
 
 .system-ui-menu-item {
+	display: block;
 	position: relative; height: 30px; line-height: 30px;
 	margin: 0 6px; padding: 0 74px 0 10px;
 	border-radius: 6px; font-size: 13px; color: $text$;
@@ -703,11 +704,12 @@ html { background-color: $bg$; }
 .system-ui-menu-item.is-disabled { color: $muted$; }
 .system-ui-menu-item.is-disabled:hover { background-color: transparent; color: $muted$; }
 .system-ui-menu-shortcut {
+	display: inline;
 	position: absolute; right: 10px; top: 0;
 	height: 30px; line-height: 30px; font-size: 12px; color: $muted$;
 }
-.system-ui-menu-sep { height: 1px; background-color: $border$; margin: 6px 10px; }
-.system-ui-menu-icon { position: absolute; left: 9px; top: 7px; color: $muted$; }
+.system-ui-menu-sep { display: block; height: 1px; background-color: $border$; margin: 6px 10px; }
+.system-ui-menu-icon { display: inline; position: absolute; left: 9px; top: 7px; color: $muted$; }
 .system-ui-menu-item:hover .system-ui-menu-icon { color: $accentText$; }
 .system-ui-menu-item.is-disabled .system-ui-menu-icon { color: $muted$; }
 
@@ -781,6 +783,7 @@ html { background-color: $bg$; }
 /* 图标字形：Segoe MDL2 按 16px 网格设计，颜色跟随 color，所以悬停/禁用
    只需要改按钮的 color，不用为图标单独写状态。 */
 .system-ui-icon {
+	display: inline;
 	font-family: $iconFont$; font-size: 16px; line-height: 16px;
 	font-weight: normal;
 }
@@ -896,8 +899,8 @@ html { background-color: $bg$; }
    body 内边距（应用的页面通常自己也排了间距）。
    pointer-events:none：它们是纯排版的盒子，DOM 序又排在页面内容之后，
    留着可命中就会吃掉压在下面的绝对定位内容（浮层、控件条）的点击。 */
-.system-ui-spacer-top { height: $chromeH$px; pointer-events: none; }
-.system-ui-spacer-bottom { height: $statusSpace$px; pointer-events: none; }
+.system-ui-spacer-top { display: block; height: $chromeH$px; pointer-events: none; }
+.system-ui-spacer-bottom { display: block; height: $statusSpace$px; pointer-events: none; }
 
 /* ===== 页面组件 ===== */
 

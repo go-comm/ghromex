@@ -54,6 +54,7 @@
   `white-space` / `pointer-events:none`（最后一条会让整个外壳点不动）同理。
 - 全局元素规则：页面 `div{margin:8px;padding:20px;border:2px}` 会把 fixed 栏
   撑大、按钮顶偏、分隔线描边；`div{width/height}` 会改菜单/占位块尺寸；
+  `div,span{display:none}` 会直接吞掉菜单项/分隔线/图标/占位块；
   `div`/`span` 的字号/字重/颜色/下划线/居中/`pre` 会改外壳文字观感（引擎宽度
   测量忽略字重，几何看不出来，只有像素能抓）。
 
@@ -62,12 +63,15 @@ border-width/width/height`）与文字口径（`font-weight/text-align/text-deco
 white-space`），三栏容器另复位全部继承属性。复位块写在组件规则之前，组件
 自己需要的边距/字号（按钮 padding、状态轨道 `padding-right`、图标按钮居中）
 由后面的同名规则覆盖，正常观感不变；1px 分隔线的 `height` 被复位块归零，
-所以分隔线规则移到复位块之后。新增 `TestChromeIgnoresHostilePageCSS`：
-五类敌意页面（继承属性 / div 盒规则 / div 文字规则 / span 文字规则 / div 尺寸）
-与干净页面比三栏几何 + **三栏像素带**逐像素一致，并断言 `pointer-events:none`
-下工具栏仍可命中；去掉复位后该测试报 `menubar 框 = {0 0 684 76}`、
-`菜单 框 = {0 0 144 32}` 等。`TestInstallBuildsChrome` 补三条分隔线 1px 守卫，
-浏览器导航测试补提示页上的按钮位置断言。
+所以分隔线规则移到复位块之后。另有 7 个组件原本靠默认 `display`（菜单项/
+菜单分隔线/菜单图标/快捷键/图标/上下占位块），页面 `div,span{display:none}`
+会直接吞掉它们，按类名钉回 `block`/`inline`。新增
+`TestChromeIgnoresHostilePageCSS`：六类敌意页面（继承属性 / div 盒规则 /
+div 文字规则 / span 文字规则 / div 尺寸 / div+span 隐藏）与干净页面比三栏
+几何 + **三栏像素带**逐像素一致，并断言 `pointer-events:none` 下工具栏仍可
+命中；去掉复位后该测试报 `menubar 框 = {0 0 684 76}`、`菜单 框 = {0 0 144 32}`
+等。`TestInstallBuildsChrome` 补三条分隔线 1px 守卫，浏览器导航测试补提示页
+上的按钮位置断言。
 
 已知边界（引擎没有 shadow DOM，无法完全隔离）：页面直接写 `!important`、
 或写与组件同名的类规则（`.system-ui-btn{...}`）时仍会覆盖；页面用元素规则

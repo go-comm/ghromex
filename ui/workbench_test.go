@@ -874,6 +874,7 @@ func TestChromeIgnoresHostilePageCSS(t *testing.T) {
 			`line-height:40px;text-align:center;text-decoration:underline;white-space:pre}`},
 		{"span文字规则", `body{margin:0} span{font-size:20px;font-weight:bold;color:#0000ff;text-decoration:underline}`},
 		{"div尺寸", `body{margin:0} div{width:120px;height:40px}`},
+		{"div-span隐藏", `body{margin:0} div,span{display:none}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
