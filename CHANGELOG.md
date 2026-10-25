@@ -45,6 +45,12 @@
 - 文档与对照页：`examples/stylebook` 表格章节升为「支持」并补 `display:table`
   对照节、colspan/rowspan、border-spacing 6px、vertical-align；README 同步。
 
+**修复**：外壳三栏（菜单栏/工具栏/状态栏）与控件条显式复位 `text-align: left`。
+外壳装在页面文档里，`text-align` 又是继承属性——页面 body 写 `text-align:
+center`（提示页、落地页很常见）时，整排工具按钮会跟着居中，示例浏览器打开
+外部链接（提示页）即触发「顶部变居中」。新增 `TestChromeIgnoresPageTextAlign`
+（三栏几何守卫），浏览器导航测试补提示页上的按钮位置断言。
+
 ## v0.3.0 — 2026-10-25
 
 ui 组件库成型，notepad 与 browser 两个示例改到全程只用 `ui` 控件，新增

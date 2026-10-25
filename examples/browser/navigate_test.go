@@ -188,6 +188,15 @@ func TestLinkNavigation(t *testing.T) {
 	clickLink("https://")
 	assertTitle("Ghromex 浏览器 · 外部链接")
 	assertChrome()
+	// 提示页 body 是 text-align:center（卡片居中）：外壳必须免疫页面居中，
+	// 否则整排工具按钮会漂到屏幕中间（用户报告过「顶部变居中了」）。
+	// 换页换的是整份文档，元素要重新查（旧文档的元素没有新几何）。
+	h.doc.Refresh()
+	if el := h.doc.QuerySelector(`.system-ui-tool[title="后退"]`); el != nil {
+		if x := el.GetBoundingClientRect().Left().Pixel(); x != 8 {
+			t.Fatalf("提示页上后退按钮 x = %d, want 8（工具栏被页面 text-align 居中了）", x)
+		}
+	}
 	clickLink("about:home")
 	assertTitle("Ghromex 浏览器 · 起始页")
 

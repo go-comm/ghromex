@@ -583,9 +583,14 @@ html { background-color: $bg$; }
 
 .system-ui-hairline { height: 1px; background-color: $border$; pointer-events: none; }
 
+/* 外壳三栏（菜单栏/工具栏/状态栏）都装在**页面文档**里，必须挡掉页面
+   常见的继承属性：text-align 被页面 body 写成 center 时（提示页、落地页
+   很常见），整排按钮/分段会跟着居中，看上去像工具栏「漂到中间」。
+   这里逐个复位为 left，外壳的对齐只由外壳自己的规则决定。 */
 .system-ui-menubar {
 	position: fixed; left: 0; top: 0; width: 100%; height: $menuH$px;
 	background-color: $surface$; z-index: 1000; font-family: $font$;
+	text-align: left;
 }
 .system-ui-menubar .system-ui-hairline { position: absolute; left: 0; bottom: 0; width: 100%; }
 
@@ -640,6 +645,7 @@ html { background-color: $bg$; }
 	padding: $toolPadUp$px 8px $toolPadDown$px; box-sizing: border-box;
 	background-color: $surfaceAlt$; z-index: 999;
 	font-family: $font$; line-height: $toolCtrlH$px;
+	text-align: left;
 }
 .system-ui-toolbar .system-ui-hairline { position: absolute; left: 0; bottom: 0; width: 100%; }
 
@@ -754,6 +760,7 @@ html { background-color: $bg$; }
 	line-height: $statusH$px; padding: 0 12px; box-sizing: border-box;
 	font-size: 12px; color: $muted$; background-color: $surface$;
 	z-index: 1000; font-family: $font$;
+	text-align: left;
 }
 .system-ui-status .system-ui-hairline { position: absolute; left: 0; top: 0; width: 100%; }
 /* 左侧分段轨道：默认占满整行；有右侧消息时由 .has-right 预留固定宽度。
@@ -979,6 +986,7 @@ html { background-color: $bg$; }
 	background-color: $surfaceAlt$; border-bottom: 1px solid $border$;
 	font-family: $font$; font-size: 13px; line-height: $btnH$px;
 	white-space: nowrap;
+	text-align: left;
 }
 .system-ui-bar .system-ui-input,
 .system-ui-bar .system-ui-select,

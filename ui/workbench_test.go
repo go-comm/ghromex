@@ -781,3 +781,32 @@ func TestAppReinstallsOnNewDocument(t *testing.T) {
 		t.Fatal("换页后快捷键应当仍然生效")
 	}
 }
+
+// TestChromeIgnoresPageTextAlign 页面 body 写 text-align:center（提示页、
+// 落地页很常见）时，外壳三栏必须仍左对齐。
+//
+// 外壳是装进**页面文档**的普通元素，text-align 又是继承属性：不复位的话
+// 工具栏整排按钮会跟着页面居中，看起来像「顶部漂到中间」。真实症状是
+// 示例浏览器打开外部链接（提示页 body 居中）后工具栏按钮全跑到屏幕中间。
+func TestChromeIgnoresPageTextAlign(t *testing.T) {
+	doc := newTestDoc(t, 640, 480, `<!doctype html><html><body style="text-align:center"><div>内容</div></body></html>`)
+	Install(doc, Spec{
+		Menus:          []Menu{{Title: "文件", Items: []Action{Item("保存", "Ctrl+S", nil)}}},
+		Tools:          []Action{Tool("保存", nil), Tool("打开", nil)},
+		StatusSegments: []StatusSegment{{Key: "page", Text: "就绪"}},
+	})
+	doc.Refresh()
+
+	// 菜单栏无内边距：首个菜单贴左缘。
+	if b := boxOf(doc.QuerySelector(".system-ui-menu")); b.x != 0 {
+		t.Errorf("菜单 x = %d, want 0（被页面 text-align 挤到中间了）", b.x)
+	}
+	// 工具栏左右各 8px 内边距：首个工具按钮落在 8。
+	if b := boxOf(doc.QuerySelector(".system-ui-tool")); b.x != 8 {
+		t.Errorf("工具按钮 x = %d, want 8（被页面 text-align 挤到中间了）", b.x)
+	}
+	// 状态栏左右各 12px 内边距：首段（is-first 收掉左内边距）落在 12。
+	if b := boxOf(doc.QuerySelector(".system-ui-status-seg")); b.x != 12 {
+		t.Errorf("状态段 x = %d, want 12（被页面 text-align 挤到中间了）", b.x)
+	}
+}
