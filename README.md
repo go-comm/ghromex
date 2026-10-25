@@ -804,4 +804,4 @@ go test ./...
 
 ## 更新日志
 
-当前版本 **v0.2.0**，逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v0.3.0**，逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。

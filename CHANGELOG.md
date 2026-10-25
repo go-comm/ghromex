@@ -1,9 +1,42 @@
 # 更新日志
 
-版本号即 git tag（Go module 语义：`v0.2.0` 可从
-`github.com/go-comm/ghromex@v0.2.0` 直接取用）。
+版本号即 git tag（Go module 语义：`v0.3.0` 可从
+`github.com/go-comm/ghromex@v0.3.0` 直接取用）。
 
-## 未发布
+## v0.3.0 — 2026-10-25
+
+ui 组件库成型，notepad 与 browser 两个示例改到全程只用 `ui` 控件，新增
+stylebook（样式全集对照）与 iconsheet（图标表）两个示例。
+
+**破坏性变更**
+
+- 命名：工具栏构造器 `ui.Button` → `ui.Tool`；`ui.Shell` → `ui.Workbench`
+  （`App.Shell()` → `App.Workbench()`）；组件类名 `ui-*` → `system-ui-*`，
+  样式自动挂到 `html.system-ui` 根作用域。`Install` 语义不变，替换名字即可。
+- 尺寸口径定型为两档：工具栏档新增 `Theme.ToolControlHeight` 28（`ToolHeight`
+  40 → 36、工具栏图标 16 → 20），标准表单档 `ButtonHeight` 30 → 32
+  （input/select 随其同高）；按钮 `line-height` 改由公式推导，文字真正垂直居中。
+- 渲染默认值：窗口**默认走内存渲染**，GPU 加速需显式 `GHROMEX_GPU=1`。
+- 接口与 flag：`BufferGraphics.SavePNG` 更名 `DumpPNG`；移除示例
+  `-dump-buffer-png`，无头出图统一 `-dump-svg`（几何）/ `-dump-png`（像素），
+  真实窗口截图走 `-shot`（`Window.Screenshot`）。
+
+**引擎**：原生 `title` 提示气泡（悬停 600ms 弹出、`TickTooltip` 推进、配色经
+`SetTooltipColors` 按文档下发）、`pointer-events`、`RemoveAttribute`、textarea
+覆盖式滚动条与首次聚焦点击落位修复、表单 `input` 文字垂直居中、`display:none`
+矩形彻底空掉、未布局 textarea 的 `CaretPosition` 退回按硬换行计算。
+
+**ui**：页面控件全套（`NewLabel` / `NewTextView` / `NewButton` / `NewCheckbox` /
+`NewSelect` / `NewTextInput` / `NewTextArea` / `NewField`）、控件条 `NewBar`、
+工具栏槽位 `ui.Slot`、`Spec.NoBodyReset`、运行时换肤 `SetTheme`、
+`SetStatusVisible`；状态栏收敛到统一段模型（左侧分段 + `AnchorRight` 右钉段 +
+可点段 `Action` + 多右项按 Σ 外扩预留）；新增 `Field` 令牌并重排深色主题层次。
+
+**示例**：browser 外壳从手写工具条（绝对坐标 + 换页重排）改为 `ui.Install` 装配；
+notepad 页面改由 Go 构造（删 `index.html` 与 `go:embed`）并给全部命令配图标；
+kit 新增「基础控件」卡片；删除 form / login / scroll（回归测试改用内联夹具）。
+
+以下条目为 v0.3.0 的逐条明细，保留以便升级对照。
 
 - **ui**：状态栏段可带事件（VSCode 式可点项）——`StatusSegment.Action.Run`
   非空即挂 `has-action` 类（悬停/按下换主题 `$hover$/$press$ 中性底色，与
