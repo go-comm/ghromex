@@ -227,6 +227,12 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH i
 		hideBox(el)
 		return 0, 0
 	}
+	// 表格盒（table / inline-table）走专用网格布局：列对齐 + 行堆叠 +
+	// 单元格拉伸。入口按 display 判定而非标签名——UA 样式表把 <table> 落位到
+	// DisplayTable，任意元素写 display: table 同样进这条路径。
+	if disp == DisplayTable || disp == DisplayInlineTable {
+		return layoutTableBox(g, el, outerW, outerH, ox, oy, pctW, pctH)
+	}
 
 	mg := resolveEdgeRect(comp.Margin(), pctW)
 	bd := resolveEdgeRect(comp.BorderStyleWidth(), pctW)
@@ -1050,14 +1056,26 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			continue
 		}
 
-		if cdisp == DisplayBlock {
+		if cdisp == DisplayBlock || cdisp == DisplayTable {
 			flushLine()
-			// 表格：专用布局（列对齐 + 行堆叠），不走常规流——否则
-			// table/thead/tr/td 会按默认 inline-block 挤在一行。
-			if strings.EqualFold(che.tagName, "table") {
-				cursorY += layoutTable(g, che, contentW, cx, cursorY)
+			// 表格：专用布局（列对齐 + 行堆叠），不走常规流，也不参与
+			// 外边距折叠（CSS 2.1 §17.5.2：表格的 margin 不与兄弟折叠）。
+			if cdisp == DisplayTable {
+				che.hasEff = false
+				layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH)
+				cursorY += che.layoutH
 				prevBlockMB = -1
+				pendingSpace = false
 				lastInline = false
+				w := cx + outerBoxW(che, contentW)
+				if !isClippingBox(che) {
+					if ext := che.contentW + (outerBoxW(che, contentW) - che.width); ext > w-cx {
+						w = cx + ext
+					}
+				}
+				if w > maxRight {
+					maxRight = w
+				}
 				continue
 			}
 			// 相邻块级兄弟 margin 折叠（CSS 2.1 §8.3.1）：间隙取

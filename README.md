@@ -449,12 +449,15 @@ Spec）与工作台的三条约定（换文档重装、快捷键先行、只用�
 
 ## 已支持的 CSS 子集
 
-`display(none/inline/inline-block/block)`、`width/height`、
+`display(none/inline/inline-block/block，以及完整表格家族：table/inline-table/
+table-caption/table-column(-group)/table-header-group/table-row-group/
+table-footer-group/table-row/table-cell)`、`width/height`、
 `box-sizing(content-box/border-box，表单控件 UA 默认 border-box 对齐 Chrome)`、
 `margin*`（相邻块级兄弟折叠：取较大者；父-子穿越/空块折叠未实现）、`padding*`、
 `border`/`border-top/right/bottom/left` 简写、`border-width/color/style`（1~4 值展开）
 与 12 个单边长写（四边可独立宽度/颜色/样式）、`border-radius`(四角统一，仅水平半径)、
-`border-collapse(collapse/separate，仅表格布局读取，见「已知限制」的表格模型)`、
+`border-collapse(collapse/separate)`、`border-spacing(1~2 值，px/pt/dp/%)`、
+`caption-side(top/bottom)`、`empty-cells(show/hide)`、
 `box-shadow`（外阴影；逗号分隔多条、px/pt/dp 偏移/模糊/扩散、颜色，`inset` 仅解析不绘制）、
 `background-color`/`background`、`color`、`font-size`、`font-weight(bold)`、`font-family`、
 `text-align(left/center/right)`、`text-decoration(underline/line-through/none，随父链继承)`、
@@ -494,7 +497,8 @@ CSS 2.1 §10.8.1 取底外边距边——Chrome 的 textarea 计算 overflow 非
 有意分歧**：Chrome 没有 hover 规则（浏览器里按钮悬停不变色），但作为桌面 UI
 框架，按钮悬停毫无反馈会显得「死了」。作者 CSS 仍可覆盖（作者来源优先于 UA
 来源，与 CSS 级联一致）；
-表格/列表标记等仍是近似模型，见「已知限制」；
+表格完整模型（display 家族 + colspan/rowspan + border-spacing + 题注），
+列表标记等仍是近似模型，见「已知限制」；
 字体默认语义对齐 Chrome（Windows）并做 UI 取向调整：初始字号 16px；
 standard（未指定 family）默认 sans-serif → Arial（区别于 Chrome 的 Times，更贴桌面 UI）；
 serif → Times New Roman、sans-serif → Arial、system-ui → Segoe UI、fantasy → Impact、
@@ -626,13 +630,28 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
   `monospace`/`cursive` 映射到 simsun.ttc 的 face 0（SimSun），Chrome 用的是
   同一文件里的新宋体（NSimSun）——行高与整串宽度一致，但单字 ink 高度与
   短串宽度有微差（对照页 `<code>元素</code>` 等宽串 61 vs Chrome 63、ink 高 15 vs 13）
-- 表格是最小模型：按行堆叠、同列左缘对齐、列宽取各行最大值、caption 居中、
-  th 居中加粗；`border-collapse: collapse` 已支持（单元格只画上/左、外缘右/下
-  由表格补画，等价于浏览器的「半边框」：实测紧贴无间隙、每行只摊 1px 线，
-  对照页表格 181×112 vs Chrome 181.75×112，单元格外盒 90×30 vs 90.38×30）；
-  仍不支持 colspan/rowspan、不做「宽者胜」的边框冲突仲裁（相邻边框取后者），
-  列宽按**内容最大值**（不做浏览器的自动表格布局分配），separate 下用 2px
-  间隙近似 border-spacing
+- 表格是**完整模型**（CSS 2.1 §17），角色只由 `display` 判定：HTML 标签靠 UA
+  样式表落位到表格家族，普通元素写 `display: table` 同样进网格布局。已支持：
+  - 网格与匿名盒：colspan/rowspan（HTML5 放置算法；`rowspan=0` 延伸到网格末行，
+    超出末行按剩余行数钳制、**不生成幽灵行**，colspan 上限 1000）；表格/行组里的
+    块级或行内内容按 CSS 生成匿名行/匿名格，行内非格内容按连续段聚成匿名格；
+  - 列宽：col/colgroup 的 `width`（样式或遗留属性、含 `span`）作列下限，单列格
+    天然宽定列、跨列格按比例补差；表格显式宽按比例拉伸/压缩列（不低于列下限），
+    `auto` 宽收缩到可用宽；
+  - 行高与对齐：行等高（取行内最高格），`tr` 显式高/遗留 `height` 作下限，跨行格
+    按比例补差；格盒拉伸填满行带，内容按 `vertical-align` 落位（格上的 `baseline`
+    按 `middle` 处理，§17.5.2.1；遗留 `valign` 属性作回退档）；
+  - `border-spacing`：1~2 值，网格**四边都留**（含外缘，Chrome 同款）；UA 给
+    `<table>` 的默认是 2px，CSS 初始值是 0（`display:table` 的普通元素不带这 2px）；
+  - 题注：`caption-side(top/bottom)`，题注在**表格盒之外**（§17.4，表格盒只含网格，
+    宽度随表格边框盒）；`empty-cells: hide` 只隐绘制（几何/命中照旧）；
+  - 行组顺序：表头组 → 行组（DOM 序）→ 表尾组，与源码顺序无关（§17.5.1.2）；
+  - `border-collapse: collapse` 的半边框模型保持：单元格只画上/左、外缘右/下由表格
+    补画（实测紧贴无间隙、每行只摊 1px 线，对照页表格 181×112 vs Chrome
+    181.75×112，单元格外盒 90×30 vs 90.38×30）。
+  已知边界：collapse 下不做相邻边框的「宽者胜」仲裁（取先声明格）；rowspan 跨行组
+  （thead→tbody）不合并；`table-layout` 无布局语义（始终自动表格布局）；列宽取
+  **内容最大值**（不做浏览器的自动表格布局分配，Chrome 带小数像素）
 - 列表：缩进/外边距/标记已实现并与 Chrome 对齐（ul 的 •、ol 的序号；标记位置按内容左缘 −0.75em 近似）；仍无 `display:list-item` 与 `list-style-type`（作者自定义标记类型不生效）
 - `white-space` 仅 `pre` 一个关键字；`line-height` 不支持 `em`/`rem`/`vh` 等单位
   （只认无单位数字、百分比与 px；其余整条声明忽略，保留继承来的值）；

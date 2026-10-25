@@ -266,14 +266,15 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 			fmt.Fprintf(b, `<g mask="url(#%s)"><rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.2f"%s%s/></g>`+"\n",
 				mid, sx, sy, sw, shh, hexColor(r, g, bl), float64(al)/255, srx, filterAttr)
 		}
-		if bg := comp.BackgroundColor(); bg != nil && bw > 0 && bh > 0 {
+		// empty-cells: hide 的单元格不导出背景/边框（与渲染路径同口径）。
+		if bg := comp.BackgroundColor(); bg != nil && bw > 0 && bh > 0 && !base.noCellDeco {
 			r, g, bl, al := bg.RGBA()
 			if al > 0 {
 				fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.2f"%s/>`+"\n",
 					bx, by, bw, bh, hexColor(r, g, bl), float64(al)/255, rxAttr)
 			}
 		}
-		if bw > 0 && bh > 0 {
+		if bw > 0 && bh > 0 && !base.noCellDeco {
 			paintBD, colors, has := borderPaintState(comp, bd)
 			if has {
 				uniform := true

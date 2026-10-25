@@ -3,6 +3,48 @@
 版本号即 git tag（Go module 语义：`v0.3.0` 可从
 `github.com/go-comm/ghromex@v0.3.0` 直接取用）。
 
+## 未发布
+
+**完整表格模型（CSS 2.1 §17）**：表格布局入口从「按标签名」改为「按 `display`
+判定」——HTML 标签仍靠 UA 样式表落位，任意元素写 `display: table` 同样成网格
+（Chrome 同款）。
+
+- 新增 `display` 值：`DisplayTable` / `DisplayInlineTable` / `DisplayTableCaption` /
+  `DisplayTableColumn` / `DisplayTableColumnGroup` / `DisplayTableHeaderGroup` /
+  `DisplayTableFooterGroup` / `DisplayTableRowGroup` / `DisplayTableRow` /
+  `DisplayTableCell`（`Display` 是公开类型，值追加不破坏既有代码）。
+- 网格：colspan/rowspan 按 HTML5 放置算法落位（`rowspan=0` 延伸到网格末行，
+  跨度超出末行按剩余行数钳制、**不生成幽灵行**；colspan 上限 1000）；行组顺序
+  固定为「表头组 → 行组 → 表尾组」（§17.5.1.2）。
+- 匿名盒：表格/行组直属单元格进隐式行；表格级块级或行内内容生成占满整行的
+  匿名行；行内非格内容按连续段聚成匿名格。匿名载体不进 DOM，绘制/命中没有
+  它的盒。
+- 列宽：col/colgroup 的 `width`（样式或遗留属性、含 `span`）作列下限；单列格
+  天然外宽定列、跨列格按比例补差；表格显式宽按比例拉伸/压缩列（不低于列下限），
+  `auto` 宽收缩到可用宽。
+- 行高与对齐：行等高（取行内最高格），`tr` 显式高/遗留 `height` 作下限，跨行格
+  按比例补差；格盒拉伸填满行带，内容按 `vertical-align` 落位——格上的
+  `baseline` 按 `middle` 处理（§17.5.2.1），遗留 `valign` 属性作回退档。
+- `border-spacing`：新增 `BorderSpacing()` / `SetBorderSpacing(h, v Size)`
+  （1~2 值，px/pt/dp/%）；网格四边都留间距（含外缘，Chrome 同款）。UA 给
+  `<table>` 的默认是 2px，CSS 初始值是 0——`display:table` 的普通元素不带这份 2px。
+  collapse 模式间距恒 0（半边框模型不变）。
+- 题注：新增 `CaptionSide()` / `SetCaptionSide`（top/bottom，继承）。题注在
+  **表格盒之外**（§17.4：表格盒只含网格，题注占包装盒的额外高度），宽度随表格
+  边框盒——顺带修掉了 collapse 外缘边框从题注带穿过的绘制缺陷。
+- `empty-cells`：新增 `EmptyCells()` / `SetEmptyCells`（show/hide，继承）；
+  `hide` 只跳过背景/边框绘制（`render.go`、`svg_dump.go` 同口径），几何与命中不变。
+- **解析修复**：表格标签的隐含闭合改为逐层收栈——`<tr>` 现在会同时收掉未闭合的
+  `<td>` 和上一行（`<td>a<td>b<tr>...` 是常态写法，旧实现会把新行嵌进旧行）。
+- 回归测试：新增 `engine/table_display_internal_test.go`（11 条：display 网格、
+  UA 2px vs div 0、colspan/rowspan、rowspan=0/9999 钳制、6px 与 4px 6px 间距、
+  vertical-align 三档、caption-side 上下、empty-cells 像素+标记、col 宽度、
+  隐式闭合、声明宽拉伸）；既有 collapse/列对齐契约保持全绿。
+- 已知边界：collapse 下不做相邻边框的「宽者胜」仲裁（取先声明格）；rowspan 跨
+  行组不合并；`table-layout` 无布局语义（始终自动表格布局）。
+- 文档与对照页：`examples/stylebook` 表格章节升为「支持」并补 `display:table`
+  对照节、colspan/rowspan、border-spacing 6px、vertical-align；README 同步。
+
 ## v0.3.0 — 2026-10-25
 
 ui 组件库成型，notepad 与 browser 两个示例改到全程只用 `ui` 控件，新增

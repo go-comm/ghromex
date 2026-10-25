@@ -210,6 +210,10 @@ type htmlElement struct {
 	// hasEff 为 false 表示未回填（根元素等），此时用样式里的原始 margin。
 	effTop, effBot int
 	hasEff         bool
+	// noCellDeco 是表格布局给「空单元格」打的装饰跳过标记：empty-cells:hide
+	// 时背景与边框不绘制（CSS 2.1 §17.5.1.1），几何与命中照旧占位——与
+	// Chrome 口径一致。由表格布局每轮写入（含复位），绘制层只读。
+	noCellDeco bool
 }
 
 func (element *htmlElement) TagName() string {

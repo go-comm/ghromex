@@ -26,6 +26,26 @@ var voidElements = map[string]bool{
 	"param": true, "source": true, "track": true, "wbr": true,
 }
 
+// 表格标签的隐含闭合（HTML5）：<td>/<th> 收掉同排未关的格，<tr> 收掉格与行，
+// 行组标签收掉格与行。扫描自上而下穿过行内标签，遇到 tr/table 等结构边界即停
+// （边界内的行内内容留在原格里）。HTML 里 `<td>a<td>b` 是常态写法——不闭合
+// 的话第二格会嵌进第一格，网格布局就少了一列。
+var (
+	tableImpliedClose = map[string]map[string]bool{
+		"td":    {"td": true, "th": true},
+		"th":    {"td": true, "th": true},
+		"tr":    {"td": true, "th": true, "tr": true},
+		"tbody": {"td": true, "th": true, "tr": true, "tbody": true, "thead": true, "tfoot": true},
+		"thead": {"td": true, "th": true, "tr": true, "tbody": true, "thead": true, "tfoot": true},
+		"tfoot": {"td": true, "th": true, "tr": true, "tbody": true, "thead": true, "tfoot": true},
+	}
+	// tableScopeStops 是隐含闭合的扫描边界：够不到可收的标签就作罢。
+	tableScopeStops = map[string]bool{
+		"tr": true, "table": true, "tbody": true, "thead": true, "tfoot": true,
+		"caption": true, "html": true, "body": true,
+	}
+)
+
 // parseInto 核心解析循环。doc 为 nil 时退化为片段模式（无 head/style 路由）。
 func parseInto(htmlNode HTMLElement, headEl, bodyEl HTMLElement, src string, doc HTMLDocument) {
 	stack := []HTMLElement{htmlNode}
@@ -132,6 +152,31 @@ func parseInto(htmlNode HTMLElement, headEl, bodyEl HTMLElement, src string, doc
 		}
 		tag := strings.ToLower(src[start:j])
 		attrs, after, selfClose := parseAttributes(src, j)
+
+		// 表格标签的隐含闭合（见 tableImpliedClose 的注释）。script/style
+		// 等特殊元素在下面各自分支处理，不受影响。
+		//
+		// 逐层收：<tr> 既要收掉未闭合的 <td>，也要收掉上一行——单次匹配
+		// 不够（否则新行会嵌进旧行，第二行变成第一行的兄弟格）。
+		if closers, ok := tableImpliedClose[tag]; ok {
+			for {
+				idx := -1
+				for k := len(stack) - 1; k > 0; k-- {
+					t := strings.ToLower(stack[k].TagName())
+					if closers[t] {
+						idx = k
+						break
+					}
+					if tableScopeStops[t] {
+						break
+					}
+				}
+				if idx < 0 {
+					break
+				}
+				stack = stack[:idx]
+			}
+		}
 
 		switch tag {
 		case "script":

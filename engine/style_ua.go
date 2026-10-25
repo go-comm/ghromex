@@ -39,13 +39,24 @@ h3 { display: block; font-size: 19px; font-weight: bold; margin: 19px 0; } /* 1.
      整块高度比浏览器高 34px。 */
   ul ul, ol ul, ul ol, ol ol { display: block; margin: 0; padding-left: 40px; }
   li { display: block; }
-  /* 表格：引擎有最小表格模型（列对齐 + 行堆叠，见 table_layout.go）。
-     table 走专用布局；这里的 display 只影响表格以外的退化情形。 */
-  table { display: block; }
-  caption { display: block; text-align: center; }
-  /* 单元格按 inline-block 参与测量：表格布局需要各单元格的**自然宽**
-     （块级会撑满整行，量出来的列宽就等于容器宽）。 */
-  th, td { display: inline-block; padding: 1px; }
+  /* 表格：display 家族按 HTML5 渲染规范的 UA 值落位，布局走 display 驱动的
+     网格模型（见 table_layout.go）。border-spacing:2px 是 UA 给 <table>
+     元素的默认（CSS 初始值是 0——display:table 的普通元素不带这份 2px，
+     Chrome 同款）。单元格不写 UA 的 vertical-align（Chrome 也报 baseline）：
+     表格布局把单元格上的 baseline 按 middle 处理（CSS 2.1 §17.5.2.1），
+     作者显式 top/middle/bottom 则照办。 */
+  table { display: table; border-spacing: 2px; }
+  caption { display: table-caption; text-align: center; }
+  colgroup { display: table-column-group; }
+  col { display: table-column; }
+  thead { display: table-header-group; }
+  tbody { display: table-row-group; }
+  tfoot { display: table-footer-group; }
+  tr { display: table-row; }
+  /* 单元格的宽度测量语义与旧 inline-block 口径一致：display:table 布局
+     先按内容自然宽量列（table-cell 在 layoutBox 里按内容收缩），块级会
+     撑满容器、列宽就量不出来了。padding:1px 沿用 HTML5 UA 的单元格默认。 */
+  th, td { display: table-cell; padding: 1px; }
   th { text-align: center; font-weight: bold; }
   dl { display: block; margin: 16px 0; }
   /* dt 不加粗：HTML5 渲染规范里 dt 没有 font-weight（HTML4 的 UA 才加粗），

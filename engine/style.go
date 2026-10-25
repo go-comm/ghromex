@@ -35,6 +35,13 @@ type Shadow struct {
 	Inset bool
 }
 
+// Display 是 display 计算值。前四个是常规流值；其余为表格家族（CSS 2.1
+// 表格模型）：table/inline-table 生成表格盒（列对齐 + 行堆叠的专用布局），
+// table-caption/table-header-group/table-row-group/table-footer-group/
+// table-row/table-cell 分别生成题注、行组、行、单元格盒，由最近的表格
+// 祖先收集进网格；table-column/table-column-group 不生成盒（只提供列宽
+// 约束）。元素在表格中的角色只由 display 判定，与标签名无关——HTML
+// <table> 靠 UA 样式表落位，任意元素用 display: table 同样能排成表格。
 type Display uint8
 
 const (
@@ -42,6 +49,56 @@ const (
 	DisplayInline
 	DisplayInlineBlock
 	DisplayBlock
+	// DisplayTable 生成块级表格盒（auto 宽度按网格收缩，不参与 margin 折叠）。
+	DisplayTable
+	// DisplayInlineTable 生成行内级表格盒：与 DisplayTable 同一套网格布局，
+	// 差别只在参与行内排版（随文字流、可换行）。
+	DisplayInlineTable
+	// DisplayTableCaption 生成题注盒；在表格内排于网格上方或下方（见
+	// CaptionSide），在表格外退化为普通块盒。
+	DisplayTableCaption
+	// DisplayTableColumn 生成列盒（CSS 里不产生几何），仅 col/colgroup
+	// 的宽度在此充当列宽下限。
+	DisplayTableColumn
+	// DisplayTableColumnGroup 是 table-column-group：不产生几何，子 col
+	// 的宽度约束照常收集。
+	DisplayTableColumnGroup
+	// DisplayTableHeaderGroup / DisplayTableFooterGroup 是表头/表尾行组：
+	// 视觉顺序固定为「表头组 → 行组 → 表尾组」，与源码顺序无关（CSS 2.1
+	// §17.5.1.2，Chrome 同款——tfoot 写在 tbody 前面也排最后）。
+	DisplayTableHeaderGroup
+	DisplayTableFooterGroup
+	// DisplayTableRowGroup 是普通行组（tbody 的 UA 值）。
+	DisplayTableRowGroup
+	// DisplayTableRow 生成行盒：行等高（取行内最高单元格）。
+	DisplayTableRow
+	// DisplayTableCell 生成单元格盒：content 自动宽度按内容收缩测量，
+	// 定列后拉伸到列宽并随单元格 vertical-align 落位。
+	DisplayTableCell
+)
+
+// isTableRowGroup 判断是否为三种行组 display。
+func (d Display) isTableRowGroup() bool {
+	return d == DisplayTableRowGroup || d == DisplayTableHeaderGroup || d == DisplayTableFooterGroup
+}
+
+// CaptionSide 是 caption-side 的取值（继承属性，只被表格布局读取）。
+// left/right 是竖排表格的取值，引擎按 top/bottom 两档处理（其余值回退 top）。
+type CaptionSide uint8
+
+const (
+	CaptionSideTop CaptionSide = iota // 默认：题注在网格上方
+	CaptionSideBottom                 // 题注在网格下方
+)
+
+// EmptyCells 是 empty-cells 的取值（继承属性，只作用于表格单元格）。
+// hide 时「空单元格」（无元素子节点、无非空白文本）的背景与边框不绘制
+// （CSS 2.1 §17.5.1.1）——只隐绘制，格位/列宽/命中保留，Chrome 同口径。
+type EmptyCells uint8
+
+const (
+	EmptyCellsShow EmptyCells = iota // 默认
+	EmptyCellsHide
 )
 
 type Position uint8
@@ -297,6 +354,21 @@ type CSSStyleDeclaration interface {
 	// 不继承、仅表格布局读取。默认 separate。
 	BorderCollapse() BorderCollapse
 	SetBorderCollapse(b BorderCollapse) CSSStyleDeclaration
+	// BorderSpacing 是 border-spacing 的两轴间距（不继承，仅表格布局读取）。
+	// 初始值 0；HTML <table> 的 UA 样式表把它置为 2px（Chrome 同款——
+	// 2px 是 UA 对表格元素的默认，不是 CSS 初始值，display:table 的普通
+	// 元素不带）。语义为 separate 模式下单元格网格四周与相邻格之间的
+	// 间隙；collapse 模式下恒无效。
+	BorderSpacing() (h, v Size)
+	SetBorderSpacing(h, v Size) CSSStyleDeclaration
+	// EmptyCells 决定空单元格是否绘制背景与边框（empty-cells），沿父链
+	// 继承、仅表格布局读取。默认 show。
+	EmptyCells() EmptyCells
+	SetEmptyCells(e EmptyCells) CSSStyleDeclaration
+	// CaptionSide 决定题注排在网格上方还是下方（caption-side），沿父链
+	// 继承、仅表格布局读取。默认 top。
+	CaptionSide() CaptionSide
+	SetCaptionSide(c CaptionSide) CSSStyleDeclaration
 	// LineHeight 是 line-height 的值（normal/倍数/绝对长度），沿父链继承
 	// 的是**原始形态**（倍数相对子元素自己的字号解析）。
 	LineHeight() LineHeight
@@ -325,6 +397,8 @@ func newStyle() CSSStyleDeclaration {
 	}
 	style.borderRadius = NewZeroSize()
 	style.inset = newAutoRect()
+	style.borderSpacingH = NewZeroSize()
+	style.borderSpacingV = NewZeroSize()
 	return style
 }
 
@@ -368,6 +442,10 @@ type cssStyleDeclaration struct {
 	whiteSpace       WhiteSpace
 	pointerEvents    PointerEvents
 	borderCollapse   BorderCollapse
+	borderSpacingH   Size
+	borderSpacingV   Size
+	emptyCells       EmptyCells
+	captionSide      CaptionSide
 	lineHeight       LineHeight
 	verticalAlign    VerticalAlign
 	verticalAlignOff Size
@@ -405,6 +483,10 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetWhiteSpace(s.WhiteSpace())
 	c.SetPointerEvents(s.PointerEvents())
 	c.SetBorderCollapse(s.BorderCollapse())
+	sph, spv := s.BorderSpacing()
+	c.SetBorderSpacing(sph, spv)
+	c.SetEmptyCells(s.EmptyCells())
+	c.SetCaptionSide(s.CaptionSide())
 	c.SetLineHeight(s.LineHeight())
 	c.SetVerticalAlign(s.VerticalAlign())
 	c.SetVerticalAlignOffset(s.VerticalAlignOffset())
@@ -716,6 +798,38 @@ func (style *cssStyleDeclaration) BorderCollapse() BorderCollapse {
 
 func (style *cssStyleDeclaration) SetBorderCollapse(b BorderCollapse) CSSStyleDeclaration {
 	style.borderCollapse = b
+	return style
+}
+
+func (style *cssStyleDeclaration) BorderSpacing() (h, v Size) {
+	return style.borderSpacingH, style.borderSpacingV
+}
+
+func (style *cssStyleDeclaration) SetBorderSpacing(h, v Size) CSSStyleDeclaration {
+	if h != nil {
+		style.borderSpacingH = h
+	}
+	if v != nil {
+		style.borderSpacingV = v
+	}
+	return style
+}
+
+func (style *cssStyleDeclaration) EmptyCells() EmptyCells {
+	return style.emptyCells
+}
+
+func (style *cssStyleDeclaration) SetEmptyCells(e EmptyCells) CSSStyleDeclaration {
+	style.emptyCells = e
+	return style
+}
+
+func (style *cssStyleDeclaration) CaptionSide() CaptionSide {
+	return style.captionSide
+}
+
+func (style *cssStyleDeclaration) SetCaptionSide(c CaptionSide) CSSStyleDeclaration {
+	style.captionSide = c
 	return style
 }
 

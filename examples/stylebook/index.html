@@ -37,7 +37,8 @@
   · 布局整数像素，长页逐段累积漂移约 5px/2310px
   · 边框只画单色实线（dashed/dotted/double 退化为 solid；input/按钮/hr 的
     Chrome 立体边框为单色）
-  · 表格最小模型：无 colspan/rowspan，列宽取各列内容最大值
+  · 表格完整模型：display 家族（table/inline-table/table-row/table-cell 等）、
+    colspan/rowspan、border-spacing、col 宽度、caption-side、empty-cells
   · 无斜体字形（i/em 只保证不换行）、无 webfont/@font-face
   · img/svg/canvas/iframe/video 无渲染链路，只有 CSS 盒
   · 悬停/按下默认反馈是引擎有意分歧（Chrome UA 无 hover 规则）
@@ -248,7 +249,15 @@ a  b   c    d</pre>
 
 <!-- ===== 表格 ===== -->
 <div class="sec" id="sec-table">
-	<h2>表格标签 <span class="badge b-part">部分</span></h2>
+	<h2>表格 <span class="badge b-full">支持</span></h2>
+	<p class="note">完整表格模型（CSS 2.1 §17）。角色只由 <code class="inl">display</code> 判定：
+		<code class="inl">table</code> / <code class="inl">inline-table</code> /
+		<code class="inl">table-caption</code> / <code class="inl">table-column(-group)</code> /
+		<code class="inl">table-header-group</code> / <code class="inl">table-row-group</code> /
+		<code class="inl">table-footer-group</code> / <code class="inl">table-row</code> /
+		<code class="inl">table-cell</code>——HTML 标签靠 UA 样式表落位，普通元素写
+		<code class="inl">display: table</code> 同样成网格。匿名盒、colspan/rowspan 网格、
+		border-spacing、行等高 + vertical-align、col 宽度、caption-side、empty-cells 均已支持。</p>
 	<table class="grid">
 		<caption>table.grid · border-collapse: collapse · caption/thead/tbody/tfoot/th/td</caption>
 		<thead>
@@ -262,25 +271,50 @@ a  b   c    d</pre>
 			<tr><td>合计</td><td>7</td><td>9</td></tr>
 		</tfoot>
 	</table>
-	<p class="cap">colspan / rowspan <span class="badge b-none">不支持</span>（Chrome 合并单元格，引擎按格独立排 → 错位）：</p>
+	<p class="cap">colspan / rowspan（跨列槽宽 = 所辖列宽之和；跨行格拉伸到所辖行高之和）：</p>
 	<table class="grid">
 		<thead>
-			<tr><th colspan="2">th colspan=2（引擎忽略）</th><th>第三列</th></tr>
+			<tr><th colspan="2">th colspan=2</th><th>第三列</th></tr>
 		</thead>
 		<tbody>
-			<tr><td>a</td><td>b</td><td>c</td></tr>
+			<tr><td rowspan="2">rowspan=2</td><td>a</td><td>b</td></tr>
+			<tr><td>c</td><td>d</td></tr>
 		</tbody>
 	</table>
-	<p class="cap">border-collapse: separate（引擎用 2px 间隙近似 border-spacing，Chrome 默认正好 2px）：</p>
+	<p class="cap">border-spacing: 6px（网格四边都留间距，含外缘）：</p>
 	<table class="spread">
 		<tbody>
 			<tr><td>separate 甲</td><td>separate 乙</td></tr>
 		</tbody>
 	</table>
-	<p class="note">专用布局器（列对齐 + 行堆叠）：列宽取各列内容最大值（Chrome 是自动表格布局分配，
-		带小数像素）；collapse 按「单元格画上/左 + 表格补外缘右/下」的半边框实现；
-		<code class="inl">col/colgroup</code>、<code class="inl">border-spacing</code>、
-		<code class="inl">table-layout</code> 无布局语义。</p>
+	<p class="cap">vertical-align 与行等高（同一行的格都拉伸到行高，内容按 top/middle/bottom 落位）：</p>
+	<table class="grid">
+		<tbody>
+			<tr>
+				<td class="va-top">top</td>
+				<td class="va-mid">middle</td>
+				<td class="va-bot">bottom</td>
+				<td>两行<br>内容撑高</td>
+			</tr>
+		</tbody>
+	</table>
+	<p class="cap"><code class="inl">display: table</code> 用在普通 div 上（角色只看 display，与标签名无关；
+		CSS 初始 border-spacing 是 0，所以没有 <code class="inl">&lt;table&gt;</code> 的 2px 间隙）：</p>
+	<div class="dtable">
+		<div class="drow">
+			<div class="dcell">格 1</div>
+			<div class="dcell dhead">格 2</div>
+		</div>
+		<div class="drow">
+			<div class="dcell">格 3</div>
+			<div class="dcell">格 4</div>
+		</div>
+	</div>
+	<p class="note">列宽取各列内容最大值（Chrome 是自动表格布局分配，带小数像素）；
+		collapse 按「单元格画上/左 + 表格补外缘右/下」的半边框实现。
+		已知边界：collapse 下不做相邻边框的「宽者胜」仲裁（取先声明格）；
+		rowspan 跨行组（thead→tbody）不合并；<code class="inl">table-layout</code>
+		无布局语义（始终自动表格布局）。</p>
 </div>
 
 <!-- ===== 盒模型与定位 ===== -->
@@ -564,7 +598,7 @@ a  b   c    d</pre>
 		</thead>
 		<tbody>
 			<tr><td><code class="inl">float</code> / <code class="inl">clear</code></td><td>浮动布局</td><td class="x">忽略，仍按正常流</td></tr>
-			<tr><td><code class="inl">display: flex / grid</code> 及 flex*/grid*</td><td>弹性/网格布局</td><td class="x">display 只认 none/inline/inline-block/block，其余忽略</td></tr>
+			<tr><td><code class="inl">display: flex / grid</code> 及 flex*/grid*</td><td>弹性/网格布局</td><td class="x">display 只认 none/inline/inline-block/block 与表格家族，其余忽略</td></tr>
 			<tr><td><code class="inl">opacity</code> / <code class="inl">visibility</code></td><td>半透明/可见性</td><td class="x">忽略（半透明改用 rgba 颜色）</td></tr>
 			<tr><td><code class="inl">cursor</code></td><td>光标样式</td><td class="x">忽略，光标恒默认</td></tr>
 			<tr><td><code class="inl">transform</code> / <code class="inl">transition</code> / <code class="inl">animation</code> / <code class="inl">filter</code></td><td>变换/过渡/动画/滤镜</td><td class="x">忽略</td></tr>
@@ -581,7 +615,7 @@ a  b   c    d</pre>
 			<tr><td>属性选择器 <code class="inl">~= |= ^= $= *=</code></td><td>匹配运算</td><td class="x">只支持存在性与 <code class="inl">=</code></td></tr>
 			<tr><td><code class="inl">@media</code> / <code class="inl">@font-face</code> / <code class="inl">@keyframes</code></td><td>条件/字体/动画规则</td><td class="x">整块跳过（@media 不分屏，内容不生效）</td></tr>
 			<tr><td><code class="inl">@import</code></td><td>导入样式表</td><td>支持（需宿主提供加载器，本页未用）</td></tr>
-			<tr><td><code class="inl">col</code> / <code class="inl">colgroup</code> / colspan / rowspan</td><td>表格扩展</td><td class="x">无布局语义</td></tr>
+			<tr><td><code class="inl">table-layout: fixed</code> / collapse 边框冲突仲裁</td><td>固定表格布局/宽者胜</td><td class="x">始终自动布局；collapse 取先声明格的边框</td></tr>
 			<tr><td><code class="inl">script</code> / <code class="inl">meta</code> / <code class="inl">base</code></td><td>脚本执行/元数据</td><td class="x">解析期丢弃（script 不进 DOM、不执行）</td></tr>
 			<tr><td><code class="inl">img</code> / <code class="inl">svg</code> / <code class="inl">canvas</code> / <code class="inl">iframe</code> / <code class="inl">video</code></td><td>图像/矢量/画布/嵌入</td><td class="x">无渲染链路，只有 CSS 盒</td></tr>
 			<tr><td><code class="inl">white-space: nowrap</code> / <code class="inl">pre-wrap</code></td><td>折行控制</td><td class="x">只区分 pre 与其余（nowrap 按 normal 折行）</td></tr>

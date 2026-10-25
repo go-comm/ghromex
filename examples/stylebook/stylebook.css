@@ -331,9 +331,10 @@ table.grid caption {
 	padding: 2px 0;
 }
 
-/* separate：引擎用 2px 间隙近似 border-spacing（Chrome 默认正好 2px） */
+/* separate：显式 border-spacing（网格四边都留，含外缘） */
 table.spread {
 	border-collapse: separate;
+	border-spacing: 6px;
 	border: 2px solid #c9d2db;
 	margin: 6px 0;
 }
@@ -342,6 +343,43 @@ table.spread td {
 	border: 1px solid #c9d2db;
 	padding: 5px 10px;
 	font-size: 14px;
+}
+
+/* 单元格 vertical-align：行等高，内容按三档落位 */
+td.va-top {
+	vertical-align: top;
+}
+
+td.va-mid {
+	vertical-align: middle;
+}
+
+td.va-bot {
+	vertical-align: bottom;
+}
+
+/* display: table 对照：角色只看 display，普通 div 也能排成网格
+   （border-spacing 的 CSS 初始值是 0，没有 <table> 的 2px） */
+.dtable {
+	display: table;
+	border-spacing: 0;
+	margin: 6px 0;
+}
+
+.drow {
+	display: table-row;
+}
+
+.dcell {
+	display: table-cell;
+	border: 1px solid #c9d2db;
+	padding: 6px 12px;
+	font-size: 14px;
+}
+
+.dhead {
+	background-color: #f1f5f9;
+	font-weight: bold;
 }
 
 /* ===== 盒模型与定位 ===== */

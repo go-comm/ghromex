@@ -59,6 +59,11 @@ func resolveStylesTreeIn(doc HTMLDocument, e HTMLElement, base *htmlElement,
 		// 父级 line-height:1.5 + 子级 font-size:32px → 子级行高 48px，
 		// 继承成像素就锁死在父级字号上了。
 		comp.SetLineHeight(pc.LineHeight())
+		// empty-cells / caption-side 是继承属性：作者写在 table 上（常见）
+		// 或写在祖先上，靠继承落到单元格与题注；border-spacing 不继承，
+		// 表格布局只读表格元素自身的声明。
+		comp.SetEmptyCells(pc.EmptyCells())
+		comp.SetCaptionSide(pc.CaptionSide())
 		if pcs, ok := pc.(*cssStyleDeclaration); ok {
 			if cs, ok := comp.(*cssStyleDeclaration); ok {
 				cs.fontSizeExplicit = pcs.fontSizeExplicit

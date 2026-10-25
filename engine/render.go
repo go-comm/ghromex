@@ -415,7 +415,9 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 
 		paintBD, borderColors, hasBorder := borderPaintState(comp, bd)
 
-		if inView {
+		// empty-cells: hide 的单元格：背景与边框不画（CSS 2.1 §17.5.1.1），
+		// 几何与命中照旧（Chrome 同口径）。
+		if inView && !base.noCellDeco {
 			if bg := comp.BackgroundColor(); bg != nil {
 				fillRoundedRect(g, bx, by, bw, bh, r, bg)
 			}

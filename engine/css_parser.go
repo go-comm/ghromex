@@ -529,6 +529,41 @@ func parseVerticalAlign(v string) (VerticalAlign, Size, bool) {
 	return VerticalAlignBaseline, nil, false
 }
 
+// parseBorderSpacing 解析 border-spacing 的 1~2 值。合法分量必须是
+// 非负、非百分比、非 auto 的长度（px/pt/dp/无单位）；非法返回 ok=false，
+// 调用方整条声明忽略——CSS 语义是「一条声明要么全部生效要么全部无效」，
+// 只写一半间距比不写更糟。
+func parseBorderSpacing(v string) (h, vSp Size, ok bool) {
+	fields := strings.Fields(v)
+	if len(fields) == 0 || len(fields) > 2 {
+		return nil, nil, false
+	}
+	h = parseLength(fields[0])
+	if !validSpacingSize(h) {
+		return nil, nil, false
+	}
+	vSp = h
+	if len(fields) == 2 {
+		vSp = parseLength(fields[1])
+		if !validSpacingSize(vSp) {
+			return nil, nil, false
+		}
+	}
+	return h, vSp, true
+}
+
+// validSpacingSize 判断分量是否是合法的间距长度。
+func validSpacingSize(s Size) bool {
+	if s == nil {
+		return false
+	}
+	switch s.Type() {
+	case SIZE_PERCENT, SIZE_AUTO:
+		return false
+	}
+	return resolveLen(s, 0) >= 0
+}
+
 // applyDecl 将单条声明写入样式对象。未识别的属性被忽略。
 func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 	v := strings.ToLower(strings.TrimSpace(value))
@@ -543,6 +578,26 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 			comp.SetDisplay(DisplayInlineBlock)
 		case "block":
 			comp.SetDisplay(DisplayBlock)
+		case "table":
+			comp.SetDisplay(DisplayTable)
+		case "inline-table":
+			comp.SetDisplay(DisplayInlineTable)
+		case "table-caption":
+			comp.SetDisplay(DisplayTableCaption)
+		case "table-column":
+			comp.SetDisplay(DisplayTableColumn)
+		case "table-column-group":
+			comp.SetDisplay(DisplayTableColumnGroup)
+		case "table-header-group":
+			comp.SetDisplay(DisplayTableHeaderGroup)
+		case "table-footer-group":
+			comp.SetDisplay(DisplayTableFooterGroup)
+		case "table-row-group":
+			comp.SetDisplay(DisplayTableRowGroup)
+		case "table-row":
+			comp.SetDisplay(DisplayTableRow)
+		case "table-cell":
+			comp.SetDisplay(DisplayTableCell)
 		}
 	case "position":
 		switch v {
@@ -602,6 +657,27 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 			comp.SetBorderCollapse(BorderCollapseCollapse)
 		} else {
 			comp.SetBorderCollapse(BorderCollapseSeparate)
+		}
+	case "border-spacing":
+		// 1~2 个长度（单值同写两轴）。CSS 不接受负值与百分比，auto 非法：
+		// 任一分量非法则整条声明忽略（保留继承前的默认 0 / UA 2px）。
+		if h, vSp, ok := parseBorderSpacing(v); ok {
+			comp.SetBorderSpacing(h, vSp)
+		}
+	case "empty-cells":
+		// 只区分 hide 与其余值（show 为 CSS 默认）。语义见 EmptyCells。
+		if v == "hide" {
+			comp.SetEmptyCells(EmptyCellsHide)
+		} else {
+			comp.SetEmptyCells(EmptyCellsShow)
+		}
+	case "caption-side":
+		// 只区分 bottom 与其余值（top 为 CSS 默认；left/right 属竖排表格，
+		// 引擎按 top 处理）。
+		if v == "bottom" {
+			comp.SetCaptionSide(CaptionSideBottom)
+		} else {
+			comp.SetCaptionSide(CaptionSideTop)
 		}
 	case "top":
 		comp.SetInset(edgeRect(comp.Inset(), edgeTop, parseLength(v)))
