@@ -1,5 +1,7 @@
 # 临时与调试产物
 .temp/
+# git commit -F 用的临时提交信息文件
+.gitcommitmsg
 # playwright MCP 在仓库根落盘的对照截图与页面快照
 .playwright-mcp/
 *.log
