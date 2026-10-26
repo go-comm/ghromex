@@ -5,6 +5,30 @@
 
 ## 未发布
 
+**伪元素 `::before` / `::after`**：支持用 `content` 生成装饰盒（圆点、箭头、
+徽标、引号等）。生成盒是宿主的真实子元素，插在 `children` 首/尾参与常规
+布局、绘制、命中与 SVG 导出；但它不是 DOM 节点——`Children()` / `InnerText` /
+查询 API 都看不到它，`:first-child` / `:empty` 等结构伪类也不把它算进子节点。
+
+- 选择器：`::before` / `::after`，兼容单冒号旧写法 `:before` / `:after`；
+  伪元素按类型选择器档计特异度。`p:hover::before` 的 `:hover` 按宿主状态
+  匹配（悬停切换 `content` 会随重排更新）。未知伪元素（`::first-line` 等）
+  仍永不匹配。
+- `content`：带引号字符串（含 CSS 转义）、`attr(属性名)`、多分量拼接
+  （`content: "[" attr(data-k) "]"`）；`none` / `normal` 不生成盒子；
+  `content: ""` 仍生成空盒（可配 `width/height/background` 画圆点）。
+  `counter()` / `url()` / `open-quote` 等取值未实现。
+- 生成盒默认 `display:inline`（不是引擎 `newStyle` 的 `inline-block`），
+  其余继承口径与普通子元素一致；作者可写 `display/width/height/padding/
+  border/background/position` 等常规属性。
+- 边界：替换元素与表单控件（`input`/`textarea`/`select`/`img`/`br` 等）
+  不生成；表格结构盒（`table`/`tr`/行组/列）不生成（避免生成盒被表格布局
+  误当成行/列），单元格与题注支持。样式表没有伪元素规则时整条路径跳过，
+  不给常规布局增加扫描开销。
+- 回归测试：`engine/generated_test.go`（源序/颜色、DOM 过滤、`attr()`、
+  `content:none`、空内容盒、单冒号、`:hover::before`、未知伪元素）与
+  `engine/generated_internal_test.go`（首尾挂载、content 消失后清理、空内容）。
+
 **完整表格模型（CSS 2.1 §17）**：表格布局入口从「按标签名」改为「按 `display`
 判定」——HTML 标签仍靠 UA 样式表落位，任意元素写 `display: table` 同样成网格
 （Chrome 同款）。

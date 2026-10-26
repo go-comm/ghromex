@@ -193,6 +193,23 @@ type htmlElement struct {
 	// list-item 概念，标记由布局期按父级 ul/ol 算出、绘制期画在内容左缘
 	// 左侧（Chrome 口径：右对齐到内容左缘 −0.5em）。
 	listMarker string
+	// generated 标记该元素是 ::before/::after 生成盒。生成盒放在宿主的
+	// children 里参与布局/绘制/命中，但不是 DOM 的一部分：Children() 会
+	// 过滤掉它，选择器（:first-child 等）与 InnerText 也看不到它。
+	generated bool
+	// genPseudo 是生成盒对应的伪元素名（"before"/"after"）。
+	genPseudo string
+	// genHost 是生成盒的宿主元素。
+	genHost *htmlElement
+	// genBefore/genAfter 是宿主缓存的两个生成盒（无则 nil）。缓存起来是
+	// 为了每轮重排复用节点：悬停等状态变化会频繁触发级联，每帧新建节点
+	// 既浪费分配，也会让布局缓存（文本 runs）反复重建。
+	genBefore, genAfter *htmlElement
+	// genText 是生成盒内的文本节点（内容为空时为 nil）。
+	genText *textNode
+	// hasGenerated 表示 children 里含生成盒（Children() 据此走过滤路径；
+	// 没有生成盒时返回原切片，不分配）。
+	hasGenerated bool
 	// rsvPD/rsvBD 为布局期解析出的 padding/border 边长（百分比按包含块
 	// 宽度解析）。绘制与命中必须复用同一份：百分比 padding 在布局期按
 	// 百分比算、在绘制期若按 0 基数算，背景/边框就会画在错误的盒上，
@@ -340,8 +357,20 @@ func (element *htmlElement) RemoveChild(e HTMLElement, es ...HTMLElement) {
 	element.onChanged()
 }
 
+// Children 返回元素子节点。::before/::after 生成盒不在其中：它们是渲染
+// 期产物，不是 DOM 节点（脚本/选择器/InnerText 都不应看到）。
 func (element *htmlElement) Children() []HTMLElement {
-	return element.children
+	if !element.hasGenerated {
+		return element.children
+	}
+	out := make([]HTMLElement, 0, len(element.children))
+	for _, child := range element.children {
+		if cb := inner(child); cb != nil && cb.generated {
+			continue
+		}
+		out = append(out, child)
+	}
+	return out
 }
 
 func (element *htmlElement) ParentElement() HTMLElement {
@@ -395,6 +424,9 @@ func (element *htmlElement) Text() string {
 // SetText 用单一文本子节点替换全部子节点。
 func (element *htmlElement) SetText(text string) {
 	element.children = nil
+	// 生成盒随子节点一起被清掉；下一轮级联会按伪元素规则重建。
+	element.genBefore, element.genAfter = nil, nil
+	element.hasGenerated = false
 	element.text = text
 	if text != "" {
 		tn := NewTextNode(text)
@@ -427,7 +459,7 @@ func (element *htmlElement) SetInnerText(text string) {
 func (element *htmlElement) InnerHTML() string {
 	// TODO: 序列化子树为 HTML 标记文本，当前退化为 JSON
 	var b strings.Builder
-	for _, child := range element.children {
+	for _, child := range element.Children() {
 		b.WriteString(child.String())
 	}
 	return b.String()
@@ -435,6 +467,9 @@ func (element *htmlElement) InnerHTML() string {
 
 func (element *htmlElement) SetInnerHTML(html string) {
 	element.children = nil
+	// 生成盒随子节点一起被清掉；下一轮级联会按伪元素规则重建。
+	element.genBefore, element.genAfter = nil, nil
+	element.hasGenerated = false
 	if element.tagName == "html" {
 		if doc, ok := element.self.(HTMLDocument); ok {
 			ParseHTMLInto(doc, html)
@@ -543,6 +578,14 @@ func (element *htmlElement) Clone() HTMLElement {
 	c.parentElement = nil
 	c.runs = nil
 	c.computed = nil
+	// 生成盒是宿主级联的产物，不随克隆复制：克隆元素会按自己的伪元素
+	// 规则重建（共享节点会造成两个宿主争用同一份布局几何）。
+	c.generated = false
+	c.genPseudo = ""
+	c.genHost = nil
+	c.genBefore, c.genAfter = nil, nil
+	c.genText = nil
+	c.hasGenerated = false
 	c.handlers = nil
 	c.inline = nil
 	c.paint = element.paint
@@ -732,7 +775,9 @@ func (element htmlElement) writeToJSON(w io.StringWriter, prefix string, indent 
 		w.WriteString("\"")
 	}
 
-	children := element.children
+	// 用 Children() 而不是 children：::before/::after 生成盒不属于 DOM，
+	// JSON 视图（调试/脚本）也不该看到它们。
+	children := element.Children()
 	if len(children) > 0 {
 		w.WriteString(",")
 		if indent {

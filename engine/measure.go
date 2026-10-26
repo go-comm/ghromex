@@ -918,7 +918,9 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	}
 	addPreText := func(tn *textNode, raw string) {
 		// HTML 规范：<pre> 开标签后紧跟的第一个换行不属于内容。
-		if len(el.children) > 0 && HTMLElement(tn) == el.children[0] {
+		// 用「第一个非生成盒子节点」判定：::before 生成盒插在 children[0]
+		// 时，首段文本仍是真正的第一个内容子节点。
+		if firstNonGeneratedChild(el) == HTMLElement(tn) {
 			raw = strings.TrimPrefix(raw, "\r\n")
 			raw = strings.TrimPrefix(raw, "\n")
 		}

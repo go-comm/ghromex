@@ -580,11 +580,19 @@ a  b   c    d</pre>
 	<span class="em"></span><span class="em">:empty 不中</span>
 	<span class="code">:empty（左盒无内容命中变绿，右盒有文字不中）</span>
 
+	<p class="cap">伪元素 ::before / ::after（content 生成盒）：</p>
+	<span class="gen">文本前后缀</span>
+	<span class="gen attr" data-owner="林晓">attr() 取属性</span>
+	<span class="gen dot">空 content 圆点</span>
+
 	<p class="note">共 11 个伪类：:hover/:focus/:active、:checked/:disabled/:enabled、
 		:first-child/:last-child/:only-child/:root/:empty。悬停与按下<b>沿父链继承</b>
 		（父级 :hover 时子级也匹配）、聚焦不继承；状态变化走「变更通知 → 重排重绘 → 级联重算」。
 		<code class="inl">:root</code> 命中 &lt;html&gt;——本页整圈浅绿底色即其效果（body 白底让位处可见）。
-		伪元素（::before/::after 等）<b>永不命中</b>（末节清单）。</p>
+		伪元素 <code class="inl">::before</code>/<code class="inl">::after</code>
+		（含单冒号旧写法）支持 <code class="inl">content</code> 字符串、<code class="inl">attr()</code>
+		与多分量拼接，生成盒默认 inline，可写宽高/背景/定位；它<b>不在 DOM 里</b>
+		（Children/InnerText/查询都看不到）。</p>
 </div>
 
 <!-- ===== 不支持清单 ===== -->
@@ -609,7 +617,7 @@ a  b   c    d</pre>
 			<tr><td><code class="inl">min/max-width</code> / <code class="inl">min/max-height</code></td><td>尺寸钳制</td><td class="x">忽略</td></tr>
 			<tr><td><code class="inl">em</code> / <code class="inl">rem</code> / <code class="inl">ex</code> / <code class="inl">ch</code> / <code class="inl">vh</code> / <code class="inl">vw</code></td><td>相对/视口单位</td><td class="x">不解析（只认 px/pt/dp/%/0/无单位）</td></tr>
 			<tr><td><code class="inl">calc()</code> / <code class="inl">var()</code> / <code class="inl">hsl()</code></td><td>函数值</td><td class="x">不解析</td></tr>
-			<tr><td><code class="inl">::before</code> / <code class="inl">::after</code> / <code class="inl">::marker</code> 等伪元素</td><td>生成内容</td><td class="x">解析但选择器永不命中</td></tr>
+			<tr><td><code class="inl">::marker</code> / <code class="inl">::first-line</code> 等其余伪元素</td><td>生成内容</td><td class="x">只支持 ::before/::after，其余永不命中</td></tr>
 			<tr><td><code class="inl">:not()</code> / <code class="inl">:nth-child()</code> / <code class="inl">:is()</code> / <code class="inl">:focus-within</code></td><td>结构伪类</td><td class="x">未识别伪类，永不匹配</td></tr>
 			<tr><td><code class="inl">+</code> / <code class="inl">~</code> 组合器、通配 <code class="inl">*</code></td><td>兄弟/通配选择</td><td class="x">不命中（* 被当成标签名）</td></tr>
 			<tr><td>属性选择器 <code class="inl">~= |= ^= $= *=</code></td><td>匹配运算</td><td class="x">只支持存在性与 <code class="inl">=</code></td></tr>

@@ -475,7 +475,13 @@ table-footer-group/table-row/table-cell)`、`width/height`、
 特异度。`:hover`/`:active` 沿父链继承——鼠标停在子元素上时祖先同样匹配；
 `:focus` 只落在焦点元素上。动态伪类的状态存在文档上，状态变化走
 「变更通知 → 重排重绘 → 级联重算」，与浏览器的链路一致；
-伪元素 `::before`/`::after` 与 `:not()`/`:nth-child()` 未实现）、
+`:not()`/`:nth-child()` 未实现）、
+**伪元素** `::before`/`::after`（单冒号旧写法 `:before`/`:after` 等价；
+`content` 支持带引号字符串、`attr(属性名)` 与多分量拼接，`none`/`normal`
+不生成盒子；生成盒默认 `display:inline`，可写 `width/height/padding/
+border/background/position` 等常规属性，参与布局、绘制、命中与 SVG 导出，
+但不出现在 `Children()`/`InnerText`/查询结果里——不是 DOM 节点；
+`counter()`/`url()`/`open-quote` 等取值未实现）、
 `position(relative/absolute/fixed)`、`top/right/bottom/left`(px 与 %，支持负值；
 absolute/fixed 相对包含块锚定，right/bottom 回推)、`z-index`（非 0 的定位元素与 fixed 元素建立层叠上下文；z:auto 与 z:0 暂不区分）、
 `overflow(visible/hidden/clip/scroll/auto：单值作用两轴、两值为 overflow-x overflow-y、
@@ -599,7 +605,7 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
 - 布局为块级 + 行内/inline-block 流式布局 + 定位子集；无 flex/grid；**textarea 有覆盖式滚动条**（内容溢出即显示，轨道点击跳转 + 滑块拖拽，见 engine/textarea.go），通用容器滚动仍仅滚轮驱动（无滚动条 UI、无 PageUp/PageDown 翻页键、无触控板惯性），wheel 步长 100px/档（与 Chrome/Windows 一致）；文档级滚动为**动画式**：**基于时间的缓动 + 目标位置累加**（Chrome 同款）——滚轮只把目标（`scrollTop`/`scrollLeft`）累加一档，每帧按「已推进的动画时间 / 150ms」求进度 t∈[0,1]，位置 = 起点 + (目标 − 起点) × easeOutQuad(t)；时长用**墙钟时间**算而非帧计数（高刷屏不会滚太快、掉帧不会变速），不用「固定帧数每帧加 11px」（那样在高刷/掉帧时会变速）；连续滚动时新的一档目标继续累加、缓动段从**当前视觉位置**重新起算（位置连续、不跳）；60Hz 下一档 100px 的累计位移是 21.0、39.5、55.6、69.1、80.2、88.9、95.1、98.8、100（每帧增量 21、19、16、13、11、9、6、4、1，单调不增——可见位移按「每帧位移取整」而非「累积位置取整」，后者会在 floor/ceil 之间来回跳，看着像抖）；**两轴各自计时**（frame clock 与缓动进度都分轴：只滚纵向不会把横向的动画重新计时，也不会截断横向的帧间隔——触控板 momentum 时 wheel 比帧还密，共用时钟会让另一轴几乎停住）；单帧推进量有上限（20ms 动画进度：卡顿的一帧——新内容进视口要现建纹理/字模，可能上百毫秒——不会让内容跳过一整段距离；代价是**低于 50Hz 的屏上动画会被拉长**，45Hz 约 165ms、30Hz 约 250ms）；滚动只平移子树——**动画帧不重排**（`engine.TickScroll` 按增量平移已布局的盒子，级联与布局只在内容变化时跑）；绘制时按**视口裁剪**（完全落在视口外的盒子不画，滚动时页面下半部分不再白画一遍：portal 页每帧绘制调用 2624 → 1014）；字体路径解析与文本度量已缓存（文本度量按「文本+字号+粗细+family」），examples/ua 单次重排约 1~2ms。但滚动偏移无对外 DOM API（`scrollTop`/`scrollLeft` 未导出，仅由 wheel 与 textarea 光标跟随内部驱动），亦无 `scroll`/`wheel` 之外的滚动事件；引擎是**单线程**的（事件派发与每帧的 `TickScroll` 必须在同一 goroutine，否则要自行加锁）
 - position v1 边界：absolute 双锚（left+right 同给）时 auto 宽按内容收缩而非拉伸；未实现嵌套层叠上下文（opacity/transform 成组、负 z-index 压至祖先背景之下）；命中测试未按 z-index 取最上层元素（select 选项浮层例外，按浮层层序优先）
 - 行内盒的基线：inline-block 的基线取「盒底 − 字体 descent」（内容高度 = 行高时与 Chrome 的「最后一行基线」同值）；**定高盒装不下内容**（文字折行溢出盒外）时，Chrome 的基线是**最后一行**的基线（CSS 2.1 §10.8.1），引擎仍取盒底 → 同行的后续盒不会被推下去（差一整个行高）
-- 伪类只实现了常用的一组（`:hover`/`:focus`/`:active`/`:checked`/`:disabled`/`:enabled`/`:first-child`/`:last-child`/`:only-child`/`:root`/`:empty`）：**伪元素 `::before`/`::after` 与 `:not()`/`:nth-child()`/`:is()` 未实现**（未知伪类一律不匹配）；`:hover`/`:active` 沿父链继承但**不跨 shadow DOM/iframe 边界**（引擎无这些概念）；焦点扩展到 button/链接后，**Tab 仍只在可编辑输入之间循环**（浏览器会把按钮也纳入 Tab 序——引擎保留原行为以免打断记事本的「Tab 在文本框间移动」习惯）；悬停态变化会触发**整页重排**（级联是全量重算，见下条），大页面 + 高频鼠标移动时开销明显；`:focus` 只改样式，**按钮/链接不画焦点框**（引擎只给可编辑控件画蓝框）
+- 伪类只实现了常用的一组（`:hover`/`:focus`/`:active`/`:checked`/`:disabled`/`:enabled`/`:first-child`/`:last-child`/`:only-child`/`:root`/`:empty`），伪元素实现了 `::before`/`::after`（`content` 支持字符串与 `attr()`；`counter()`/`url()` 等未实现，未知伪元素一律不匹配）：`:not()`/`:nth-child()`/`:is()` 未实现；`:hover`/`:active` 沿父链继承但**不跨 shadow DOM/iframe 边界**（引擎无这些概念）；焦点扩展到 button/链接后，**Tab 仍只在可编辑输入之间循环**（浏览器会把按钮也纳入 Tab 序——引擎保留原行为以免打断记事本的「Tab 在文本框间移动」习惯）；悬停态变化会触发**整页重排**（级联是全量重算，见下条），大页面 + 高频鼠标移动时开销明显；`:focus` 只改样式，**按钮/链接不画焦点框**（引擎只给可编辑控件画蓝框）
 - `<input>` 可编辑仅支持 text/password 类型；radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate / 表单重置；无剪切（Ctrl+X）、无按词扩展选区（Ctrl+Shift+方向键）
 - `<select>` 仅鼠标交互（展开/收起/选中），无键盘上下键选择、无 multiple、无 optgroup；选项浮层不随视口裁剪（超出视口的选项画到窗口外）；收起态按内容收缩（文字 + 箭头位 16px，与 Chrome 同口径）
 - `<textarea>` 无剪切（Ctrl+X）、无按词扩展选区（Ctrl+Shift+方向键）；滚轮可滚动（超盒高的行随滚动偏移平移、半截行按裁剪截断；后端未实现 `Clipper` 时退化为整行丢弃）

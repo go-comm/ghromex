@@ -295,14 +295,15 @@ func TestPseudoUnknownNeverMatches(t *testing.T) {
 	}
 }
 
-// 伪元素未实现：含伪元素的片段永不匹配（不能退化成只匹配标签）。
-func TestPseudoElementNeverMatches(t *testing.T) {
+// 伪元素规则不能退化成只匹配标签：没有 content 时 ::before 不生成盒子，
+// 规则里的 width 也不该落到宿主元素上。
+func TestPseudoElementWithoutContentNeverMatches(t *testing.T) {
 	doc := pseudoDoc(t, `<!doctype html><html><head><style>
 		div { width: 40px; }
 		div::before { width: 300px; }
 	</style></head><body style="margin:0"><div id="d">x</div></body></html>`)
 	if got := widthOf(t, doc.QuerySelector("#d")); got != 40 {
-		t.Errorf("宽 = %d, want 40（伪元素未实现，不该命中）", got)
+		t.Errorf("宽 = %d, want 40（无 content 不该生成盒子，也不该命中宿主）", got)
 	}
 }
 

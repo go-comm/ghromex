@@ -18,10 +18,14 @@ type compoundSelector struct {
 	// pseudos 是伪类名列表（:hover/:focus/:first-child…，小写、不含冒号）。
 	// 伪类与标签/类/属性写在同一个片段里（a:hover、li:first-child）。
 	pseudos []string
-	// pseudoElement 标记该片段含伪元素（::before/::after）。引擎不支持
-	// 伪元素，含伪元素的片段**永不匹配**——不能把 "p::before" 退化成
-	// "p"（那会让所有 p 都吃到伪元素的声明）。
-	pseudoElement bool
+	// pseudoElement 是该片段尾部的伪元素名（小写、不含冒号）：
+	// "before"/"after" 表示引擎支持的生成盒，其他值（如 "first-line"）
+	// 是未支持的伪元素。空串表示没有伪元素。
+	//
+	// 含伪元素的片段不参与**元素自身**的匹配——不能把 "p::before" 退化成
+	// "p"（那会让所有 p 都吃到伪元素的声明）；它只由伪元素级联按宿主
+	// 元素匹配（见 matchPseudoElementChain）。
+	pseudoElement string
 }
 
 // Selector 是从左到右排列的复合选择器序列，combs[i] 位于 compounds[i] 与 compounds[i+1] 之间。
@@ -39,7 +43,8 @@ func (s *Selector) isEmpty() bool {
 // 编码保证整数比较与 CSS 优先级一致——旧实现用 id*100 + class*10 + tag，
 // 11 个类（110）会压过 1 个 id（100），与 CSS 相反。
 //
-// 伪类按 class 档计特异度（CSS 2.1 §6.4.3：伪类与类选择器同级）。
+// 伪类按 class 档计特异度（CSS 2.1 §6.4.3：伪类与类选择器同级）；
+// 伪元素按类型选择器档计（Selectors 3 §9：伪元素与标签同级）。
 func (s *Selector) Specificity() int {
 	var a, b, c int
 	for _, cp := range s.compounds {
@@ -48,6 +53,9 @@ func (s *Selector) Specificity() int {
 		}
 		b += len(cp.classes) + len(cp.attrs) + len(cp.pseudos)
 		if cp.tag != "" {
+			c++
+		}
+		if cp.pseudoElement != "" {
 			c++
 		}
 	}
@@ -125,8 +133,9 @@ func ParseSelector(q string) *Selector {
 				cur.classes = append(cur.classes, q[i+1:j])
 				i = j
 			case ':':
-				// 伪类（:hover/:focus…）或伪元素（::before）。伪元素引擎
-				// 暂无支持，解析出来但不参与匹配（整条选择器不会命中）。
+				// 伪类（:hover/:focus…）或伪元素（::before/::after）。
+				// 单冒号的 :before/:after 是 CSS 2.1 的旧写法，按伪元素处理
+				// （Chrome 同样兼容）。
 				j := i + 1
 				element := false
 				if j < len(q) && q[j] == ':' {
@@ -138,8 +147,15 @@ func ParseSelector(q string) *Selector {
 					j++
 				}
 				name := strings.ToLower(q[nameStart:j])
+				if !element && (name == pseudoElementBefore || name == pseudoElementAfter) {
+					element = true
+				}
 				if element {
-					cur.pseudoElement = true
+					if name == "" {
+						// "::" 后没有名字：按未支持的伪元素处理（永不匹配）。
+						name = "?"
+					}
+					cur.pseudoElement = name
 				} else if name != "" {
 					cur.pseudos = append(cur.pseudos, name)
 				}
@@ -195,12 +211,20 @@ func isPseudoChar(ch byte) bool {
 
 // matchCompound 判断元素是否匹配一个复合选择器片段。伪类按当前状态
 // 匹配（hover/focus/active 来自文档状态，first-child 等看 DOM 形状）。
+//
+// 带伪元素的片段不匹配元素自身：伪元素是生成盒，不是宿主元素的一部分，
+// 它由伪元素级联单独匹配（matchPseudoElementChain）。
 func matchCompound(doc HTMLDocument, c *compoundSelector, e HTMLElement) bool {
-	if e == nil {
+	if c == nil || c.pseudoElement != "" {
 		return false
 	}
-	if c.pseudoElement {
-		// 伪元素未实现：整条选择器不匹配（不能退化成只匹配标签/类）。
+	return matchCompoundBase(doc, c, e)
+}
+
+// matchCompoundBase 匹配复合选择器片段里**除伪元素之外**的部分。伪元素
+// 级联用宿主元素调它：p:hover::before 的 :hover 仍然按宿主状态判定。
+func matchCompoundBase(doc HTMLDocument, c *compoundSelector, e HTMLElement) bool {
+	if e == nil {
 		return false
 	}
 	if c.tag != "" && !strings.EqualFold(e.TagName(), c.tag) {
@@ -232,17 +256,41 @@ func matchCompound(doc HTMLDocument, c *compoundSelector, e HTMLElement) bool {
 	return true
 }
 
-// matchSelectorChain 从右向左沿父链匹配。
+// matchSelectorChain 从右向左沿父链匹配元素自身（尾部片段不得带伪元素）。
 func matchSelectorChain(doc HTMLDocument, s *Selector, e HTMLElement) bool {
-	if s.isEmpty() {
+	return matchChain(doc, s, e, "")
+}
+
+// matchPseudoElementChain 判断元素是否匹配「宿主 + 伪元素」形式的规则：
+// 选择器尾部片段必须带同名伪元素（before/after），其余部分按宿主元素
+// 与父链匹配。祖先片段带伪元素（如 "p::before span"）不支持——伪元素
+// 生成盒不参与选择器匹配，这种选择器永不命中。
+func matchPseudoElementChain(doc HTMLDocument, s *Selector, e HTMLElement, kind string) bool {
+	return matchChain(doc, s, e, kind)
+}
+
+// matchChain 是两条匹配路径的公共实现。pseudo 为空时匹配元素自身；
+// 非空时要求尾部片段带该伪元素、按宿主元素匹配。
+func matchChain(doc HTMLDocument, s *Selector, e HTMLElement, pseudo string) bool {
+	if s.isEmpty() || e == nil {
 		return false
 	}
 	last := len(s.compounds) - 1
-	if !matchCompound(doc, s.compounds[last], e) {
-		return false
+	tail := s.compounds[last]
+	if pseudo == "" {
+		if !matchCompound(doc, tail, e) {
+			return false
+		}
+	} else {
+		if tail.pseudoElement != pseudo || !matchCompoundBase(doc, tail, e) {
+			return false
+		}
 	}
 	cur := e.ParentElement()
 	for j := last - 1; j >= 0; j-- {
+		if s.compounds[j].pseudoElement != "" {
+			return false
+		}
 		comb := s.combs[j]
 		if comb == combChild {
 			if cur == nil || !matchCompound(doc, s.compounds[j], cur) {

@@ -8,6 +8,31 @@ import (
 // Stylesheet 是解析后的 CSS 规则集合。
 type Stylesheet struct {
 	rules []cssRule
+	// hasPseudo 缓存「是否含伪元素规则」。伪元素级联要为每个元素额外扫
+	// 一遍规则表；绝大多数页面没有 ::before/::after，缓存后这条路径可以
+	// 整体跳过，不给常规布局增加开销。
+	hasPseudo bool
+}
+
+// hasPseudoRules 报告样式表里是否有伪元素选择器（结果惰性缓存）。
+func (s *Stylesheet) hasPseudoRules() bool {
+	if s == nil {
+		return false
+	}
+	if s.hasPseudo {
+		return true
+	}
+	for _, r := range s.rules {
+		for _, sel := range r.sels {
+			for _, cp := range sel.compounds {
+				if cp.pseudoElement != "" {
+					s.hasPseudo = true
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 type cssRule struct {
@@ -155,7 +180,9 @@ func stripCSSComments(src string) string {
 
 func parseDeclarations(body string) []simpleDecl {
 	var out []simpleDecl
-	for _, part := range strings.Split(body, ";") {
+	// 用 splitTopLevel 而不是 strings.Split：content 字符串、url(data:…)
+	// 里的分号属于值本身，不是声明分隔符。
+	for _, part := range splitTopLevel(body, ';') {
 		colon := strings.IndexByte(part, ':')
 		if colon < 0 {
 			continue

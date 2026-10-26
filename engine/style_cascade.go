@@ -42,33 +42,7 @@ func resolveStylesTreeIn(doc HTMLDocument, e HTMLElement, base *htmlElement,
 
 	// 继承性默认值
 	if parentBase != nil && parentBase.computed != nil {
-		pc := parentBase.computed
-		comp.SetColor(pc.Color())
-		if fs := pc.FontSize(); fs != nil {
-			comp.SetFontSize(fs)
-		}
-		comp.SetFontFamily(pc.FontFamily())
-		comp.SetFontWeight(pc.FontWeight())
-		comp.SetTextAlign(pc.TextAlign())
-		comp.SetTextDecoration(pc.TextDecoration())
-		comp.SetWhiteSpace(pc.WhiteSpace())
-		// pointer-events 是继承属性：占位块/分隔线声明 none 之后，它里面的
-		// 内容（如果有）默认也跟着不可点，子级自己声明 auto 才恢复。
-		comp.SetPointerEvents(pc.PointerEvents())
-		// line-height 继承**原始形态**（倍数/绝对长度），不是解析后的像素：
-		// 父级 line-height:1.5 + 子级 font-size:32px → 子级行高 48px，
-		// 继承成像素就锁死在父级字号上了。
-		comp.SetLineHeight(pc.LineHeight())
-		// empty-cells / caption-side 是继承属性：作者写在 table 上（常见）
-		// 或写在祖先上，靠继承落到单元格与题注；border-spacing 不继承，
-		// 表格布局只读表格元素自身的声明。
-		comp.SetEmptyCells(pc.EmptyCells())
-		comp.SetCaptionSide(pc.CaptionSide())
-		if pcs, ok := pc.(*cssStyleDeclaration); ok {
-			if cs, ok := comp.(*cssStyleDeclaration); ok {
-				cs.fontSizeExplicit = pcs.fontSizeExplicit
-			}
-		}
+		applyInheritedStyle(comp, parentBase.computed)
 	} else {
 		comp.SetColor(NewColor(0, 0, 0, 255))
 		comp.SetFontSize(NewSize(SIZE_PIXEL, 16, 0))
@@ -137,12 +111,54 @@ func resolveStylesTreeIn(doc HTMLDocument, e HTMLElement, base *htmlElement,
 	}
 	base.computed = comp
 
+	// ::before/::after 生成盒：样式按宿主元素级联，盒按宿主元素挂载
+	// （见 generated.go）。必须在递归子节点之前做完——生成盒不参与常规
+	// 级联，由这里直接写入 computed。
+	syncGeneratedContent(doc, base, author)
+
 	for _, child := range base.children {
 		cb := inner(child)
-		if cb == nil {
+		if cb == nil || cb.generated {
 			continue
 		}
 		resolveStylesTreeIn(doc, child, cb, base, author)
+	}
+}
+
+// applyInheritedStyle 把父元素计算样式中可继承的属性写进 comp。
+//
+// 单独抽出来供伪元素复用：::before/::after 是宿主元素的子盒，继承口径
+// 必须与普通子元素完全一致（否则伪元素的字号/颜色/行高会跟正文对不上）。
+// 调用方负责在无父元素时写入 CSS 初始值。
+func applyInheritedStyle(comp CSSStyleDeclaration, pc CSSStyleDeclaration) {
+	if comp == nil || pc == nil {
+		return
+	}
+	comp.SetColor(pc.Color())
+	if fs := pc.FontSize(); fs != nil {
+		comp.SetFontSize(fs)
+	}
+	comp.SetFontFamily(pc.FontFamily())
+	comp.SetFontWeight(pc.FontWeight())
+	comp.SetTextAlign(pc.TextAlign())
+	comp.SetTextDecoration(pc.TextDecoration())
+	comp.SetWhiteSpace(pc.WhiteSpace())
+	// pointer-events 是继承属性：占位块/分隔线声明 none 之后，它里面的
+	// 内容（如果有）默认也跟着不可点，子级自己声明 auto 才恢复。
+	comp.SetPointerEvents(pc.PointerEvents())
+	// line-height 继承**原始形态**（倍数/绝对长度），不是解析后的像素：
+	// 父级 line-height:1.5 + 子级 font-size:32px → 子级行高 48px，
+	// 继承成像素就锁死在父级字号上了。
+	comp.SetLineHeight(pc.LineHeight())
+	// empty-cells / caption-side 是继承属性：作者写在 table 上（常见）
+	// 或写在祖先上，靠继承落到单元格与题注；border-spacing 不继承，
+	// 表格布局只读表格元素自身的声明。
+	comp.SetEmptyCells(pc.EmptyCells())
+	comp.SetCaptionSide(pc.CaptionSide())
+	if pcs, ok := pc.(*cssStyleDeclaration); ok {
+		if cs, ok := comp.(*cssStyleDeclaration); ok {
+			cs.fontSizeExplicit = pcs.fontSizeExplicit
+		}
 	}
 }
 
@@ -170,6 +186,24 @@ func filterByImportant(cands []declCandidate, important bool) []declCandidate {
 // collectMatchingDecls 收集样式表中命中该元素的规则声明，按特异度与源码
 // 顺序排好（同来源内）。doc 供伪类匹配查询动态状态。
 func collectMatchingDecls(doc HTMLDocument, sheet *Stylesheet, e HTMLElement, origin int) []declCandidate {
+	return collectDecls(sheet, origin, func(sel *Selector) bool {
+		return matchSelectorChain(doc, sel, e)
+	})
+}
+
+// collectPseudoDecls 收集命中 e 的 ::before/::after 规则的声明。匹配口径
+// 是「宿主元素 + 尾部伪元素」（p:hover::before 的 :hover 按宿主状态判定）。
+func collectPseudoDecls(doc HTMLDocument, sheet *Stylesheet, e HTMLElement, kind string, origin int) []declCandidate {
+	if !sheet.hasPseudoRules() {
+		return nil
+	}
+	return collectDecls(sheet, origin, func(sel *Selector) bool {
+		return matchPseudoElementChain(doc, sel, e, kind)
+	})
+}
+
+// collectDecls 按匹配函数筛选规则，返回按特异度与源码顺序排好的声明。
+func collectDecls(sheet *Stylesheet, origin int, matches func(*Selector) bool) []declCandidate {
 	if sheet == nil {
 		return nil
 	}
@@ -180,7 +214,7 @@ func collectMatchingDecls(doc HTMLDocument, sheet *Stylesheet, e HTMLElement, or
 	var matched []matchedRule
 	for _, r := range sheet.rules {
 		for _, sel := range r.sels {
-			if matchSelectorChain(doc, sel, e) {
+			if matches(sel) {
 				matched = append(matched, matchedRule{r: r, spec: sel.Specificity()})
 				break
 			}
