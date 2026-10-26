@@ -255,7 +255,7 @@ func scrollBy(el *htmlElement, boxW, boxH int, axisX bool, delta int) int {
 			return delta
 		}
 		el.scrollLeft = next
-		el.onChanged()
+		el.onScrollChanged()
 		return delta - (next - cur)
 	}
 	if maxY <= 0 {
@@ -267,7 +267,7 @@ func scrollBy(el *htmlElement, boxW, boxH int, axisX bool, delta int) int {
 		return delta
 	}
 	el.scrollTop = next
-	el.onChanged()
+	el.onScrollChanged()
 	return delta - (next - cur)
 }
 
@@ -289,7 +289,7 @@ func wheelScrollTextarea(doc HTMLDocument, el *htmlElement, delta int) int {
 		return delta
 	}
 	el.scrollTop = next
-	el.onChanged()
+	el.onScrollChanged()
 	return delta - (next - cur)
 }
 
@@ -552,7 +552,7 @@ func OnDocumentWheel(doc HTMLDocument, x, y, dx, dy int) bool {
 			// 目标累加（连续滚轮接着上一档走），缓动段从当前视觉位置起算。
 			root.scrollLeft = next
 			startScrollAnim(root, false) // 平滑滚动：横向
-			root.onChanged()
+			root.onScrollChanged()
 			remX = 0
 		}
 	}
@@ -561,7 +561,7 @@ func OnDocumentWheel(doc HTMLDocument, x, y, dx, dy int) bool {
 		if next != root.scrollTop {
 			root.scrollTop = next
 			startScrollAnim(root, true) // 平滑滚动：纵向
-			root.onChanged()
+			root.onScrollChanged()
 			remY = 0
 		}
 	}

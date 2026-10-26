@@ -21,6 +21,11 @@ type declCandidate struct {
 	order     int // 同特异度内的源码顺序
 }
 
+// defaultStyleTemplate 是 newStyle() 的一次性副本（具体结构体），用于复用 computed
+// 对象而非每轮新建：每元素每级联保存一份胖结构体（~600B），复用后
+// 15 万节点的页面每轮省 ~90MB 分配 + GC 压力。
+var defaultStyleTemplate = newStyle().(*cssStyleDeclaration)
+
 // resolveStylesTree 为整棵树计算级联后的最终样式（写入 base.computed）。
 // 优先级：UA 样式表 < 文档样式表（特异度+声明顺序） < 内联 style 属性；
 // color/font-size/font-family/font-weight/text-align/text-decoration 沿父链继承。
@@ -38,7 +43,16 @@ func resolveStylesTree(e HTMLElement, parentBase *htmlElement, author *Styleshee
 // 供选择器匹配查询伪类状态（hover/focus/active 在文档上）。
 func resolveStylesTreeIn(doc HTMLDocument, e HTMLElement, base *htmlElement,
 	parentBase *htmlElement, author *Stylesheet) {
-	comp := newStyle()
+	comp := base.computed
+	if comp == nil {
+		comp = newStyle()
+		base.computed = comp
+	}
+	// 复用 computed：把模板默认值整体复制回去（清零 non-inherited 字段
+	// 为 CSS 初始值）。继承字段随后会被 applyInheritedStyle 覆盖。
+	if cs, ok := comp.(*cssStyleDeclaration); ok {
+		*cs = *defaultStyleTemplate
+	}
 
 	// 继承性默认值
 	if parentBase != nil && parentBase.computed != nil {
@@ -194,40 +208,77 @@ func filterByImportant(cands []declCandidate, important bool) []declCandidate {
 
 // collectMatchingDecls 收集样式表中命中该元素的规则声明，按特异度与源码
 // 顺序排好（同来源内）。doc 供伪类匹配查询动态状态。
+//
+// 规则经尾部复合选择器主键索引（sheet.ensureIndex）查桶：元素只可能命中
+// 「id 相等 / class 包含 / tag 相等 / 无主键」四类桶里的规则，候选从
+// 「全部规则」缩到少数几条，再做完整链匹配（祖先与组合符校验）。
+// 15 万节点 × 数百条规则的页面，逐元素规则扫描因此从分钟级降到毫秒级。
 func collectMatchingDecls(doc HTMLDocument, sheet *Stylesheet, e HTMLElement, origin int) []declCandidate {
-	return collectDecls(sheet, origin, func(sel *Selector) bool {
-		return matchSelectorChain(doc, sel, e)
-	})
+	return collectDeclsIndexed(doc, sheet, e, origin,
+		func(sel *Selector) bool { return matchSelectorChain(doc, sel, e) })
 }
 
 // collectPseudoDecls 收集命中 e 的 ::before/::after 规则的声明。匹配口径
 // 是「宿主元素 + 尾部伪元素」（p:hover::before 的 :hover 按宿主状态判定）。
+//
+// 与元素自身匹配共用同一主键索引：伪元素选择器的尾部主键同样是宿主匹配
+// 的必要条件（p::before 按 tag=p 入桶），多余的候选在 matchPseudoElementChain
+// 里被伪元素名校验挡掉（普通规则 tail.pseudoElement 为空直接 false）。
 func collectPseudoDecls(doc HTMLDocument, sheet *Stylesheet, e HTMLElement, kind string, origin int) []declCandidate {
 	if !sheet.hasPseudoRules() {
 		return nil
 	}
-	return collectDecls(sheet, origin, func(sel *Selector) bool {
-		return matchPseudoElementChain(doc, sel, e, kind)
-	})
+	return collectDeclsIndexed(doc, sheet, e, origin,
+		func(sel *Selector) bool { return matchPseudoElementChain(doc, sel, e, kind) })
 }
 
-// collectDecls 按匹配函数筛选规则，返回按特异度与源码顺序排好的声明。
-func collectDecls(sheet *Stylesheet, origin int, matches func(*Selector) bool) []declCandidate {
+// collectDeclsIndexed 按尾部主键查桶收集候选规则，再用 matches 做完整链
+// 校验，返回按特异度与源码顺序排好的声明。两条级联路径（元素自身 /
+// 伪元素）共用，差别只在 matches。
+func collectDeclsIndexed(doc HTMLDocument, sheet *Stylesheet, e HTMLElement, origin int,
+	matches func(*Selector) bool) []declCandidate {
 	if sheet == nil {
 		return nil
 	}
+	ix := sheet.ensureIndex()
 	type matchedRule struct {
-		r    cssRule
+		r    *cssRule
 		spec int
 	}
 	var matched []matchedRule
-	for _, r := range sheet.rules {
-		for _, sel := range r.sels {
-			if matches(sel) {
-				matched = append(matched, matchedRule{r: r, spec: sel.Specificity()})
-				break
+	// 同一规则的多个选择器可能落在不同桶，按规则去重：多个选择器同时命中
+	// 时取最高特异度（CSS 级联对同规则多选择器命中的口径，比旧实现按源码
+	// 顺序取首个更确定）。
+	add := func(r *cssRule, spec int) {
+		for i := range matched {
+			if matched[i].r == r {
+				if spec > matched[i].spec {
+					matched[i].spec = spec
+				}
+				return
 			}
 		}
+		matched = append(matched, matchedRule{r: r, spec: spec})
+	}
+	visit := func(ents []indexEntry) {
+		for _, en := range ents {
+			if !matches(en.sel) {
+				continue
+			}
+			add(&sheet.rules[en.ruleIdx], en.sel.Specificity())
+		}
+	}
+	visit(ix.all)
+	if id := e.GetAttribute("id"); id != "" {
+		visit(ix.byID[id])
+	}
+	if cls := e.GetAttribute("class"); cls != "" {
+		for _, w := range strings.Fields(cls) {
+			visit(ix.byClass[w])
+		}
+	}
+	if tag := strings.ToLower(e.TagName()); tag != "" {
+		visit(ix.byTag[tag])
 	}
 	sort.SliceStable(matched, func(i, j int) bool {
 		if matched[i].spec != matched[j].spec {

@@ -134,6 +134,14 @@ type htmlDocument struct {
 	// 拖动期间指针 y 映射为滚动偏移（见 textareaScrollTo），抬起即清空。
 	dragScroll *htmlElement
 	changed    int64
+	// scrollMark 是最近一次**滚动**变更的计数（scrollBy/wheel/光标跟随等
+	// 只动 scrollTop/scrollLeft 的路径），用于布局快速路径：滚动不改变盒
+	// 模型与级联，只需重平移，不必每帧全量重排。lastLayoutChange 是上次
+	// 全量布局时的 changed，lastAppliedScrollMark 是上次已平移到的滚动
+	// 标记——相等即无新滚动可平。
+	scrollMark          int64
+	lastLayoutChange    int64
+	lastAppliedScrollMark int64
 	onChanged  func()
 	onNavigate func(href string)
 	// vpW/vpH 是上次布局时的视口尺寸。窗口缩放后后端只强制重排、并不
@@ -345,6 +353,19 @@ func (document *htmlDocument) ChangeCount() int64 {
 
 func (document *htmlDocument) markChanged() {
 	document.changed++
+	if document.onChanged != nil {
+		document.onChanged()
+	}
+}
+
+// markScrollChanged 标记一次「滚动类」变更：changed 照常 +1（宿主据此
+// 重绘并调用 LayoutDocument），同时 scrollMark +1 供布局快速路径识别——
+// 两次计数增量相等说明自上次全量布局以来**只有滚动**发生，级联与盒模型
+// 都没变，LayoutDocument 只平移已布局的盒子，不重排（大页面滚动卡顿的
+// 根因就是每档滚轮触发一次全量级联+布局）。
+func (document *htmlDocument) markScrollChanged() {
+	document.changed++
+	document.scrollMark++
 	if document.onChanged != nil {
 		document.onChanged()
 	}

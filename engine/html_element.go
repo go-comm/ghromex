@@ -114,8 +114,9 @@ func newElement(tag string) HTMLElement {
 	e := &htmlElement{}
 	e.self = e
 	e.tagName = tag
-	e.attrs = make(map[string]string)
-	e.style = newStyle()
+	// attrs / style 惰性分配：几十万节点的页面里，绝大多数元素只有两三个
+	// 属性甚至没有，静态分配空 map 与空 style 会让 DOM 体积翻倍。
+	// SetAttribute/Style() 首次访问时再建（见 SetAttribute / Style）。
 	return e
 }
 
@@ -300,7 +301,15 @@ func (element *htmlElement) Class() string {
 	return element.attrs["class"]
 }
 
+// Style 返回元素的样式声明对象（公开 API 供宿主直接改样式）。
+//
+// 首次访问才分配：绝大多数元素宿主根本不碰 Style()，提前 newStyle 会在
+// 大页面上白付几十万份胖样式对象的常驻内存。级联不受影响——引擎级联读
+// 的是 style 属性解析出的 inline 声明，不是这个活对象。
 func (element *htmlElement) Style() CSSStyleDeclaration {
+	if element.style == nil {
+		element.style = newStyle()
+	}
 	return element.style
 }
 
@@ -558,6 +567,20 @@ func (element *htmlElement) onChanged() {
 	}
 }
 
+// onScrollChanged 沿父链通知文档「仅滚动变更」（语义见 htmlDocument.markScrollChanged）。
+// 方法名必须区别于文档侧的 markScrollChanged：断言接口与实现同名会让
+// 元素命中自己的方法、无限递归。
+func (element *htmlElement) onScrollChanged() {
+	e := element.self
+	for e != nil {
+		if d, ok := e.(interface{ markScrollChanged() }); ok {
+			d.markScrollChanged()
+			return
+		}
+		e = e.ParentElement()
+	}
+}
+
 // GetBoundingClientRect 返回边框盒。
 func (element *htmlElement) GetBoundingClientRect() Rect {
 	comp := element.computed
@@ -586,7 +609,11 @@ func (element *htmlElement) Clone() HTMLElement {
 	for k, v := range element.attrs {
 		c.attrs[k] = v
 	}
-	c.style = newStyle()
+	// 源元素从未建过 style（宿主任意没碰过 Style()）时克隆也不建：
+	// 建了就要付一份胖对象，而没人读它。
+	if element.style != nil {
+		c.style = newStyle()
+	}
 	c.children = nil
 	c.parentElement = nil
 	c.runs = nil

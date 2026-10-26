@@ -5,6 +5,23 @@
 
 ## 未发布
 
+**滚动快速路径**：
+仅触发 `markScrollChanged` 时（滚轮、textarea 内滚、编程滚动），
+`LayoutDocument` 跳过级联与重排，仅对子树盒子做增量平移（`applyScrollDeltas`）并重定位
+`::before/::after` 生成盒。4.9 MB / 149k 节点页面滚动帧从 4.13 s 降至 **~100 ms**。
+
+**选择器桶索引**：
+CSS 级联按尾部复合选择器主键（id / class[0] / tag / 无）分桶，
+`collectMatchingDecls` / `collectPseudoDecls` 同用一套索引，
+把逐元素全表扫描（O(元素数×规则数)）缩为候选遍历（O(元素数×候选数)）。
+同页面首轮布局从 4.2 s 降至 **~780 ms**（-80%）。
+
+**内存优化**：
+- `attrs` map 与 `element.style`（CSSStyleDeclaration）在 `newElement` 中改为惰性分配；
+- `Clone` 仅在源元素真建过 style 时才复制；
+- `computed` 级联对象跨轮复用，用结构体副本（`*defaultStyleTemplate`）重置而非 `newStyle`。
+堆内存从 650 MB 降至 **310 MB**，sys 从 1.1 GB 降至 **550 MB**；单元素占用 4.3 KB → **2.1 KB**。
+
 **input 长文本窗口跟随光标（scroll-follows-caret，Chrome 同口径）**：
 此前单行 input 值超宽时窗口固定「舍头保尾」，光标索引能回到 0 但画面永远
 滚不回首字（examples/browser 反馈"光标移动不到首字"）。改造三点：

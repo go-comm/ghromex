@@ -51,6 +51,12 @@ func OpenBufferedDocument(w, h int, src string) (*BufferGraphics, HTMLDocument, 
 }
 
 // LayoutDocument 对文档执行一次完整的级联 + 布局。
+//
+// 快速路径：自上次全量布局以来**只发生过滚动**（changed 与 scrollMark 同幅
+// 增长，见 markScrollChanged）时，级联与盒模型都没变，只把滚动偏移平移到
+// 已布局的盒子上（applyScrollOffsets，按绝对偏移重新施加，安全因为本次没
+// 有重排、盒子还带着上一轮的平移量——它内部按 scrollShift* 差值换算）。
+// 大文档每档滚轮触发的 4s+ 全量重排因此降为一次纯平移。
 func LayoutDocument(doc HTMLDocument) {
 	v := doc.Viewport()
 	if v == nil {
@@ -64,6 +70,19 @@ func LayoutDocument(doc HTMLDocument) {
 	if g == nil {
 		g = NewFakeGraphics()
 	}
+	if d, ok := doc.(*htmlDocument); ok {
+		if delta, scrollDelta := d.changed-d.lastLayoutChange, d.scrollMark-d.lastAppliedScrollMark; delta > 0 && delta == scrollDelta {
+			// 仅滚动：跳过级联与布局。盒子还带着上一轮已施加的平移量
+			// （scrollShift*），必须按**增量**平移（applyScrollDeltas），
+			// 不能用 applyScrollOffsets 的绝对平移——那会二次位移。
+			applyScrollDeltas(g, base, v.ViewportWidth(), v.ViewportHeight())
+			layoutSelectPopups(g, base, v.ViewportWidth(), v.ViewportHeight())
+			d.lastLayoutChange = d.changed
+			d.lastAppliedScrollMark = d.scrollMark
+			d.syncViewportSize(v)
+			return
+		}
+	}
 	resolveStylesTree(doc, nil, doc.Stylesheet())
 	layoutBox(g, base, v.ViewportWidth(), v.ViewportHeight(), 0, 0, v.ViewportWidth(), v.ViewportHeight(), nil)
 	layoutPositioned(g, base, v.ViewportWidth(), v.ViewportHeight())
@@ -75,11 +94,19 @@ func LayoutDocument(doc HTMLDocument) {
 	// 在回调里改样式只会让本次布局的结果过期一次（后端按 ChangeCount
 	// 再排一遍即可收敛）。
 	if d, ok := doc.(*htmlDocument); ok {
-		w, h := v.ViewportWidth(), v.ViewportHeight()
-		if d.vpW != w || d.vpH != h {
-			d.vpW, d.vpH = w, h
-			d.markChanged()
-		}
+		d.lastLayoutChange = d.changed
+		d.lastAppliedScrollMark = d.scrollMark
+		d.syncViewportSize(v)
+	}
+}
+
+// syncViewportSize 比对并记录视口尺寸，变化时补一次变更通知（见
+// LayoutDocument 的说明）。
+func (d *htmlDocument) syncViewportSize(v Viewport) {
+	w, h := v.ViewportWidth(), v.ViewportHeight()
+	if d.vpW != w || d.vpH != h {
+		d.vpW, d.vpH = w, h
+		d.markChanged()
 	}
 }
 

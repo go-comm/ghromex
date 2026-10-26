@@ -12,6 +12,11 @@ type Stylesheet struct {
 	// 一遍规则表；绝大多数页面没有 ::before/::after，缓存后这条路径可以
 	// 整体跳过，不给常规布局增加开销。
 	hasPseudo bool
+	// idx 是选择器右端（最右侧复合片段）主键索引：把 collectDecls 从
+	// O(元素数 × 全部规则) 降到 O(元素数 × 候选规则数)。15 万节点 + 数百
+	// 条规则的页面里，级联占整轮布局的 ~70%（实测 4s），分桶后降到百毫秒级。
+	// 规则变更后置空重建（见 Merge/invalidateIndex）。
+	idx *sheetIndex
 }
 
 // hasPseudoRules 报告样式表里是否有伪元素选择器（结果惰性缓存）。
@@ -33,6 +38,66 @@ func (s *Stylesheet) hasPseudoRules() bool {
 		}
 	}
 	return false
+}
+
+// indexEntry 是索引里的一个 (ruleIdx, selector) 对，用于候选规则遍历。
+type indexEntry struct {
+	ruleIdx int
+	sel     *Selector
+}
+
+// sheetIndex 以尾部复合选择器的「主键」（id/class/tag/无）分桶。
+// 元素的 id/tag/每个 class 都是必要条件，查桶即可得到必要规则子集，再
+// 跑完整 matchSelectorChain 即可（祖先匹配仍需完整验证）。
+type sheetIndex struct {
+	byID    map[string][]indexEntry
+	byClass map[string][]indexEntry
+	byTag   map[string][]indexEntry
+	all     []indexEntry // 无可用主键的尾部片段：* / [attr=...] / 仅伪类
+}
+
+// invalidateIndex 清空索引，下次 ensureIndex 重建。规则变更后调用。
+func (s *Stylesheet) invalidateIndex() {
+	s.idx = nil
+}
+
+// ensureIndex 惰性构建索引：O(规则数) 一次性扫描，后续复用。
+// 索引规则：取每个选择器的尾部复合选择器（最右侧片段），
+// 依次尝试 id / class[0] / tag / universal。
+// 伪元素选择器（如 p::before）也入同一桶：其尾部片段的 id/class/tag 仍是
+// 宿主元素匹配的必要条件，伪元素名由 matchPseudoElementChain 再校验；
+// 同理普通规则不会命中伪元素查询（尾部 pseudoElement 为空即被挡掉）。
+func (s *Stylesheet) ensureIndex() *sheetIndex {
+	if s.idx != nil {
+		return s.idx
+	}
+	ix := &sheetIndex{
+		byID:    map[string][]indexEntry{},
+		byClass: map[string][]indexEntry{},
+		byTag:   map[string][]indexEntry{},
+	}
+	for ri, r := range s.rules {
+		for _, sel := range r.sels {
+			if len(sel.compounds) == 0 {
+				continue
+			}
+			tail := sel.compounds[len(sel.compounds)-1]
+			e := indexEntry{ruleIdx: ri, sel: sel}
+			switch {
+			case tail.id != "":
+				ix.byID[tail.id] = append(ix.byID[tail.id], e)
+			case len(tail.classes) > 0:
+				// class 桶按第一个 class 索引：元素必须含有该 class 才可能匹配
+				ix.byClass[tail.classes[0]] = append(ix.byClass[tail.classes[0]], e)
+			case tail.tag != "":
+				ix.byTag[strings.ToLower(tail.tag)] = append(ix.byTag[strings.ToLower(tail.tag)], e)
+			default:
+				ix.all = append(ix.all, e)
+			}
+		}
+	}
+	s.idx = ix
+	return ix
 }
 
 type cssRule struct {
@@ -58,6 +123,7 @@ func (s *Stylesheet) Merge(other *Stylesheet) {
 		r.order = len(s.rules)
 		s.rules = append(s.rules, r)
 	}
+	s.invalidateIndex()
 }
 
 // ParseCSS 解析一段 CSS 文本。不支持的语法（@media 等）会被跳过而不报错；
