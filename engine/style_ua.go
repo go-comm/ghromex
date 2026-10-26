@@ -29,6 +29,9 @@ h3 { display: block; font-size: 19px; font-weight: bold; margin: 19px 0; } /* 1.
      无 vertical-align），此处只保证行内性。 */
   em, i, u, s, strike, code, kbd, samp, var, cite, dfn, abbr, q, mark, small,
   sub, sup, time, data, output, bdi, bdo, ins, del, ruby, rt, rp { display: inline; }
+  /* tt 是 HTML4 遗留的等宽语义标签（Chrome 仍认它）：不补这条会让引擎按
+     「未知标签 → inline-block」渲染，行内文字被原子化、段落里还会断行。 */
+  tt { display: inline; }
   /* 列表/定义列表/引用/预格式化：与 Chrome UA 同口径（缩进与外边距）。
      li 必须是块级（Chrome: display:list-item）——否则引擎默认的 inline-block
      会让多个 li 挤在同一行。列表标记（disc/decimal）引擎无 list-item 概念，
@@ -71,7 +74,7 @@ h3 { display: block; font-size: 19px; font-weight: bold; margin: 19px 0; } /* 1.
   dt { display: block; }
   dd { display: block; margin-left: 40px; }
   blockquote { display: block; margin: 16px 40px; }
-  pre { display: block; font-family: monospace; font-size: 13px; margin: 16px 0; white-space: pre; }
+  pre { display: block; font-family: monospace; margin: 16px 0; white-space: pre; }
   figure { display: block; margin: 16px 40px; }
   figcaption { display: block; }
   /* 块级语义容器（HTML5 渲染规范）：引擎对未收录标签按 CSS 初始值 inline
@@ -93,10 +96,14 @@ b { font-weight: bold; }
    引擎用绘制后端的合成斜体呈现（见 FontStyle），字形前进宽度不变。 */
 i, cite, em, var, dfn { font-style: italic; }
 a { display: inline; color: #0000EE; text-decoration: underline; cursor: pointer; } /* Chrome 默认链接色 #0000EE */
-/* 等宽与变小字号：Chrome UA 实测 code/kbd/samp 的计算字号为 13.33px、
-   字体族为 monospace；small 为 smaller（同 13.33px）；pre 的计算字号为
-   13px（其 monospace 通用族的默认字号）。引擎字号取整为 13px。 */
-code, kbd, samp { font-family: monospace; font-size: 13px; }
+/* 等宽语义标签：Chrome UA 只给 font-family: monospace（tt 是 HTML4 遗留
+   标签，Chrome 仍按 monospace 落位）。字号**不写 UA 规则**——继承父级：
+   实测 body 16px 时 code/kbd/samp/pre 计算为 13px（monospace 通用族在未显式
+   声明字号时取默认等宽字号，见 style_cascade.go 的那条 quirk），而父级
+   font-size:20px 时它们就是 20px。引擎此前把 13px 写死在 UA 里，会让
+   <pre> / <code> 在改过字号的容器里比浏览器小一档。
+   small 为 smaller（Chrome 13.33px，引擎取整 13px）。 */
+code, kbd, samp, tt { font-family: monospace; }
 small { font-size: 13px; }
 /* 上下标：Chrome UA 的 smaller = 13.33px（引擎取整 13），并用
    vertical-align:super/sub 把基线分开（位移量按父级字号算，见

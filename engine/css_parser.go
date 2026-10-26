@@ -894,11 +894,19 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 	case "overflow-y":
 		comp.SetOverflowY(parseOverflow(v))
 	case "white-space":
-		// 只区分 pre 与其余值（normal/nowrap/…）：对照页只需要 pre 的
-		// 「保留空白 + 不软换行」，其余按 CSS 默认的 normal 处理。
-		if v == "pre" {
+		// 五种取值按「折叠空白 / 保留换行 / 软换行」三条正交行为落位
+		// （见 style.go 的 WhiteSpace）。break-spaces 与 pre-wrap 同档近似
+		// （区别只在行尾空格的保留细节）。
+		switch v {
+		case "pre":
 			comp.SetWhiteSpace(WhiteSpacePre)
-		} else {
+		case "pre-wrap", "break-spaces":
+			comp.SetWhiteSpace(WhiteSpacePreWrap)
+		case "pre-line":
+			comp.SetWhiteSpace(WhiteSpacePreLine)
+		case "nowrap":
+			comp.SetWhiteSpace(WhiteSpaceNowrap)
+		default:
 			comp.SetWhiteSpace(WhiteSpaceNormal)
 		}
 	case "pointer-events":

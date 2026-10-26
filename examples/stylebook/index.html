@@ -108,11 +108,14 @@
 		引擎里与正文同字号且是 inline-block（与下一节的语义块同因），本页刻意不补样式让差异可见。</p>
 	<blockquote class="blk-quote">blockquote 引用块：UA 缩进 16px 40px，本页加了左边框与底色。</blockquote>
 	<div class="blk">
-		<p>pre 预格式化（UA：<span class="code">white-space: pre</span> + 等宽 13px）：</p>
+		<p>pre 预格式化（UA：<span class="code">white-space: pre</span> + 等宽；
+		字号**继承父级**，只有父级从未声明过字号时才落到 monospace 默认 13px）：</p>
 		<pre>
 行首空格保留
 	制表符保留
 a  b   c    d</pre>
+		<p>行内等宽语义（UA 只给 <span class="code">font-family: monospace</span>，
+			字号同样继承父级）：<code>code</code> <kbd>kbd</kbd> <samp>samp</samp> <tt>tt</tt></p>
 		<hr>
 		<p>hr 分隔线（无专用渲染器：Chrome 是上暗下浅 inset 双色，引擎按 border 单色画）。</p>
 		<figure>
@@ -520,10 +523,15 @@ a  b   c    d</pre>
 		<span class="td-n">none 无</span> ·
 		<span class="td-o">overline（Chrome 有上划线，引擎无）</span></p>
 
-	<p class="cap"><span class="code">white-space: pre</span>（源码换行与空格保留）：</p>
-	<div class="pre-box">行一
+	<p class="cap"><span class="code">white-space</span> 五值（折叠空白 / 保留换行 / 软换行 三条正交行为）：</p>
+	<div class="pre-box">pre：行一
 行二（源码里的换行）
     缩进四格  连续空格</div>
+	<div class="pre-box ws-nowrap">nowrap：连续空格折叠成一个，窄容器里也不换行，长句直接溢出到容器右边框之外。</div>
+	<div class="pre-box ws-pre-wrap">pre-wrap：保留空格
+	与制表符，长句超过容器宽度时在空格处折回，这一行明显比容器宽得多所以会折。</div>
+	<div class="pre-box ws-pre-line">pre-line：  折叠连续空格
+	行首空格也移除，但源换行保留成两行</div>
 
 	<p class="cap"><span class="code">vertical-align</span>（一排等高盒按不同关键字对齐基线）：</p>
 	<div class="va-row">文字
@@ -709,7 +717,7 @@ a  b   c    d</pre>
 			<tr><td><code class="inl">table-layout: fixed</code> / collapse 边框冲突仲裁</td><td>固定表格布局/宽者胜</td><td class="x">始终自动布局；collapse 取先声明格的边框</td></tr>
 			<tr><td><code class="inl">script</code> / <code class="inl">meta</code> / <code class="inl">base</code></td><td>脚本执行/元数据</td><td class="x">解析期丢弃（script 不进 DOM、不执行）</td></tr>
 			<tr><td><code class="inl">img</code> / <code class="inl">svg</code> / <code class="inl">canvas</code> / <code class="inl">iframe</code> / <code class="inl">video</code></td><td>图像/矢量/画布/嵌入</td><td class="x">无渲染链路，只有 CSS 盒</td></tr>
-			<tr><td><code class="inl">white-space: nowrap</code> / <code class="inl">pre-wrap</code></td><td>折行控制</td><td class="x">只区分 pre 与其余（nowrap 按 normal 折行）</td></tr>
+			<tr><td><code class="inl">white-space: break-spaces</code> / <code class="inl">tab-size</code></td><td>行尾空格细节/制表位宽度</td><td class="x">按 <code class="inl">pre-wrap</code> 近似；制表位固定 8 个空格宽</td></tr>
 			<tr><td><code class="inl">border-image</code> / 非 solid 线型</td><td>图片边框/虚线点线</td><td class="x">不解析 / 按 solid 绘制</td></tr>
 			<tr><td><code class="inl">box-shadow: inset</code></td><td>内阴影</td><td>支持（padding 盒裁切；无 SpriteDrawer 的后端退化为实色带）</td></tr>
 			<tr><td><code class="inl">z-index: auto</code></td><td>自动层叠</td><td class="x">按 0 处理</td></tr>

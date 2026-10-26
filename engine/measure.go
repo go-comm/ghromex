@@ -857,6 +857,23 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 	}
 
+	// ---- white-space ----
+	// 五种取值由「保留空白 / 强制换行 / 软换行」三条正交行为组合（见
+	// style.go 的 WhiteSpace）：
+	//   pre      保留空白、换行强制断行、不软换行（<pre> 的 UA 值：长行
+	//            溢出而不是折行，浏览器同款）；
+	//   pre-wrap 同 pre，但允许软换行（代码块常用，长行在空格处折回）；
+	//   pre-line 空白折叠、换行强制断行、允许软换行；
+	//   nowrap   空白折叠、不软换行；
+	//   normal   CSS 默认（折叠 + 可软换行）。
+	// 先于空格/换行相关的闭包计算：flushPendingSpace 等要读 softWrap。
+	wsMode := WhiteSpaceNormal
+	if el.computed != nil {
+		wsMode = el.computed.WhiteSpace()
+	}
+	preserveWS := wsMode == WhiteSpacePre || wsMode == WhiteSpacePreWrap
+	softWrap := wsMode != WhiteSpacePre && wsMode != WhiteSpaceNowrap
+
 	// 行内格式上下文里的空格：CSS 把连续空白折叠为单个空格，且只保留在
 	// 行内内容之间。tokenizeText 会丢弃首尾空白，纯空白文本节点因此整体
 	// 消失（`<span>A</span> <span>B</span>` 的空格被吞）。这里用
@@ -888,8 +905,11 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		// 间隙空格也要参与换行判断：游标已排到右边界时把它丢弃（行首空格
 		// 按 CSS 折叠），下一项会触发换行。否则空格把游标顶出右界后，
 		// addItem 的 right >= it.x 恒为 false，整行都不再换行（行尾溢出）。
-		if _, right := lineBounds(cursorY); len(curLine) > 0 && cursorX+spaceW > right {
-			return
+		// nowrap / pre 不折行，空格照留。
+		if softWrap {
+			if _, right := lineBounds(cursorY); len(curLine) > 0 && cursorX+spaceW > right {
+				return
+			}
 		}
 		curLine = append(curLine, lineItem{tn: pendingTN, token: " ",
 			x: cursorX, y: cursorY, w: spaceW, asc: spaceAsc, desc: spaceDesc,
@@ -1012,22 +1032,27 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 	}
 
-	// ---- white-space: pre ----
-	// <pre> 的内容按原样排版：每个空格/制表符各占一份宽度、换行强制结束
-	// 行盒、且不做软换行（浏览器 pre 里的长行是溢出而不是折行）。普通文本
-	// 走 tokenizeText 的「折叠空白 + 按宽换行」路径，两者不能混用。
-	preMode := el.computed != nil && el.computed.WhiteSpace() == WhiteSpacePre
+	// ---- white-space：布局路径 ----
+	// 模式已在闭包之前统一算出（wsMode/preserveWS/softWrap），这里只排
+	// 版 pre / pre-wrap 的文本落位与制表位测量。
 	preSpaceW := 0
 	if g != nil {
 		preSpaceW, _ = g.MeasureText(" ", fontPx, bold, family)
 	}
-	// addPreToken 把一段 pre 文本落到当前行：不做换行判断（pre 不软换行）。
-	addPreToken := func(tn *textNode, tok string, w int) {
+	// addPreToken 把一段 pre/pre-wrap 文本落到当前行。wrap=true（pre-wrap）
+	// 时参与软换行：放不下就断行回到行首，落点取断行后的游标；wrap=false
+	// （pre）不判断，直接溢出。
+	addPreToken := func(tn *textNode, tok string, w int, wrap bool) {
 		if w < 0 {
 			w, _ = g.MeasureText(tok, fontPx, bold, family)
 		}
 		if w < 0 {
 			w = 0
+		}
+		if wrap && len(curLine) > 0 {
+			if _, right := lineBounds(cursorY); cursorX+w > right {
+				flushLine()
+			}
 		}
 		asc, desc := g.FontMetrics(tok, fontPx, bold, family)
 		leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
@@ -1054,18 +1079,19 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 		flushLine()
 	}
-	addPreText := func(tn *textNode, raw string) {
-		// HTML 规范：<pre> 开标签后紧跟的第一个换行不属于内容。
+	addPreText := func(tn *textNode, raw string, wrap bool) {
+		// HTML 规范：只有 <pre>（及 textarea/listing）在开标签后紧跟的
+		// 第一个换行不属于内容——普通 div 的 white-space:pre 不剥。
 		// 用「第一个非生成盒子节点」判定：::before 生成盒插在 children[0]
 		// 时，首段文本仍是真正的第一个内容子节点。
-		if firstNonGeneratedChild(el) == HTMLElement(tn) {
+		if isPreStripTag(el) && firstNonGeneratedChild(el) == HTMLElement(tn) {
 			raw = strings.TrimPrefix(raw, "\r\n")
 			raw = strings.TrimPrefix(raw, "\n")
 		}
 		var word []rune
 		flushWord := func() {
 			if len(word) > 0 {
-				addPreToken(tn, string(word), -1)
+				addPreToken(tn, string(word), -1, wrap)
 				word = word[:0]
 			}
 		}
@@ -1082,31 +1108,30 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 					// 制表位：从行首起每 8 个空格宽对齐（Chrome pre 的 tab-size:8）
 					stop := preSpaceW * 8
 					w := stop - (cursorX-cx)%stop
-					addPreToken(tn, strings.Repeat(" ", 8), w)
+					addPreToken(tn, strings.Repeat(" ", 8), w, wrap)
 				}
 			case r == ' ':
 				flushWord()
-				addPreToken(tn, " ", preSpaceW)
+				addPreToken(tn, " ", preSpaceW, wrap)
 			default:
 				if r < 0x80 {
 					word = append(word, r)
 				} else {
 					// CJK 逐字成项，与其他路径的宽度测量口径一致。
 					flushWord()
-					addPreToken(tn, string(r), -1)
+					addPreToken(tn, string(r), -1, wrap)
 				}
 			}
 		}
 		flushWord()
 	}
-
 	addItem := func(it lineItem) {
 		_, right := lineBounds(it.y)
 		// 放不下就换行。这里不排除「游标已在右界之外」的情形：上一项本身
 		// 超宽（长单词/原子盒）时，后续项必须回到新行，否则整段都会粘在
 		// 同一行溢出（游标一旦越过右界，right >= it.x 之类的守卫会永久
-		// 关闭换行）。
-		if len(curLine) > 0 && it.x+it.w > right {
+		// 关闭换行）。nowrap / pre 不软换行：整行溢出而不是折回。
+		if softWrap && len(curLine) > 0 && it.x+it.w > right {
 			flushLine()
 			it.x = cursorX
 			it.y = cursorY
@@ -1129,13 +1154,58 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		prevBlockMB = -1
 		lastInline = true
 	}
+	// addPreLineText 处理 white-space:pre-line：空白折叠但保留源换行。
+	// 按 \n 分段，段内走与 normal 同一条「折叠空白 + 可软换行」路径
+	// （行首/行尾空白被 tokenizeText 丢弃，正是 Chrome pre-line 的口径），
+	// 段间强制断行；连续换行（空段）各留一个空行。
+	addPreLineText := func(tn *textNode, raw string) {
+		if isPreStripTag(el) && firstNonGeneratedChild(el) == HTMLElement(tn) {
+			raw = strings.TrimPrefix(raw, "\r\n")
+			raw = strings.TrimPrefix(raw, "\n")
+		}
+		segments := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+		for i, seg := range segments {
+			if i > 0 {
+				breakPreLine()
+			}
+			if strings.Trim(seg, " \t\f ") == "" {
+				continue // 纯空白段在 pre-line 里折叠掉（换行本身已生效）
+			}
+			if lastInline && hasLeadingBlank(seg) {
+				pendingSpace = true
+				pendingTN = tn
+			}
+			toks := tokenizeText(seg)
+			if len(toks) > 0 {
+				flushPendingSpace()
+			}
+			for _, tok := range toks {
+				tw, _ := g.MeasureText(tok, fontPx, bold, family)
+				if tw <= 0 {
+					continue
+				}
+				asc, desc := g.FontMetrics(tok, fontPx, bold, family)
+				leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
+				addItem(lineItem{tn: tn, token: tok, x: cursorX, y: cursorY, w: tw,
+					asc: asc, desc: desc, leadAsc: leadAsc, leadDesc: leadDesc})
+			}
+			if hasTrailingBlank(seg) && (len(toks) > 0 || lastInline) {
+				pendingSpace = true
+				pendingTN = tn
+			}
+		}
+	}
 
 	for _, child := range el.children {
 		if tnc, ok := child.(*textNode); ok {
 			tnc.node.runs = nil
 			raw := tnc.Text()
-			if preMode {
-				addPreText(tnc, raw)
+			if preserveWS {
+				addPreText(tnc, raw, wsMode == WhiteSpacePreWrap)
+				continue
+			}
+			if wsMode == WhiteSpacePreLine {
+				addPreLineText(tnc, raw)
 				continue
 			}
 			// 前导空白：上一项是行内内容时，该空格属于行内间隙，须保留。
@@ -1341,9 +1411,13 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		if ow <= 0 && oh <= 0 {
 			continue // 零尺寸且无外盒的原子盒（如空 head）不占行高
 		}
-		if _, right := lineBounds(cursorY); len(curLine) > 0 && cursorX+ow > right {
-			flushLine()
-			ow, oh = layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH, childExcl)
+		// 原子盒（行内盒/inline-block）放不下也折行——nowrap / pre 除外：
+		// 这两档不软换行，超宽盒直接溢出（Chrome 同款）。
+		if softWrap {
+			if _, right := lineBounds(cursorY); len(curLine) > 0 && cursorX+ow > right {
+				flushLine()
+				ow, oh = layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH, childExcl)
+			}
 		}
 		asc, desc := inlineBoxBaseline(g, che, maxInt(oh, 1))
 		// vertical-align：算盒相对基线的位移（正=向上抬高）以及计入行盒
@@ -1377,6 +1451,21 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 
 	flushLine()
 	return maxRight - cx, cursorY - cy
+}
+
+// isPreStripTag 报告元素是否属于 HTML 规范里「开标签后紧跟的第一个换行
+// 不属于内容」的标签集——<pre>、<textarea>、<listing>。普通 div 等即便
+// 声明 white-space:pre 也不剥（Chrome 实测 <div style="white-space:pre">
+// 的首换行照常占一行）。
+func isPreStripTag(el *htmlElement) bool {
+	if el == nil {
+		return false
+	}
+	switch strings.ToLower(el.tagName) {
+	case "pre", "textarea", "listing":
+		return true
+	}
+	return false
 }
 
 // hasLeadingBlank 报告文本是否以空白开头（CSS 空白字符集）。

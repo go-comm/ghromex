@@ -804,12 +804,30 @@ td.va-bot {
 }
 
 .pre-box {
+	white-space: pre;
 	font-family: "Microsoft YaHei";
 	font-size: 14px;
 	border: 1px solid #e3e7eb;
 	background-color: #f6f8fa;
 	padding: 6px 10px;
 	margin: 4px 0;
+}
+
+/* white-space 族对照：窄容器才看得出折不折行、折在哪 */
+.pre-box.ws-nowrap {
+	white-space: nowrap;
+	width: 240px;
+	overflow: visible;
+}
+
+.pre-box.ws-pre-wrap {
+	white-space: pre-wrap;
+	width: 240px;
+}
+
+.pre-box.ws-pre-line {
+	white-space: pre-line;
+	width: 240px;
 }
 
 /* vertical-align：一排等高 inline-block 按不同关键字对齐基线 */

@@ -1,5 +1,7 @@
 # 临时与调试产物
 .temp/
+# playwright MCP 在仓库根落盘的对照截图与页面快照
+.playwright-mcp/
 *.log
 *.test
 *.out
@@ -21,5 +23,5 @@ libs/*.dll
 Thumbs.db
 desktop.ini
 
-# notepad -shot ��� flag �������·�����ɵĿ��գ���ʷ�ӣ���������
+# notepad -shot ��� flag �������·�����ɵĿ��գ���ʷ�ӣ���������
 /-out

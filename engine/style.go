@@ -237,15 +237,28 @@ const (
 	TextDecorationLineThrough
 )
 
-// WhiteSpace 控制空白折叠与换行（white-space）。只实现对照需要的两档：
-// normal 为 CSS 默认（连续空白折叠为一个空格、可软换行）；pre 保留空白与
-// 换行、不做软换行（<pre> 的 UA 值）。缺这一档时 <pre> 里的换行与缩进会
-// 被当成普通文本折叠掉，与浏览器视觉差一整行。
+// WhiteSpace 控制空白折叠与换行（white-space）。CSS Text §4.1 用三条正交
+// 行为描述这一族取值——「折叠空白」「保留换行」「软换行」：
+//
+//	值          折叠空白  保留换行  软换行
+//	normal      是        否        是
+//	nowrap      是        否        否
+//	pre         否        是        否
+//	pre-wrap    否        是        是
+//	pre-line    是        是        是
+//
+// <pre> 的 UA 值是 pre：保留缩进/制表符、按换行强制断行、长行溢出而不是
+// 折行。缺这一档时 <pre> 里的换行与缩进会被当成普通文本折叠掉，与浏览器
+// 视觉差一整行。pre-wrap / pre-line / nowrap 是代码块与「不换行」标题的
+// 常用写法（GitHub 的代码块就是 pre-wrap）。
 type WhiteSpace uint8
 
 const (
 	WhiteSpaceNormal WhiteSpace = iota
+	WhiteSpaceNowrap
 	WhiteSpacePre
+	WhiteSpacePreWrap
+	WhiteSpacePreLine
 )
 
 // PointerEvents 决定元素是否参与命中测试（pointer-events）。只实现两档：

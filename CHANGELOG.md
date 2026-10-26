@@ -44,6 +44,29 @@
 `TestDisplayTableAfterInlineAtomicTrial`（inline 试排后重排按内容量列）、
 `TestUASemanticBlockDefaults`（UA 落位与字号）。
 
+**`<pre>` / `<code>` 对齐 Chrome + `white-space` 五值**：核对并修复四组与浏览器
+的口径偏差，补齐 CSS Text 的空白处理族。
+
+- UA 不再给 `pre`/`code`/`kbd`/`samp` 写死 13px 字号：只给
+  `font-family: monospace`，**字号继承父级**（Chrome 实测父级 20px → 它们就是
+  20px；父级从未显式声明字号时才落到通用族默认 13px，见 `style_cascade.go`
+  的 quirk）。此前写死 13px，改过字号的容器里代码会比浏览器小一档。
+- 补 `tt { display: inline }`：HTML4 遗留的等宽语义标签 Chrome 仍认，引擎此前
+  按「未知标签 → inline-block」渲染，段落里被原子化还会断行。
+- 首换行剥离只对 `<pre>`/`<textarea>`/`<listing>` 生效（新增 `isPreStripTag`）：
+  之前任何 `white-space: pre` 的元素都剥首换行，`<div style="white-space:pre">`
+  比 Chrome 少一行。
+- `white-space(normal/nowrap/pre/pre-wrap/pre-line)` 按 CSS Text §4.1 的三条
+  正交行为实现全五值（`break-spaces` 按 `pre-wrap` 近似）：`pre` 保留空白与
+  源换行、不软换行（长行溢出）；`pre-wrap` 同上但在空格处软换行、**不拆长词**；
+  `pre-line` 折叠空白（含行首空白）但保留源换行、连续换行保留空行；
+  `nowrap` 折叠且不换行。软换行守卫（`addItem`、原子盒、行首空格丢弃）统一
+  受 `softWrap` 控制。
+- 回归测试：`engine/whitespace_pre_test.go`（五值解析、字号继承、tt、空 pre
+  高 0、tab 停靠 8 空格宽、首换行按标签剥离、pre 不软换行/pre-wrap 折行且不拆
+  词/pre-line 折行折叠、nowrap 单行溢出、行内 code 折叠空白、pre 内 `<br>`）。
+- stylebook 新增 white-space 五值演示与行内等宽语义行；README 同步。
+
 **布局与交互补齐：`float`/`clear`、`opacity`、`visibility`、`cursor`、`font-style: italic`**：
 五项此前只解析不生效（或完全没解析）的 CSS 能力，现在都有实际行为。
 

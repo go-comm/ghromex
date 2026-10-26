@@ -467,8 +467,11 @@ lower|upper-roman/none)`、`list-style-position(outside/inside)`、`list-style` 
 颜色，第一条在最上层；内阴影按 padding 盒裁切并支持 `border-radius`）、
 `background-color`/`background`、`color`、`font-size`、`font-weight(bold)`、`font-family`、
 `text-align(left/center/right)`、`text-decoration(underline/line-through/none，随父链继承)`、
-`white-space(pre)`（保留空白与制表符、按换行强制断行、不软换行；UA 的 `pre`/`code` 用它，
-`nowrap`/`pre-wrap` 未实现）、
+`white-space(normal/nowrap/pre/pre-wrap/pre-line)`（CSS Text §4.1 的三条正交行为：
+`pre` 保留空白与制表符、按源换行强制断行、不软换行（长行溢出）；`pre-wrap` 同上但
+在空格处软换行（不拆长词）；`pre-line` 折叠空白（含行首空白）但保留源换行；
+`nowrap` 折叠空白且不换行；`break-spaces` 按 `pre-wrap` 近似；UA 的 `pre` 用 `pre`，
+行内 `code`/`kbd`/`samp`/`tt` 仍是 `normal`）、
 `line-height(normal/倍数/百分比/px)`（行距一半加在文字之上、一半加在之下，行盒高度
 严格等于声明值；倍数与百分比相对**元素自身**字号解析，随父链继承的是**原始形态**
 ——父级 `1.5` + 子级 `font-size:32px` → 子级行高 48px）、
@@ -513,6 +516,8 @@ em/i/cite/var/dfn 给 `font-style: italic`、`a` 给 `cursor: pointer`、表单�
 基线位移：上标 `父字号/3+1`、下标 `父字号/5+1`，字号取 smaller 的 13px）、
 dt **不加粗**（Chrome UA 实测计算权重 400；HTML4 的 UA 才加粗 dt）、
 dd 缩进 40px、ul/ol 缩进 40px、blockquote/pre/figure 外边距、
+`pre`/`code`/`kbd`/`samp`/`tt` 只给 `font-family: monospace`（**不写死字号**：继承父级，
+父级从未声明字号时才落到通用族默认 13px；`tt` 另补 `display: inline`）、
 hr 边框、form/input/select/textarea/button 的尺寸与外观（多行控件的基线按
 CSS 2.1 §10.8.1 取底外边距边——Chrome 的 textarea 计算 overflow 非 visible）；
 **交互反馈（悬停/按下）**：按钮型控件（`<button>` 与 `<input type=submit/reset/button>`
@@ -685,7 +690,8 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
   （thead→tbody）不合并；`table-layout` 无布局语义（始终自动表格布局）；列宽取
   **内容最大值**（不做浏览器的自动表格布局分配，Chrome 带小数像素）
 - 列表：缩进/外边距/标记已实现并与 Chrome 对齐（ul 的 •、ol 的序号；标记位置按内容左缘 − 间隙近似，符号类 0.875em / 编号类 0.6em）。`list-style-type`（disc/circle/square/decimal/decimal-leading-zero/lower|upper-alpha/lower|upper-roman/none）与 `list-style-position`（outside/inside）及 `list-style` 简写已支持；仍无 `display:list-item`（标记只对 ul/ol 的 li 子元素生成）与 `list-style-image`（`url()` 只解析、不绘制）；`inside` 只缩进 li 自身的首行，li 首个内容子节点是块级时标记退回 outside 绘制（Chrome 会把块首行整体右移）
-- `white-space` 仅 `pre` 一个关键字；`line-height` 不支持 `em`/`rem`/`vh` 等单位
+- `white-space` 五值已齐（`normal/nowrap/pre/pre-wrap/pre-line`）；`break-spaces` 按
+  `pre-wrap` 近似（区别只在行尾空格细节）、`tab-size` 固定 8 个空格宽；`line-height` 不支持 `em`/`rem`/`vh` 等单位
   （只认无单位数字、百分比与 px；其余整条声明忽略，保留继承来的值）；
   `vertical-align` 的 `top`/`bottom` 与行盒最终高度互相依赖，引擎迭代两轮收敛，
   极端组合（同一行里多个 top 盒且高度各异）可能与浏览器差 1~2px
