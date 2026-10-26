@@ -162,6 +162,15 @@ func parseCSSRules(src string) (rules []cssRule, imports []string) {
 		}
 		selText := strings.TrimSpace(src[i : i+open])
 		bodyStart := i + open + 1
+
+		if strings.HasPrefix(selText, "@") {
+			// 带块的 at-rule（@media / @supports / @keyframes…）：整块跳过到
+			// **配对**的收尾括号（引擎不分媒体）。按第一个「}」收尾会把块内
+			// 后续规则当顶层规则应用——@media (prefers-color-scheme: dark)
+			// 的暗色规则漏进亮色页面渲染即此根因。
+			i = skipCSSBlock(src, bodyStart)
+			continue
+		}
 		close := strings.IndexByte(src[bodyStart:], '}')
 		if close < 0 {
 			break
@@ -169,9 +178,6 @@ func parseCSSRules(src string) (rules []cssRule, imports []string) {
 		body := src[bodyStart : bodyStart+close]
 		i = bodyStart + close + 1
 
-		if strings.HasPrefix(selText, "@") {
-			continue
-		}
 		decls := parseDeclarations(body)
 		if len(decls) == 0 {
 			continue
@@ -228,6 +234,25 @@ func parseImportRef(stmt string) (string, bool) {
 		return "", false
 	}
 	return s, true
+}
+
+// skipCSSBlock 从块内容起点（外层 '{' 已消耗）向后扫到配对的 '}'，
+// 返回其后一个位置。嵌套块（@media 内的规则、@keyframes 内的帧）按
+// 大括号深度计数跳过；未闭合到文本尾则吞掉剩余部分。
+func skipCSSBlock(src string, from int) int {
+	depth := 1
+	for j := from; j < len(src); j++ {
+		switch src[j] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return j + 1
+			}
+		}
+	}
+	return len(src)
 }
 
 func stripCSSComments(src string) string {

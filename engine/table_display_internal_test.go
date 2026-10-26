@@ -404,6 +404,28 @@ func tableBox2W(e *htmlElement) int {
 	return w
 }
 
+// TestTableColumnShrinkRespectsMinContent 回归（会议纪要页调试）：
+// 列宽被表格可用宽压时不得低于单元格最小内容外宽（最宽不可断片段+内边距）。
+// 旧实现 mins 只看 col/colgroup 约束（无 col 时下限 1px），比例压缩把
+// 不可断的 ASCII 片段列压到片段宽以下——文字溢出被裁在格外（实际页面
+// 里「10.31前」整格不可见、CJK 列被压成一字宽）。
+func TestTableColumnShrinkRespectsMinContent(t *testing.T) {
+	src := `<!doctype html><html><body style="margin:0">
+		<table id="t" style="width:100%;border-spacing:0">
+			<tr>
+				<td id="a">会务通知：请各位于明日十时前提交报告材料与统计表格，并留意后续安排更新。</td>
+				<td id="b">XXXXXXXXXX</td>
+			</tr>
+		</table>
+	</body></html>`
+	doc, _ := tableLayout(t, src, 300, 400)
+	bw := tableBox2W(tableEl(t, doc, "b"))
+	// BufferGraphics 度量：16px ASCII = 9px → 10 字符 = 90 + UA td padding 1px×2 = 92。
+	if bw < 92 {
+		t.Errorf("不可断列宽 = %d, want ≥92（最小内容宽不被压缩裁字）", bw)
+	}
+}
+
 // sprintfSpan 替换 rowspan 占位。
 func sprintfSpan(tpl, v string) string {
 	out := make([]byte, 0, len(tpl)+len(v))

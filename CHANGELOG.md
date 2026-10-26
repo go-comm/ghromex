@@ -5,6 +5,20 @@
 
 ## 未发布
 
+**@media 多规则块泄漏修复**：
+带块 at-rule 的跳过原先只收到块内**第一个** `}`，`@media (prefers-color-scheme: dark)`
+等多规则块从第二条起被提升成顶层规则应用（会议纪要页亮色背景漏出暗色表格）。
+现在按大括号深度配平整块跳过（`skipCSSBlock`），块后规则照常解析。
+回归：`TestParseCSSRulesSkipsMultiRuleMediaBlock`。
+
+**表格列宽压缩的最小内容下限**：
+`mins` 原先只看 col/colgroup 约束（无 col 时下限 1px），比例压缩可把列压到
+内容最小宽以下——不可断 ASCII 片段被裁出格外、CJK 列压成一字宽竖排。
+新增每格 1px 试排量取最小内容外宽（最宽不可断片段 + 内边距）作列下限，
+跨列格按 `spreadExtra` 分摊，作者显式声明的格宽直接作下限。
+会议纪要页列宽 45/360/130/77/263 对齐 Chrome 62/376/133/78/240。
+回归：`TestTableColumnShrinkRespectsMinContent`。
+
 **滚动快速路径**：
 仅触发 `markScrollChanged` 时（滚轮、textarea 内滚、编程滚动），
 `LayoutDocument` 跳过级联与重排，仅对子树盒子做增量平移（`applyScrollDeltas`）并重定位

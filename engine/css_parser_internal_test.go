@@ -57,3 +57,25 @@ func TestParseCSSRulesKeepsRulesAfterImport(t *testing.T) {
 		t.Errorf("order 未按源码顺序编号：%d/%d/%d", rules[0].order, rules[1].order, rules[2].order)
 	}
 }
+
+// TestParseCSSRulesSkipsMultiRuleMediaBlock 回归（会议纪要页调试）：
+// @media 块内含多条规则时，旧实现只跳到块内**第一个**「}」，第二条起的
+// 规则被提升成顶层规则应用——prefers-color-scheme: dark 的暗色表格样式
+// 漏进亮色页面渲染。带块 at-rule 必须按大括号深度配平整块跳过。
+func TestParseCSSRulesSkipsMultiRuleMediaBlock(t *testing.T) {
+	rules, _ := parseCSSRules(`
+		body { color: black; }
+		@media (prefers-color-scheme: dark) {
+			table tr { background-color: #0d1117; }
+			table td { border-color: #3d444d; }
+			pre { color: #e6edf3; }
+		}
+		h1 { font-size: 32px; }
+	`)
+	if len(rules) != 2 {
+		t.Fatalf("规则数 = %d, want 2（@media 内 3 条整块跳过，块后的 h1 保留）", len(rules))
+	}
+	if s := rules[1].sels[0]; len(s.compounds) != 1 || s.compounds[0].tag != "h1" {
+		t.Errorf("块后规则不是 h1：%+v", s.compounds)
+	}
+}

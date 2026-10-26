@@ -63,6 +63,9 @@ type tableCell struct {
 	row      int  // 落位后的起始行/列
 	col      int
 	natW     int  // 测量外宽（内容自然宽，边框盒）
+	minW     int  // 最小内容外宽（1px 试排换行后的最宽不可断片段，边框盒）——
+	// Chrome 压列宽的下限：列宽被表格可用宽压时不得低于它，否则 CJK 列
+	// 被比例压成一字宽、"10.31" 这类不可断片段被裁出格（会议纪要表实测）。
 	natH     int  // 槽宽重量后的外高（含拉伸前）
 	va       int8 // tblV* 三档
 	empty    bool // 空单元格（empty-cells 用，仅真实格）
@@ -1019,10 +1022,34 @@ func layoutTableBox(g Graphics, tbl *htmlElement, outerW, outerH, ox, oy, pctW, 
 		pin(c.el)
 	}
 
-	// 第一遍：天然尺寸（内容收缩测量，以可用宽为上限）。
+	// 第一遍：天然尺寸（内容收缩测量，以可用宽为上限）；随后 1px 试排量
+	// 最小内容外宽（内容按最窄换行后的最宽行——不可断片段/单词 + 边框内边距）。
+	// 返回值不可用（fitW 被钳到试排宽），取内容盒流宽 + 自身边框内边距。
 	for _, c := range cells {
 		w, h := layoutBox(g, c.el, availW, 0, 0, 0, pctBase, -1, nil)
 		c.natW, c.natH = w, h
+		if c.el.computed != nil && c.el.computed.Display() == DisplayNone {
+			c.minW = 0
+			continue
+		}
+		layoutBox(g, c.el, 1, 0, 0, 0, pctBase, -1, nil)
+		mw := c.el.contentW
+		if mw > 0 && c.el.hasRsv {
+			mw += c.el.rsvPD[eLeft] + c.el.rsvPD[eRight] +
+				c.el.rsvBD[eLeft] + c.el.rsvBD[eRight]
+		}
+		// 显式声明宽：格按声明宽即最小宽（Chrome 不把作者声明的格宽压下去）。
+		if comp := c.el.computed; comp != nil && comp.Width() != nil &&
+			resolveLen(comp.Width(), pctBase) >= 0 {
+			mw = c.natW
+		}
+		if mw < 4 {
+			mw = 4
+		}
+		if mw > c.natW {
+			mw = c.natW
+		}
+		c.minW = mw
 	}
 
 	// 列宽：col 约束作下限 → 单列格定宽 → 跨列格补差（跨度从短到长）。
@@ -1035,8 +1062,14 @@ func layoutTableBox(g Graphics, tbl *htmlElement, outerW, outerH, ox, oy, pctW, 
 		mins[i] = maxInt(cols[i], 1)
 	}
 	for _, c := range cells {
-		if c.spanW == 1 && c.col < ncols && c.natW > cols[c.col] {
+		if c.spanW != 1 || c.col >= ncols {
+			continue
+		}
+		if c.natW > cols[c.col] {
 			cols[c.col] = c.natW
+		}
+		if c.minW > mins[c.col] {
+			mins[c.col] = c.minW
 		}
 	}
 	for span := 2; span <= ncols; span++ {
@@ -1051,6 +1084,19 @@ func layoutTableBox(g Graphics, tbl *htmlElement, outerW, outerH, ox, oy, pctW, 
 			if c.natW > covered {
 				spreadExtra(cols, c.col, span, c.natW-covered)
 			}
+			covered = (span - 1) * sh
+			for i := c.col; i < c.col+span && i < ncols; i++ {
+				covered += mins[i]
+			}
+			if c.minW > covered {
+				spreadExtra(mins, c.col, span, c.minW-covered)
+			}
+		}
+	}
+	// 传播：列宽不得低于内容最小宽（跨列分布后个别列可能仍超）。
+	for i := range cols {
+		if mins[i] > cols[i] {
+			cols[i] = mins[i]
 		}
 	}
 	// 表格宽：显式宽按比例缩放列（不低于列下限）；auto 宽收缩到可用宽。
