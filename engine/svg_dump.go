@@ -382,7 +382,7 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 	// 按标记类型分别取 Chrome 实测值；inside 画在内容盒内首行行首），否则
 	// SVG 导出与屏幕渲染不同构（看不到圆点/序号）。
 	if visible && base.listMarker != "" {
-		fpx, _, ffam := fontOf(comp)
+		fpx, _, _, ffam := fontOf(comp)
 		mw, _ := fakeMeasureText(base.listMarker, fpx)
 		_, lh := fakeMeasureText("Mg", fpx)
 		if lh <= 0 {
@@ -506,6 +506,7 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 	fs := 13
 	fill := "#000000"
 	fam := ""
+	wn := 0
 	if comp != nil {
 		if s := resolveLen(comp.FontSize(), 0); s > 0 {
 			fs = s
@@ -515,6 +516,7 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 			fill = hexColor(r, g, bl)
 		}
 		fam = comp.FontFamily()
+		wn = fontWeightNumOf(comp)
 	}
 	// 度量与渲染路径一致走 Fake 估算口径（dump 无 Graphics 实例）
 	fg := NewFakeGraphics()
@@ -536,7 +538,7 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 	if strings.EqualFold(base.tagName, "select") {
 		// 与渲染路径同口径：可用宽 = 内容宽 - 箭头位，超宽舍尾保留头。
 		val := selectDisplayClipped(NewFakeGraphics(), base, base.width-selectArrowWidth,
-			fs, comp.FontWeight() == FontWeightBold, fam)
+			fs, wn, comp.FontWeight() == FontWeightBold, fam)
 		if val == "" {
 			return
 		}
@@ -555,7 +557,7 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 		// 不相交的行，半截行交给 clip-path 截断；否则整行丢弃。
 		clipOK := isClippingBox(base)
 		if isFocusedElement(base) {
-			for _, sr := range textareaSelectionRects(fg, base, l, fs, bold, fam, clipOK) {
+			for _, sr := range textareaSelectionRects(fg, base, l, fs, wn, bold, fam, clipOK) {
 				emitSelection(sr)
 			}
 		}
@@ -587,7 +589,7 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 		}
 		return
 	}
-	val, cut, w, h := inputVisibleWindow(fg, base, fs, bold, fam)
+	val, cut, w, h := inputVisibleWindow(fg, base, fs, wn, bold, fam)
 	if val == "" {
 		return
 	}
@@ -615,7 +617,7 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 		ty += (base.height - h) / 2
 	}
 	if lo, hi, ok := selectionRange(base); ok && isFocusedElement(base) {
-		for _, sr := range inputSelectionRects(fg, val, cut, tx, ty, h, fs, bold, fam, lo, hi) {
+		for _, sr := range inputSelectionRects(fg, val, cut, tx, ty, h, fs, wn, bold, fam, lo, hi) {
 			emitSelection(sr)
 		}
 	}

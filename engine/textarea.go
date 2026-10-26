@@ -97,7 +97,7 @@ type textareaLine struct {
 
 // wrapTextarea 按 maxW 贪心折行：'\n' 强制断行，行末优先在空格处回退
 // 断行，超长单词硬切。始终至少返回一行（空值也返回空行，供光标落位）。
-func wrapTextarea(g Graphics, value string, maxW, fontPx int, bold bool, family string) []textareaLine {
+func wrapTextarea(g Graphics, value string, maxW, fontPx, weightNum int, bold bool, family string) []textareaLine {
 	if g == nil {
 		g = NewFakeGraphics()
 	}
@@ -106,7 +106,7 @@ func wrapTextarea(g Graphics, value string, maxW, fontPx int, bold bool, family 
 	}
 	runes := []rune(value)
 	measure := func(s string) int {
-		w, _ := g.MeasureText(s, fontPx, bold, family)
+		w, _ := measureTextW(g, s, fontPx, weightNum, bold, family)
 		return w
 	}
 	var lines []textareaLine
@@ -145,7 +145,7 @@ func wrapTextarea(g Graphics, value string, maxW, fontPx int, bold bool, family 
 			lastSpace = -1
 			continue
 		}
-		w, _ := g.MeasureText(string(r), fontPx, bold, family)
+		w, _ := measureTextW(g, string(r), fontPx, weightNum, bold, family)
 		if curW+w > maxW && len(cur) > 0 {
 			if lastSpace > 0 {
 				// 在最后一个空格处断行：空格**留在上一行末尾**（含在 keep 内），
@@ -196,13 +196,13 @@ func layoutTextarea(g Graphics, el *htmlElement) textareaLayout {
 		comp = newStyle()
 		el.computed = comp
 	}
-	px, bold, family := fontOf(comp)
+	px, weightNum, bold, family := fontOf(comp)
 	maxW := el.width
 	if maxW < 1 {
 		maxW = 1
 	}
-	lines := wrapTextarea(g, el.GetAttribute("value"), maxW, px, bold, family)
-	_, lh := g.MeasureText("Mg", px, bold, family)
+	lines := wrapTextarea(g, el.GetAttribute("value"), maxW, px, weightNum, bold, family)
+	_, lh := measureTextW(g, "Mg", px, weightNum, bold, family)
 	if lh <= 0 {
 		lh = px * 13 / 10
 	}
@@ -211,7 +211,7 @@ func layoutTextarea(g Graphics, el *htmlElement) textareaLayout {
 	if decl := resolvedLineHeight(comp); decl >= 0 {
 		lh = decl
 	}
-	asc, _ := g.FontMetrics("", px, bold, family)
+	asc, _ := fontMetricsW(g, "", px, weightNum, bold, family)
 	if asc <= 0 {
 		asc = lh / 2
 	}
@@ -253,7 +253,7 @@ func caretRow(lines []textareaLine, caret int) int {
 }
 
 // caretXY 返回光标在内容区的落点（已扣滚动）。
-func (l textareaLayout) caretXY(g Graphics, caret int, fontPx int, bold bool, family string) (x, y int) {
+func (l textareaLayout) caretXY(g Graphics, caret int, fontPx, weightNum int, bold bool, family string) (x, y int) {
 	if len(l.lines) == 0 {
 		return l.x, l.y
 	}
@@ -267,13 +267,13 @@ func (l textareaLayout) caretXY(g Graphics, caret int, fontPx int, bold bool, fa
 	if col > len(txt) {
 		col = len(txt)
 	}
-	w, _ := g.MeasureText(string(txt[:col]), fontPx, bold, family)
+	w, _ := measureTextW(g, string(txt[:col]), fontPx, weightNum, bold, family)
 	return l.x + w, l.y + row*l.lh
 }
 
 // caretFromPoint 由点击坐标反推光标 rune 下标：先按行高定行，再在行内
 // 按字符中点定列（与浏览器点选一致的就近吸附）。
-func (l textareaLayout) caretFromPoint(g Graphics, x, y int, fontPx int, bold bool, family string) int {
+func (l textareaLayout) caretFromPoint(g Graphics, x, y int, fontPx, weightNum int, bold bool, family string) int {
 	if len(l.lines) == 0 {
 		return 0
 	}
@@ -294,7 +294,7 @@ func (l textareaLayout) caretFromPoint(g Graphics, x, y int, fontPx int, bold bo
 	}
 	prev := 0
 	for k := 1; k <= len(txt); k++ {
-		w, _ := g.MeasureText(string(txt[:k]), fontPx, bold, family)
+		w, _ := measureTextW(g, string(txt[:k]), fontPx, weightNum, bold, family)
 		if x < l.x+(prev+w)/2 {
 			return ln.start + k - 1
 		}
@@ -377,11 +377,11 @@ func ensureCaretVisible(doc HTMLDocument, el *htmlElement) {
 	case "submit", "reset", "button":
 		return
 	}
-	px, bold, family := fontOf(el.computed)
+	px, weightNum, bold, family := fontOf(el.computed)
 	full := []rune(displayValue(el))
 	caret := clampCaret(el.caret, len(full))
-	pre, _ := g.MeasureText(string(full[:caret]), px, bold, family)
-	fullW, _ := g.MeasureText(string(full), px, bold, family)
+	pre, _ := measureTextW(g, string(full[:caret]), px, weightNum, bold, family)
+	fullW, _ := measureTextW(g, string(full), px, weightNum, bold, family)
 	avail := el.width - 4
 	if avail < 1 {
 		avail = 1

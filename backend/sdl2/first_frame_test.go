@@ -54,7 +54,7 @@ func TestFreshFaceBoldAppliedImmediately(t *testing.T) {
 	// 文件**且不再叠加 TTF_STYLE_BOLD；无真粗体文件时才用常规文件 + 合成加粗
 	// （facePath 返回与 base 相同即意味着走合成加粗）。
 	base := g.cjkFontPathFor("")
-	refPath := g.facePath(base, size, true)
+	refPath := g.facePath(base, size, tierBold)
 	syntheticBold := refPath == base
 	ref := openTTF(t, refPath, size)
 	defer ttfCloseFont(ref)

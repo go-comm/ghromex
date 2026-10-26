@@ -50,9 +50,9 @@ func listMarkerBox(g Graphics, base *htmlElement, comp CSSStyleDeclaration) (x, 
 	if base == nil || base.listMarker == "" {
 		return 0, 0, 0, 0, false
 	}
-	fpx, fbold, ffam := fontOf(comp)
-	mw, _ := g.MeasureText(base.listMarker, fpx, fbold, ffam)
-	_, lh := g.MeasureText("Mg", fpx, fbold, ffam) // 行高（与文字行盒一致）
+	fpx, fweightNum, fbold, ffam := fontOf(comp)
+	mw, _ := measureTextW(g, base.listMarker, fpx, fweightNum, fbold, ffam)
+	_, lh := measureTextW(g, "Mg", fpx, fweightNum, fbold, ffam) // 行高（与文字行盒一致）
 	if lh <= 0 {
 		lh = base.height
 	}

@@ -69,8 +69,8 @@ func ownLineHeight(g Graphics, comp CSSStyleDeclaration) int {
 	if g == nil || comp == nil {
 		return 0
 	}
-	px, bold, family := fontOf(comp)
-	a, d := g.FontMetrics("", px, bold, family)
+	px, weightNum, bold, family := fontOf(comp)
+	a, d := fontMetricsW(g, "", px, weightNum, bold, family)
 	return a + d
 }
 

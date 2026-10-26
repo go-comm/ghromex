@@ -121,3 +121,69 @@ func TestFontWeightMapping(t *testing.T) {
 		t.Errorf("非法值应保留继承的 Bold，实际被覆盖为 %v", st.FontWeight())
 	}
 }
+
+// TestFontWeightNumericStorage 回归（会议纪要页拉丁 600 修复）：两档
+// FontWeight 归档之外必须把 font-weight 的**数值**原值存进
+// fontWeightNum——后端要靠它区分 600/700（Semibold vs Bold 面）。
+// bolder/lighter 同时给出数值（bolder：继承值 ≥650→900，否则→700，
+// 0=UA 直接 bold 视作 400 起跳；lighter→400，与两档结论一致）。
+func TestFontWeightNumericStorage(t *testing.T) {
+	cases := []struct {
+		value string
+		want  int
+	}{
+		{"normal", 400}, {"400", 400}, {"500", 500}, {"lighter", 400},
+		{"bold", 700}, {"550", 550}, {"600", 600}, {"650", 650},
+		{"700", 700}, {"900", 900},
+	}
+	for _, c := range cases {
+		st := newStyle()
+		applyDecl(st, "font-weight", c.value)
+		if got := fontWeightNumOf(st); got != c.want {
+			t.Errorf("font-weight:%s 数值 = %d, want %d", c.value, got, c.want)
+		}
+	}
+
+	// bolder 按继承数值升档。
+	for _, c := range []struct{ from, want int }{
+		{0, 700}, {400, 700}, {600, 700}, {650, 900}, {700, 900},
+	} {
+		st := newStyle()
+		setFontWeightNumOf(st, c.from)
+		applyDecl(st, "font-weight", "bolder")
+		if got := fontWeightNumOf(st); got != c.want {
+			t.Errorf("bolder 从 %d = %d, want %d", c.from, got, c.want)
+		}
+	}
+
+	// 非法值同样不覆盖数值（与两档归档的丢弃语义一致）。
+	st := newStyle()
+	setFontWeightNumOf(st, 600)
+	applyDecl(st, "font-weight", "var(--x)")
+	if got := fontWeightNumOf(st); got != 600 {
+		t.Errorf("非法值应保留继承的 600，实际 %d", got)
+	}
+
+	// font-weight 是继承属性：子元素未声明时数值随两档一起继承
+	//（否则父级 600 在子级退化成初始档，Semibold 丢失）。
+	parent := newStyle()
+	applyDecl(parent, "font-weight", "600")
+	child := newStyle()
+	applyInheritedStyle(child, parent)
+	if got := fontWeightNumOf(child); got != 600 {
+		t.Errorf("继承后数值 = %d, want 600", got)
+	}
+	// 子级声明 normal 必须复位为 400（不能保留父级 600）。
+	applyDecl(child, "font-weight", "normal")
+	if got := fontWeightNumOf(child); got != 400 {
+		t.Errorf("子级 normal 数值 = %d, want 400", got)
+	}
+
+	// 样式克隆也要带上数值（级联快照路径）。
+	src := newStyle()
+	applyDecl(src, "font-weight", "600")
+	dst := copyStyle(src)
+	if got := fontWeightNumOf(dst); got != 600 {
+		t.Errorf("克隆后数值 = %d, want 600", got)
+	}
+}

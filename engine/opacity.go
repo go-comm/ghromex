@@ -49,6 +49,13 @@ func scalePaint(p Paint, k float64) Paint {
 	np.SetFontFamily(p.FontFamily())
 	np.SetBold(p.Bold())
 	setPaintItalic(np, paintItalic(p))
+	// 数值字重随 paint 一起缩放：透明层底下选字面不能退化成两档（否则
+	// opacity 内的 600 文字会意外用上 700 Bold 面）。
+	if wp, ok := np.(WeightedPaint); ok {
+		if pp, ok2 := p.(WeightedPaint); ok2 {
+			wp.SetFontWeightNum(pp.FontWeightNum())
+		}
+	}
 	np.SetBackground(scaleColor(p.Background(), k))
 	return np
 }

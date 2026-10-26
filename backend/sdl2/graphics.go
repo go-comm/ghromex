@@ -252,6 +252,7 @@ type Graphics struct {
 
 // 编译期断言：SDL 后端必须实现 core.Clipper，否则 overflow 裁剪会静默失效。
 var _ core.Clipper = (*Graphics)(nil)
+var _ core.WeightedMeasurer = (*Graphics)(nil)
 
 type faceKey struct {
 	path string
@@ -345,7 +346,10 @@ type texKey struct {
 	fontPath string
 	text     string
 	size     int
-	bold     bool
+	// tier = 字面档位（见 fontTierOf）。不能用 bold 代替：fontPath 是变体
+	// 解析**前**的段路径（如 segoeui.ttf），600（→seguisb）与 700
+	// （→segoeuib）若同 key 会串用彼此的纹理。
+	tier uint8
 	italic   bool
 	lcd      bool
 	// hint = hinting 档位（fontHinting()）：同 faceKey 的理由——运行中切
@@ -460,11 +464,59 @@ var boldVariants = map[string]string{
 	"simsun.ttc":  "simsunb.ttf",
 }
 
-// facePath 返回该 (路径, 粗细) 实际会打开的字体文件路径（粗体可能命中真粗体
-// 变体）。仅用于诊断输出。
-func (g *Graphics) facePath(path string, size int, bold bool) string {
+// semiboldVariants 给出各字体文件对应的**真半粗体**（Semibold，600 档）
+// 文件。Chrome 就近选面实测（Segoe UI 族含 300/350/400/600/700/900 六面）：
+// font-weight 550~649 落 600 面（"2026-10-23 AI" 32px 宽 202.7，而
+// segoeuib Bold 为 214.6——两档归档的 600 会重 6% 且行宽偏大）。
+// 没有半粗面的族（Arial/雅黑/宋体）不登记：未命中落 boldVariants 或合成
+// 粗，与 Chrome 的就近选面（600→700 面）一致。
+var semiboldVariants = map[string]string{
+	"segoeui.ttf": "seguisb.ttf",
+}
+
+// 字面档位：由数值 font-weight 与两档布尔归档得出，face/度量/纹理三处
+// 共用同一口径。
+const (
+	tierRegular = iota // 0：正体
+	tierSemibold       // 1：半粗（550~649，优先真 Semibold 面）
+	tierBold           // 2：粗体（650+ 或 legacy bold）
+)
+
+// fontTierOf 把（数值字重, 两档粗体）归档到字面档位。weightNum<=0 表示
+// 调用方未带数字（UA 直接 SetFontWeight 的 legacy 路径），按两档布尔；
+// 带数字时以数字为准（与解析层 ≥550→Bold 的归档保证一致）。
+func fontTierOf(bold bool, weightNum int) int {
+	if weightNum > 0 {
+		switch {
+		case weightNum >= 650:
+			return tierBold
+		case weightNum >= 550:
+			return tierSemibold
+		default:
+			return tierRegular
+		}
+	}
 	if bold {
-		if name, ok := boldVariants[strings.ToLower(filepath.Base(path))]; ok {
+		return tierBold
+	}
+	return tierRegular
+}
+
+// facePath 返回该 (路径, 档位) 实际会打开的字体文件路径（半粗/粗体可能
+// 命中真字重变体）。仅用于诊断输出。
+func (g *Graphics) facePath(path string, size, tier int) string {
+	base := strings.ToLower(filepath.Base(path))
+	if tier >= tierSemibold {
+		if tier == tierSemibold {
+			if name, ok := semiboldVariants[base]; ok {
+				if p := fontPathOf(name); p != "" {
+					return p
+				}
+			}
+		}
+		// 半粗未命中（族无 Semibold 面）落粗体面——与 face 的变体解析
+		// 同构（Chrome 对 {400,700} 族 600→700 就近选面）。
+		if name, ok := boldVariants[base]; ok {
 			if p := fontPathOf(name); p != "" {
 				return p
 			}
@@ -476,18 +528,33 @@ func (g *Graphics) facePath(path string, size int, bold bool) string {
 // face 取得（并按需创建/切换）字体句柄。reuseFaces 时一个 (文件, hinting
 // 档位) 一个 face，用 TTF_SetFontSize / TTF_SetFontStyle 动态切换，避免同一
 // TTC 按字号重复加载；hinting 档位进 key 是为支持运行中切 GHROMEX_HINT。
-func (g *Graphics) face(path string, size int, bold, italic bool) *fontFace {
-	// 粗体优先用真粗体字文件（见 boldVariants）：合成加粗比真粗体重得多，
-	// 中文尤甚。命中时该 face 本身就是粗体，不再叠加 TTF_STYLE_BOLD。
+func (g *Graphics) face(path string, size, tier int, italic bool) *fontFace {
+	// 粗字重优先用真字面文件（700 档见 boldVariants、600 档见
+	// semiboldVariants）：合成加粗比真粗体重得多，中文尤甚。命中真字面时
+	// 该 face 自身已带字重，不再叠加 TTF_STYLE_BOLD。半粗档未命中（族无
+	// Semibold 面）落粗体面——与 Chrome 对 {400,700} 族 600→700 的就近
+	// 选面同口径；两者都未命中才合成加粗（如 Noto VF，SDL2_ttf 无 VF API）。
+	base := strings.ToLower(filepath.Base(path))
 	realBold := false
-	if bold {
-		if name, ok := boldVariants[strings.ToLower(filepath.Base(path))]; ok {
-			if p := fontPathOf(name); p != "" {
-				path = p
-				realBold = true
+	if tier >= tierSemibold {
+		if tier == tierSemibold {
+			if name, ok := semiboldVariants[base]; ok {
+				if p := fontPathOf(name); p != "" {
+					path = p
+					realBold = true
+				}
+			}
+		}
+		if !realBold {
+			if name, ok := boldVariants[base]; ok {
+				if p := fontPathOf(name); p != "" {
+					path = p
+					realBold = true
+				}
 			}
 		}
 	}
+	bold := tier >= tierSemibold
 	key := faceKey{path: path, hint: uint8(g.envHint)}
 	if !g.reuseFaces {
 		key.size, key.bold, key.italic = size, bold, italic
@@ -649,9 +716,10 @@ func (g *Graphics) fontPath(family string) string { return g.resolveFontPath(fam
 // examples/ua/index.html 单次重排 80% 以上，是滚动掉帧的最后一处大头。
 // ttf 进 key：DLL 是否可用会改变度量口径（估算 vs 真实），不能串用。
 type measureKey struct {
-	text   string
-	size   int
-	bold   bool
+	text string
+	size int
+	// tier 语义同 texKey：600/700 度量命中不同字面，不能共键。
+	tier   uint8
 	family string
 	hint   uint8
 	ttf    bool
@@ -662,13 +730,26 @@ type measureVal struct{ w, h int }
 // 唯一字符串无上限，超出后整体清空——度量重算比无限增长安全。
 const maxCachedMeasures = 8192
 
-// MeasureText 实现 core.Graphics。与 DrawText 同一套脚本分段与字体解析，
-// 宽度为各段之和，行高取各段最大值（近似 Chrome 的行盒语义）。
+// MeasureText 实现 core.Graphics：两档口径（bold 决定正/粗体面），
+// 未携带数值字重的调用方走这里。
 func (g *Graphics) MeasureText(text string, fontSize int, bold bool, family string) (int, int) {
+	return g.measureText(text, fontSize, fontTierOf(bold, 0), family)
+}
+
+// MeasureTextWeight 实现 core.WeightedMeasurer：按数值 font-weight 归档
+// 字面档位度量（550~649 → Semibold 面，如 segoeui→seguisb），与 DrawText
+// 从 paint 读到的档位同口径，否则混排宽度会错位。
+func (g *Graphics) MeasureTextWeight(text string, fontSize, weightNum int, family string) (int, int) {
+	return g.measureText(text, fontSize, fontTierOf(weightNum >= 550, weightNum), family)
+}
+
+// measureText 是两种度量的共同实现：与 DrawText 同一套脚本分段与字体
+// 解析，宽度为各段之和，行高取各段最大值（近似 Chrome 的行盒语义）。
+func (g *Graphics) measureText(text string, fontSize, tier int, family string) (int, int) {
 	if fontSize <= 0 {
 		fontSize = 16
 	}
-	key := measureKey{text: text, size: fontSize, bold: bold, family: family,
+	key := measureKey{text: text, size: fontSize, tier: uint8(tier), family: family,
 		hint: uint8(g.envHint), ttf: hasTTF()}
 	if v, ok := g.measures[key]; ok {
 		return v.w, v.h
@@ -680,7 +761,7 @@ func (g *Graphics) MeasureText(text string, fontSize int, bold bool, family stri
 	} else {
 		for _, seg := range splitScripts(text) {
 			path := g.segFontPath(seg, family)
-			f := g.face(path, fontSize, bold, false)
+			f := g.face(path, fontSize, tier, false)
 			if f == nil {
 				// 字体句柄打开失败是暂时性的（文件被占用等）：本次按估算
 				// 返回但不入缓存，后续帧还有机会拿到真实度量。
@@ -713,12 +794,24 @@ func (g *Graphics) MeasureText(text string, fontSize int, bold bool, family stri
 	return totalW, maxH
 }
 
-// FontMetrics 实现 core.Graphics：返回行度量（基线以上 ascent、基线以下
-// descent）。各脚本段取最大值：行盒高度 = 各内联盒 ascent 的最大者 +
+// FontMetrics 实现 core.Graphics：两档口径（bold 决定正/粗体面），与
+// MeasureText 同义。
+func (g *Graphics) FontMetrics(text string, fontSize int, bold bool, family string) (int, int) {
+	return g.fontMetrics(text, fontSize, fontTierOf(bold, 0), family)
+}
+
+// FontMetricsWeight 实现 core.WeightedMeasurer：数值字重档位下的行度量
+//（半粗面与粗体面的 ascent/descent 可能有细微差异，需同档位取用）。
+func (g *Graphics) FontMetricsWeight(text string, fontSize, weightNum int, family string) (int, int) {
+	return g.fontMetrics(text, fontSize, fontTierOf(weightNum >= 550, weightNum), family)
+}
+
+// fontMetrics 是两种行度量的共同实现：返回行度量（基线以上 ascent、基线
+// 以下 descent）。各脚本段取最大值：行盒高度 = 各内联盒 ascent 的最大者 +
 // descent 的最大者（同基线对齐）。度量来自 SDL_ttf 的 TTF_FontAscent/
 // TTF_FontDescent，行高与 Chrome/DirectWrite 可能有 1~4px 差异。
 // text 为空时只取主字体（不触发 CJK 逐字回退），对应行盒的 strut。
-func (g *Graphics) FontMetrics(text string, fontSize int, bold bool, family string) (int, int) {
+func (g *Graphics) fontMetrics(text string, fontSize, tier int, family string) (int, int) {
 	if fontSize <= 0 {
 		fontSize = 16
 	}
@@ -727,7 +820,7 @@ func (g *Graphics) FontMetrics(text string, fontSize int, bold bool, family stri
 		return h / 2, h - h/2
 	}
 	if text == "" {
-		asc, desc, ok := g.lineMetricsOf(g.resolveFontPath(family), fontSize, bold)
+		asc, desc, ok := g.lineMetricsOf(g.resolveFontPath(family), fontSize, tier)
 		if !ok {
 			h := fontSize * 13 / 10
 			return h / 2, h - h/2
@@ -736,7 +829,7 @@ func (g *Graphics) FontMetrics(text string, fontSize int, bold bool, family stri
 	}
 	maxAsc, maxDesc := 0, 0
 	for _, seg := range splitScripts(text) {
-		asc, desc, ok := g.lineMetricsOf(g.segFontPath(seg, family), fontSize, bold)
+		asc, desc, ok := g.lineMetricsOf(g.segFontPath(seg, family), fontSize, tier)
 		if !ok {
 			continue
 		}
@@ -754,18 +847,18 @@ func (g *Graphics) FontMetrics(text string, fontSize int, bold bool, family stri
 	return maxAsc, maxDesc
 }
 
-// lineMetricsOf 返回（字体文件, 字号, 粗细）下的行度量：ascent 取
+// lineMetricsOf 返回（字体文件, 字号, 字重档位）下的行度量：ascent 取
 // TTF_FontAscent，descent 取 -TTF_FontDescent（SDL_ttf 返回负值）。
 //
 // 这里直接用 SDL_ttf 的 FreeType 像素取整，不再解析字体的 head/hhea/OS2。
 // 代价是行高不再逐像素对齐 Chrome/DirectWrite（同一字体可能差 1~4px），
 // 换来的是实现简单、无字体表解析代码；布局与绘制仍使用同一个 face，
 // ascent/descent 与真实字形基线至少自洽。
-func (g *Graphics) lineMetricsOf(path string, size int, bold bool) (int, int, bool) {
+func (g *Graphics) lineMetricsOf(path string, size, tier int) (int, int, bool) {
 	if !hasTTFFontAscent || !hasTTFFontDescent {
 		return 0, 0, false
 	}
-	f := g.face(path, size, bold, false)
+	f := g.face(path, size, tier, false)
 	if f == nil {
 		return 0, 0, false
 	}
@@ -802,13 +895,20 @@ func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string) {
 	family := paint.FontFamily()
 	bold := paint.Bold()
 	italic := paintItalic(paint)
+	// 数值字重：paint 携带时按档位选字面（600 → Semibold 面），与度量侧
+	// MeasureTextWeight 同口径；不携带则退回两档 bold（legacy 调用）。
+	wn := 0
+	if wp, ok := paint.(core.WeightedPaint); ok {
+		wn = wp.FontWeightNum()
+	}
+	tier := fontTierOf(bold, wn)
 
 	segs := splitScripts(text)
 	// 第一段（standard 段）的基线作为对齐参考；取各段中最大的 ascent
 	refAscent := int32(-1)
 	for _, seg := range segs {
 		path := g.segFontPath(seg, family)
-		if a := g.ascentOf(path, size, bold); a > refAscent {
+		if a := g.ascentOf(path, size, tier); a > refAscent {
 			refAscent = a
 		}
 	}
@@ -831,7 +931,7 @@ func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string) {
 	hint := uint8(g.envHint)
 	for _, seg := range segs {
 		path := g.segFontPath(seg, family)
-		key := texKey{fontPath: path, text: seg.text, size: size, bold: bold, italic: italic, lcd: lcd,
+		key := texKey{fontPath: path, text: seg.text, size: size, tier: uint8(tier), italic: italic, lcd: lcd,
 			hint:     hint,
 			contrast: uint16(kc * 100),
 			r:        cr, g: cg, b: cb, a: ca}
@@ -846,7 +946,7 @@ func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string) {
 			info.lastUsed = g.nextTexClock()
 			g.textures[key] = info
 		} else {
-			f := g.face(path, size, bold, italic)
+			f := g.face(path, size, tier, italic)
 			if f == nil {
 				continue
 			}
@@ -908,8 +1008,8 @@ func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string) {
 			// 记录每段的解析路径与"实际渲染纹理尺寸"：若 SetFontSize 参数传递失效，
 			// actual 会与 req 不符（字号被 XMM 残值之类的外部因素带偏），此处一眼可见。
 			// 路径取 face 实际打开的文件（粗体可能命中真粗体变体 msyhbd.ttc 等）。
-			fmt.Fprintf(os.Stderr, "[font] %q req=%dpx bold=%v -> %s actual=%dx%d ascent=%d\n",
-				seg.text, size, bold, filepath.Base(g.facePath(path, size, bold)), info.w, info.h, info.ascent)
+			fmt.Fprintf(os.Stderr, "[font] %q req=%dpx tier=%d -> %s actual=%dx%d ascent=%d\n",
+				seg.text, size, tier, filepath.Base(g.facePath(path, size, tier)), info.w, info.h, info.ascent)
 		}
 		top := y
 		if info.ascent > 0 && refAscent > 0 {
@@ -932,8 +1032,8 @@ func paintItalic(p core.Paint) bool {
 	return false
 }
 
-func (g *Graphics) ascentOf(path string, size int, bold bool) int32 {
-	asc, _, ok := g.lineMetricsOf(path, size, bold)
+func (g *Graphics) ascentOf(path string, size, tier int) int32 {
+	asc, _, ok := g.lineMetricsOf(path, size, tier)
 	if !ok {
 		return 0
 	}

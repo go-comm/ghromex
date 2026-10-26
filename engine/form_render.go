@@ -26,11 +26,11 @@ const selectArrowWidth = 16
 // selectDisplayClipped 按可用宽度截断 select 的显示文本（超宽舍尾保留头：
 // 光标不在 select 尾部）。绘制与 SVG 导出共用，保证同一控件两处文本一致
 // （此前导出全值、渲染截断，用 SVG 校验布局会误判）。
-func selectDisplayClipped(g Graphics, b *htmlElement, avail, size int, bold bool, family string) string {
+func selectDisplayClipped(g Graphics, b *htmlElement, avail, size, weightNum int, bold bool, family string) string {
 	val := selectDisplayText(b)
 	runes := []rune(val)
 	for len(runes) > 1 {
-		tw, _ := g.MeasureText(val, size, bold, family)
+		tw, _ := measureTextW(g, val, size, weightNum, bold, family)
 		if tw <= avail {
 			break
 		}
@@ -43,9 +43,9 @@ func selectDisplayClipped(g Graphics, b *htmlElement, avail, size int, bold bool
 // renderSelectValue 绘制 select 收起态的选中文本与右侧下拉箭头。
 // 文本超宽舍尾保留头（与 input 舍头保尾相反：光标不在 select 尾部）。
 func renderSelectValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p Paint, bx, by, bw, bh, r int) {
-	val := selectDisplayClipped(g, b, b.width-selectArrowWidth, p.Size().Pixel(), p.Bold(), p.FontFamily())
+	val := selectDisplayClipped(g, b, b.width-selectArrowWidth, p.Size().Pixel(), paintFontWeightNum(p), p.Bold(), p.FontFamily())
 	size := p.Size().Pixel()
-	tw, th := g.MeasureText(val, size, p.Bold(), p.FontFamily())
+	tw, th := measureTextW(g, val, size, paintFontWeightNum(p), p.Bold(), p.FontFamily())
 	if val != "" {
 		tx, ty := b.x, b.y
 		if th < b.height {
@@ -82,7 +82,7 @@ func renderSelectValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p P
 // 聚焦框不在此画：它位于边框盒，须早于 overflow 裁剪压栈（见 render.go）。
 func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p Paint,
 	focused bool) {
-	px, bold, family := fontOf(comp)
+	px, weightNum, bold, family := fontOf(comp)
 	l := layoutTextarea(g, b)
 	_, clipOK := g.(Clipper)
 	dec := TextDecorationNone
@@ -92,7 +92,7 @@ func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p
 	// 选区高亮先整体绘制，再画文本：跨行选区每行一块，空行也有窄块。
 	// 与文本行共用同一套盒外过滤规则，避免高亮溢出到相邻内容。
 	if focused {
-		for _, sr := range textareaSelectionRects(g, b, l, px, bold, family, clipOK) {
+		for _, sr := range textareaSelectionRects(g, b, l, px, weightNum, bold, family, clipOK) {
 			g.DrawColor(sr.x, sr.y, sr.w, sr.h, selectionColor)
 		}
 	}
@@ -122,7 +122,7 @@ func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p
 		return
 	}
 	// 光标：1px 竖线（文本色），与盒子相交即绘制（裁剪后端会截断）
-	cx, cy := l.caretXY(g, b.caret, px, bold, family)
+	cx, cy := l.caretXY(g, b.caret, px, weightNum, bold, family)
 	visible := cx >= b.x && cx <= b.x+b.width &&
 		cy >= b.y && cy+l.lh <= b.y+b.height
 	if clipOK {

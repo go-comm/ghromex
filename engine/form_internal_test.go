@@ -49,7 +49,7 @@ func TestWrapTextareaRules(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			lines := wrapTextarea(g, c.value, c.maxW, px, false, "")
+			lines := wrapTextarea(g, c.value, c.maxW, px, 0, false, "")
 			if len(lines) != len(c.wants) {
 				t.Fatalf("行数 = %d, want %d: %#v", len(lines), len(c.wants), lines)
 			}
@@ -76,7 +76,7 @@ func TestWrapTextareaRules(t *testing.T) {
 
 func TestCaretRowEdges(t *testing.T) {
 	g := NewFakeGraphics()
-	lines := wrapTextarea(g, "ab\ncd", 1000, 10, false, "")
+	lines := wrapTextarea(g, "ab\ncd", 1000, 10, 0, false, "")
 	if len(lines) != 2 {
 		t.Fatalf("行数 = %d, want 2", len(lines))
 	}
@@ -230,7 +230,7 @@ func TestPasswordCaretLayoutUsesMaskedText(t *testing.T) {
 	}
 
 	g := vp.Graphics()
-	px, bold, family := fontOf(b.computed)
+	px, _, bold, family := fontOf(b.computed)
 	mw, _ := g.MeasureText("●", px, bold, family)
 	cw, _ := g.MeasureText("汉", px, bold, family)
 	if mw >= cw {
@@ -239,11 +239,11 @@ func TestPasswordCaretLayoutUsesMaskedText(t *testing.T) {
 	// 点在第一个字符中点之前：按掩码（● 窄）已过中点 → 光标落 1；
 	// 按明文（汉字宽）未过中点 → 会落 0。断言 1 即证明走的是掩码口径。
 	x := mw / 2
-	if got := l.caretFromPoint(g, l.x+x, l.y+l.lh/2, px, bold, family); got != 1 {
+	if got := l.caretFromPoint(g, l.x+x, l.y+l.lh/2, px, 0, bold, family); got != 1 {
 		t.Fatalf("caretFromPoint(%d) = %d, want 1（按明文宽度定位会得到 0）", l.x+x, got)
 	}
 	// 光标 x =掩码前缀宽，非明文前缀宽
-	cx, _ := l.caretXY(g, 1, px, bold, family)
+	cx, _ := l.caretXY(g, 1, px, 0, bold, family)
 	if cx != l.x+mw {
 		t.Fatalf("caretXY(1).x = %d, want %d（= x + 掩码宽 %d）", cx, l.x+mw, mw)
 	}

@@ -28,7 +28,7 @@ func TestBoldUsesRealBoldFace(t *testing.T) {
 	if fontPathOf("msyhbd.ttc") == "" {
 		t.Skip("本机无 msyhbd.ttc（真粗体雅黑），跳过")
 	}
-	if g.face(regular, 24, true, false) == nil {
+	if g.face(regular, 24, tierBold, false) == nil {
 		t.Fatal("粗体 face 打开失败")
 	}
 	found := false
@@ -45,7 +45,7 @@ func TestBoldUsesRealBoldFace(t *testing.T) {
 		t.Fatalf("粗体请求未打开真粗体文件 %s（face keys: %v）", boldPath, g.faces)
 	}
 	// 常规请求仍用常规文件，且两者是不同的 face（不互相污染样式）
-	if g.face(regular, 24, false, false) == nil {
+	if g.face(regular, 24, tierRegular, false) == nil {
 		t.Fatal("常规 face 打开失败")
 	}
 	regularFound := false

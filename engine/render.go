@@ -367,6 +367,13 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		}
 		p.SetFontFamily(comp.FontFamily())
 		p.SetBold(comp.FontWeight() == FontWeightBold)
+		// 数值字重：font-weight 是继承属性，computed 里已是最终值
+		//（不声明则继承父级 600），直接按它写标记——normal 时也必须
+		// 写 400 复位，不能只在粗体时置位（否则子级 normal 会保留
+		// 父级的 600）。
+		if wp, ok := p.(WeightedPaint); ok {
+			wp.SetFontWeightNum(fontWeightNumOf(comp))
+		}
 		// font-style 是继承属性，computed 里已是最终值：直接按它写标记，
 		// 不能只「斜体时置位」——父级斜体、子级 normal 时必须能复位。
 		setPaintItalic(p, comp.FontStyle() == FontStyleItalic)
@@ -526,7 +533,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 				// 光标前缀宽全部以掩码文本为口径。可见窗口（舍头保尾）与光标
 				// 映射共用 inputVisibleWindow——同一口径，避免光标落到被裁掉的
 				// 前缀里（插入字符会落到错误位置）。
-				val, cut, tw, th := inputVisibleWindow(g, base, size, p.Bold(), p.FontFamily())
+				val, cut, tw, th := inputVisibleWindow(g, base, size, paintFontWeightNum(p), p.Bold(), p.FontFamily())
 				// 窗口按 rune 取整后（或光标保头时）可见文本可能超出控件内盒
 				// 一个字符宽：按 padding 盒裁剪，文字不外漏（Chrome 的 input
 				// 文本不越右缘）。舍头保尾旧口径 tw ≤ avail，不触发此裁剪。
@@ -553,7 +560,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 				// 一半要加在纹理之上，否则文字贴着行盒顶偏上（browser 地址栏
 				// 实测 4px）。与常规流 flushLine 的 half-leading 同一口径。
 				textY := ty
-				if _, natH := g.MeasureText("Mg", size, p.Bold(), p.FontFamily()); th > natH {
+				if _, natH := measureTextW(g, "Mg", size, paintFontWeightNum(p), p.Bold(), p.FontFamily()); th > natH {
 					textY += (th - natH) / 2
 				}
 				if focused {
@@ -562,7 +569,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 					// 的选区不会错位到被裁掉的前缀。
 					if lo, hi, ok := selectionRange(base); ok {
 						for _, sr := range inputSelectionRects(g, val, cut, tx, ty, th,
-							size, p.Bold(), p.FontFamily(), lo, hi) {
+							size, paintFontWeightNum(p), p.Bold(), p.FontFamily(), lo, hi) {
 							g.DrawColor(sr.x, sr.y, sr.w, sr.h, selectionColor)
 						}
 					}

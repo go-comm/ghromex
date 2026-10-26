@@ -39,6 +39,10 @@ type (
 	CursorSetter = core.CursorSetter
 	// StyledPaint 是 Paint 的可选扩展：带斜体标记。
 	StyledPaint = core.StyledPaint
+	// WeightedPaint 是 Paint 的可选扩展：带数值字重标记。
+	WeightedPaint = core.WeightedPaint
+	// WeightedMeasurer 是 Graphics 的可选扩展：带数值字重的文本度量。
+	WeightedMeasurer = core.WeightedMeasurer
 )
 
 // 指针形状（与 core 同名常量，类型一致）。
@@ -74,6 +78,36 @@ func paintItalic(p Paint) bool {
 		return sp.Italic()
 	}
 	return false
+}
+
+// paintFontWeightNum 读取 Paint 的数值字重；未携带时返回 0（两档口径）。
+func paintFontWeightNum(p Paint) int {
+	if wp, ok := p.(WeightedPaint); ok {
+		return wp.FontWeightNum()
+	}
+	return 0
+}
+
+// measureTextW 按数值字重度量文本（后端实现 WeightedMeasurer 时）；否则
+// 回落到 MeasureText 的两档口径（结果与旧版一致）。weightNum<=0 视为未
+// 提供（UA 直接 SetFontWeight 的场景），同样走两档。
+func measureTextW(g Graphics, text string, fontPx, weightNum int, bold bool, family string) (int, int) {
+	if weightNum > 0 {
+		if wm, ok := g.(WeightedMeasurer); ok {
+			return wm.MeasureTextWeight(text, fontPx, weightNum, family)
+		}
+	}
+	return g.MeasureText(text, fontPx, bold, family)
+}
+
+// fontMetricsW 是 FontMetrics 的数值字重版本，语义同 measureTextW。
+func fontMetricsW(g Graphics, text string, fontPx, weightNum int, bold bool, family string) (int, int) {
+	if weightNum > 0 {
+		if wm, ok := g.(WeightedMeasurer); ok {
+			return wm.FontMetricsWeight(text, fontPx, weightNum, family)
+		}
+	}
+	return g.FontMetrics(text, fontPx, bold, family)
 }
 
 // 尺寸单位（与 core 同名常量，类型一致）。
@@ -184,8 +218,10 @@ func popClip(g Graphics) {
 }
 
 var (
-	_ Clipper = (*FakeGraphics)(nil)
-	_ Clipper = (*BufferGraphics)(nil)
+	_ Clipper          = (*FakeGraphics)(nil)
+	_ Clipper          = (*BufferGraphics)(nil)
+	_ WeightedMeasurer = (*FakeGraphics)(nil)
+	_ WeightedMeasurer = (*BufferGraphics)(nil)
 )
 
 // FakeGraphics 供测试与无显卡环境使用的空后端。
@@ -237,6 +273,16 @@ func (g *FakeGraphics) FontMetrics(text string, fontSize int, bold bool, family 
 	}
 	h := fontSize * 13 / 10
 	return h / 2, h - h/2
+}
+
+// MeasureTextWeight/FontMetricsWeight 实现 WeightedMeasurer：估算口径与
+// 字重无关，直接委托两档方法（保持与真实后端相同的可选接口契约）。
+func (g *FakeGraphics) MeasureTextWeight(text string, fontSize, weightNum int, family string) (int, int) {
+	return g.MeasureText(text, fontSize, weightNum >= 550, family)
+}
+
+func (g *FakeGraphics) FontMetricsWeight(text string, fontSize, weightNum int, family string) (int, int) {
+	return g.FontMetrics(text, fontSize, weightNum >= 550, family)
 }
 
 // PushClip/PopClip 实现 Clipper（空后端无需真裁剪，但保持接口一致，
@@ -472,6 +518,16 @@ func (g *BufferGraphics) FontMetrics(text string, fontSize int, bold bool, famil
 	}
 	h := fontSize * 13 / 10
 	return h / 2, h - h/2
+}
+
+// MeasureTextWeight/FontMetricsWeight 实现 WeightedMeasurer：估算口径与
+// 字重无关，直接委托两档方法（保持与真实后端相同的可选接口契约）。
+func (g *BufferGraphics) MeasureTextWeight(text string, fontSize, weightNum int, family string) (int, int) {
+	return g.MeasureText(text, fontSize, weightNum >= 550, family)
+}
+
+func (g *BufferGraphics) FontMetricsWeight(text string, fontSize, weightNum int, family string) (int, int) {
+	return g.FontMetrics(text, fontSize, weightNum >= 550, family)
 }
 
 // DumpPNG 把缓冲区当前内容编码为 PNG 文件落盘。

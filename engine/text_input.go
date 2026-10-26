@@ -628,10 +628,10 @@ func onDocumentKeyDown(doc HTMLDocument, key int) bool {
 // 历史显示的旧口径。渲染与光标映射（点击落光标/Home/End 行边界）必须同
 // 口径——此前渲染按舍头保尾裁掉前缀，而光标映射仍从字符串头部量前缀宽，
 // 点击可见区会把光标定位到不可见的前缀里，随后插入的字符落到错误位置。
-func inputVisibleWindow(g Graphics, b *htmlElement, px int, bold bool, family string) (text string, cut, tw, th int) {
+func inputVisibleWindow(g Graphics, b *htmlElement, px, weightNum int, bold bool, family string) (text string, cut, tw, th int) {
 	full := displayValue(b)
 	runes := []rune(full)
-	tw, th = g.MeasureText(full, px, bold, family)
+	tw, th = measureTextW(g, full, px, weightNum, bold, family)
 	// 按钮型不截断：auto 宽按 value 文本测量（Chrome 同语义）。
 	typ := strings.ToLower(b.GetAttribute("type"))
 	buttonLike := typ == "submit" || typ == "reset" || typ == "button"
@@ -659,18 +659,18 @@ func inputVisibleWindow(g Graphics, b *htmlElement, px int, bold bool, family st
 		// —— Chrome 的 max scroll 将窗口钉在文本末尾，旧口径同样“末尾完整可见”。
 		dropped := 0
 		for len(runes) > 1 {
-			cw, _ := g.MeasureText(string(runes[0]), px, bold, family)
+			cw, _ := measureTextW(g, string(runes[0]), px, weightNum, bold, family)
 			if cw <= 0 || dropped+cw > target {
 				break
 			}
 			runes = runes[1:]
 			dropped += cw
-			tw, th = g.MeasureText(string(runes), px, bold, family)
+			tw, th = measureTextW(g, string(runes), px, weightNum, bold, family)
 		}
 		if target == maxScroll {
 			for len(runes) > 1 && tw > avail {
 				runes = runes[1:]
-				tw, th = g.MeasureText(string(runes), px, bold, family)
+				tw, th = measureTextW(g, string(runes), px, weightNum, bold, family)
 			}
 		}
 	}
@@ -689,15 +689,15 @@ func controlLayout(doc HTMLDocument, b *htmlElement) textareaLayout {
 	if strings.EqualFold(b.tagName, "textarea") {
 		return layoutTextarea(g, b)
 	}
-	px, bold, family := fontOf(b.computed)
+	px, weightNum, bold, family := fontOf(b.computed)
 	// 按显示文本测量：password 走 ● 掩码（宽度与明文不同），点击落光标、
 	// Home/End 行边界的前缀宽必须与绘制的掩码文本同口径。
 	// 单行 input 的「行」= 可见窗口（舍头保尾），行区间按完整显示值
 	// 编号，光标下标因此仍是完整值里的位置。
-	visible, cut, tw, _ := inputVisibleWindow(g, b, px, bold, family)
+	visible, cut, tw, _ := inputVisibleWindow(g, b, px, weightNum, bold, family)
 	full := len([]rune(displayValue(b)))
 	lines := []textareaLine{{text: visible, start: cut, end: full, w: tw}}
-	_, lh := g.MeasureText("Mg", px, bold, family)
+	_, lh := measureTextW(g, "Mg", px, weightNum, bold, family)
 	if lh <= 0 {
 		lh = b.height
 	}
@@ -743,7 +743,7 @@ func caretVerticalTarget(doc HTMLDocument, b *htmlElement, dy, caret int) int {
 	if len(l.lines) == 0 {
 		return caret
 	}
-	px, bold, family := fontOf(b.computed)
+	px, weightNum, bold, family := fontOf(b.computed)
 	row := caretRow(l.lines, caret)
 	target := row + dy
 	if target < 0 {
@@ -756,8 +756,8 @@ func caretVerticalTarget(doc HTMLDocument, b *htmlElement, dy, caret int) int {
 		return caret
 	}
 	// 以当前光标 x 为目标行反推列位
-	cx, _ := l.caretXY(g, caret, px, bold, family)
-	return l.caretFromPoint(g, cx, l.y+target*l.lh, px, bold, family)
+	cx, _ := l.caretXY(g, caret, px, weightNum, bold, family)
+	return l.caretFromPoint(g, cx, l.y+target*l.lh, px, weightNum, bold, family)
 }
 
 // moveCaretVertical 上/下移动一行：保持列位置，越界时贴边。

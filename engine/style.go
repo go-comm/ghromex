@@ -554,7 +554,12 @@ type cssStyleDeclaration struct {
 	fontSizeExplicit bool
 	fontFamily       string
 	fontWeight       FontWeight
-	fontStyle        FontStyle
+	// fontWeightNum 保留 font-weight 的**数值**原值（100~1000），0 表示
+	// 声明未携带数字（UA 直接写 bold/normal、或外部实现 SetFontWeight）。
+	// 公开接口仍是两档 FontWeight（外部实现不受影响）；后端选择中间字重
+	// 字面（600 → Segoe UI Semibold）时用它，见 core.WeightedPaint。
+	fontWeightNum int
+	fontStyle     FontStyle
 	visibility       Visibility
 	floatSide        FloatSide
 	clearSide        ClearSide
@@ -603,6 +608,7 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetFontSize(s.FontSize())
 	c.SetFontFamily(s.FontFamily())
 	c.SetFontWeight(s.FontWeight())
+	setFontWeightNumOf(c, fontWeightNumOf(s))
 	c.SetFontStyle(s.FontStyle())
 	c.SetVisibility(s.Visibility())
 	c.SetFloat(s.Float())
@@ -827,6 +833,22 @@ func (style *cssStyleDeclaration) FontWeight() FontWeight {
 func (style *cssStyleDeclaration) SetFontWeight(weight FontWeight) CSSStyleDeclaration {
 	style.fontWeight = weight
 	return style
+}
+
+// fontWeightNumOf 读取计算样式的数值字重（未携带时返回 0）。公开的
+// CSSStyleDeclaration 接口保持两档不动，内部用具体类型读取。
+func fontWeightNumOf(s CSSStyleDeclaration) int {
+	if c, ok := s.(*cssStyleDeclaration); ok {
+		return c.fontWeightNum
+	}
+	return 0
+}
+
+// setFontWeightNumOf 写入数值字重（同 fontWeightNumOf 的接口口径）。
+func setFontWeightNumOf(s CSSStyleDeclaration, n int) {
+	if c, ok := s.(*cssStyleDeclaration); ok {
+		c.fontWeightNum = n
+	}
 }
 
 func (style *cssStyleDeclaration) FontStyle() FontStyle {

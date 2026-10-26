@@ -135,14 +135,29 @@ type StyledPaint interface {
 	SetItalic(italic bool)
 }
 
+// WeightedPaint 是 Paint 的可选扩展：除正/粗两档外还携带**数值**
+// font-weight（CSS 数字 100~1000，0 表示未提供）。引擎在归档 Bold 的
+// 同时保留原值，后端据此选择中间字重字面（如 Segoe UI Semibold，
+// weight 600）——只看两档时 600 会落 700 Bold，标题里的拉丁数字比
+// Chrome 粗一圈且更宽。
+//
+// 与 StyledPaint 同理：Paint 是公开契约，直接加方法会让仓库外自定义
+// 实现编译失败，故用可选接口。不实现者退化为两档口径（Bold() 决定）。
+type WeightedPaint interface {
+	Paint
+	FontWeightNum() int
+	SetFontWeightNum(n int)
+}
+
 // paint 是 Paint 的实现。
 type paint struct {
-	size   Size
-	color  Color
-	family string
-	bold   bool
-	italic bool
-	bg     Color
+	size      Size
+	color     Color
+	family    string
+	bold      bool
+	italic    bool
+	weightNum int
+	bg        Color
 }
 
 // NewPaint 造一份默认绘制属性（16px 常规字重、黑色）。
@@ -168,6 +183,14 @@ func (p *paint) Bold() bool             { return p.bold }
 func (p *paint) SetBold(bold bool)      { p.bold = bold }
 func (p *paint) Italic() bool           { return p.italic }
 func (p *paint) SetItalic(italic bool)  { p.italic = italic }
+func (p *paint) FontWeightNum() int     { return p.weightNum }
+func (p *paint) SetFontWeightNum(n int) { p.weightNum = n }
+
+// 确保 paint 满足全部可选扩展接口（新增方法漏实现由编译期兜底）。
+var (
+	_ StyledPaint   = (*paint)(nil)
+	_ WeightedPaint = (*paint)(nil)
+)
 func (p *paint) Background() Color      { return p.bg }
 func (p *paint) SetBackground(c Color)  { p.bg = c }
 
@@ -222,6 +245,15 @@ type Graphics interface {
 type Clipper interface {
 	PushClip(x, y, w, h int)
 	PopClip()
+}
+
+// WeightedMeasurer 是 Graphics 的可选扩展：带**数值** font-weight 的
+// 文本度量。与 MeasureText/FontMetrics 的差异仅在字重参数由 bool 换成
+// 数值（后端据此选择中间字重字面，如 weight 600 → Segoe UI Semibold）。
+// 不实现的后端由引擎回落到 MeasureText/FontMetrics 的两档口径。
+type WeightedMeasurer interface {
+	MeasureTextWeight(text string, fontSize, weightNum int, family string) (w, h int)
+	FontMetricsWeight(text string, fontSize, weightNum int, family string) (ascent, descent int)
 }
 
 // Viewport 是渲染输出目标的抽象：一个有尺寸、可绘图的窗口/画布。

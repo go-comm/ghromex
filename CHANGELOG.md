@@ -5,6 +5,21 @@
 
 ## 未发布
 
+**数值字重贯通：600 落 Segoe UI Semibold**：
+上一轮把 `font-weight: 600` 归档成粗体后标题「不细了」，但拉丁段仍比
+Chrome 粗一圈且宽 ~6%（`segoeuib` Bold 214.6 vs Chrome Semibold 202.7 @32px）。
+现把数值原值从解析层贯通到后端：`cssStyleDeclaration.fontWeightNum` 存数字
+（600/650…，随级联继承与克隆），绘制经可选接口 `core.WeightedPaint` 带进
+`DrawText`，度量经 `core.WeightedMeasurer`（`MeasureTextWeight`/
+`FontMetricsWeight`）贯穿全部测量点；后端按 `fontTierOf` 归三档
+（<550→正体、550~649→**Semibold 面** `seguisb.ttf`、≥650→粗体面），
+半粗未命中的族（雅黑等）按 Chrome 就近选面落粗体面（600→700）。
+公开 `Paint`/`Graphics` 契约不变（可选接口仿 `StyledPaint` 先例），
+度量与绘制同档位取面，宽度不回退（legacy 两档调用路径原样）。
+回归：`TestFontWeightNumericStorage`、`TestFontTierOf`、
+`TestSemiboldFacePath`、`TestMeasureTextWeightSemibold`；
+会议纪要页 h1 拉丁段实测走 `seguisb.ttf`，串宽 204px ≈ Chrome 202.7。
+
 **font-weight 数字权重归档修复**：
 `font-weight` 解析原先只把 `bold`/700/800/900 判为粗体，`600` 等其余值一律
 落成 normal——GitHub markdown 的 h1~h6 与表格 th 全部是 `font-weight: 600`，

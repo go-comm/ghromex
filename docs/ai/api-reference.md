@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-26 16:56
+> 生成时间: 2026-10-27 04:13
 
 ---
 
@@ -396,14 +396,18 @@ func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string)
     DrawText 实现 core.Graphics：按脚本段绘制纹理，x 依次推进各段测量宽度， 各段以基线（TTF_FontAscent）对齐。
 
 func (g *Graphics) FontMetrics(text string, fontSize int, bold bool, family string) (int, int)
-    FontMetrics 实现 core.Graphics：返回行度量（基线以上 ascent、基线以下 descent）。各脚本段取最大值：行盒高度
-    = 各内联盒 ascent 的最大者 + descent 的最大者（同基线对齐）。度量来自 SDL_ttf 的 TTF_FontAscent/
-    TTF_FontDescent，行高与 Chrome/DirectWrite 可能有 1~4px 差异。 text 为空时只取主字体（不触发 CJK
-    逐字回退），对应行盒的 strut。
+    FontMetrics 实现 core.Graphics：两档口径（bold 决定正/粗体面），与 MeasureText 同义。
+
+func (g *Graphics) FontMetricsWeight(text string, fontSize, weightNum int, family string) (int, int)
+    FontMetricsWeight 实现 core.WeightedMeasurer：数值字重档位下的行度量 （半粗面与粗体面的
+    ascent/descent 可能有细微差异，需同档位取用）。
 
 func (g *Graphics) MeasureText(text string, fontSize int, bold bool, family string) (int, int)
-    MeasureText 实现 core.Graphics。与 DrawText 同一套脚本分段与字体解析， 宽度为各段之和，行高取各段最大值（近似
-    Chrome 的行盒语义）。
+    MeasureText 实现 core.Graphics：两档口径（bold 决定正/粗体面）， 未携带数值字重的调用方走这里。
+
+func (g *Graphics) MeasureTextWeight(text string, fontSize, weightNum int, family string) (int, int)
+    MeasureTextWeight 实现 core.WeightedMeasurer：按数值 font-weight 归档 字面档位度量（550~649
+    → Semibold 面，如 segoeui→seguisb），与 DrawText 从 paint 读到的档位同口径，否则混排宽度会错位。
 
 func (g *Graphics) PopClip()
     PopClip 实现 core.Clipper：弹出栈顶并应用剩余栈顶（空栈=关闭裁剪）。
@@ -1047,6 +1051,26 @@ type Viewport interface {
     Viewport 是渲染输出目标的抽象：一个有尺寸、可绘图的窗口/画布。 具体后端（如 SDL2）实现该接口；文档通过 OpenDocument
     绑定到视口。
 
+type WeightedMeasurer interface {
+	MeasureTextWeight(text string, fontSize, weightNum int, family string) (w, h int)
+	FontMetricsWeight(text string, fontSize, weightNum int, family string) (ascent, descent int)
+}
+    WeightedMeasurer 是 Graphics 的可选扩展：带**数值** font-weight 的 文本度量。与
+    MeasureText/FontMetrics 的差异仅在字重参数由 bool 换成 数值（后端据此选择中间字重字面，如 weight 600 →
+    Segoe UI Semibold）。 不实现的后端由引擎回落到 MeasureText/FontMetrics 的两档口径。
+
+type WeightedPaint interface {
+	Paint
+	FontWeightNum() int
+	SetFontWeightNum(n int)
+}
+    WeightedPaint 是 Paint 的可选扩展：除正/粗两档外还携带**数值** font-weight（CSS 数字 100~1000，0
+    表示未提供）。引擎在归档 Bold 的 同时保留原值，后端据此选择中间字重字面（如 Segoe UI Semibold， weight
+    600）——只看两档时 600 会落 700 Bold，标题里的拉丁数字比 Chrome 粗一圈且更宽。
+
+    与 StyledPaint 同理：Paint 是公开契约，直接加方法会让仓库外自定义 实现编译失败，故用可选接口。不实现者退化为两档口径（Bold()
+    决定）。
+
 ````
 
 ---
@@ -1234,6 +1258,11 @@ func IsChecked(el HTMLElement) bool
 
 func LayoutDocument(doc HTMLDocument)
     LayoutDocument 对文档执行一次完整的级联 + 布局。
+
+    快速路径：自上次全量布局以来**只发生过滚动**（changed 与 scrollMark
+    同幅 增长，见 markScrollChanged）时，级联与盒模型都没变，只把滚动偏移平移到
+    已布局的盒子上（applyScrollOffsets，按绝对偏移重新施加，安全因为本次没 有重排、盒子还带着上一轮的平移量——它内部按
+    scrollShift* 差值换算）。 大文档每档滚轮触发的 4s+ 全量重排因此降为一次纯平移。
 
 func MeasureDocumentWithStylesheet(g Graphics, doc HTMLDocument, mw, mh int)
     MeasureDocumentWithStylesheet 完整流水线入口：级联 + 布局，不依赖 Viewport。
@@ -1492,8 +1521,14 @@ func (g *BufferGraphics) FillRect(x, y, w, h int, r, gg, b, a uint8)
 func (g *BufferGraphics) FontMetrics(text string, fontSize int, bold bool, family string) (int, int)
     FontMetrics 实现 Graphics：与 FakeGraphics 相同的估算口径。
 
+func (g *BufferGraphics) FontMetricsWeight(text string, fontSize, weightNum int, family string) (int, int)
+
 func (g *BufferGraphics) MeasureText(text string, fontSize int, bold bool, family string) (w, h int)
     MeasureText 实现 Graphics：与 FakeGraphics 相同的粗略估算， 保证布局结果可与断言表对应。
+
+func (g *BufferGraphics) MeasureTextWeight(text string, fontSize, weightNum int, family string) (int, int)
+    MeasureTextWeight/FontMetricsWeight 实现 WeightedMeasurer：估算口径与
+    字重无关，直接委托两档方法（保持与真实后端相同的可选接口契约）。
 
 func (g *BufferGraphics) PopClip()
     PopClip 实现 Clipper：弹出栈顶；栈空时为无害的多余调用。
@@ -1778,8 +1813,14 @@ func (g *FakeGraphics) FontMetrics(text string, fontSize int, bold bool, family 
     FontMetrics 实现 Graphics：给出估算的行度量（与 MeasureText 的估算
     行高同口径拆成基线上下两半），供布局按基线对齐行内盒。
 
+func (g *FakeGraphics) FontMetricsWeight(text string, fontSize, weightNum int, family string) (int, int)
+
 func (g *FakeGraphics) MeasureText(text string, fontSize int, bold bool, family string) (w, h int)
     MeasureText 给出粗略估算：CJK 按全宽、拉丁按半宽，行高 1.3 倍字号。
+
+func (g *FakeGraphics) MeasureTextWeight(text string, fontSize, weightNum int, family string) (int, int)
+    MeasureTextWeight/FontMetricsWeight 实现 WeightedMeasurer：估算口径与
+    字重无关，直接委托两档方法（保持与真实后端相同的可选接口契约）。
 
 func (g *FakeGraphics) PopClip()
 
@@ -2326,6 +2367,12 @@ const (
 	// VisibilityCollapse 对非表格元素等同 hidden（引擎没有行/列折叠布局）。
 	VisibilityCollapse
 )
+type WeightedMeasurer = core.WeightedMeasurer
+    WeightedMeasurer 是 Graphics 的可选扩展：带数值字重的文本度量。
+
+type WeightedPaint = core.WeightedPaint
+    WeightedPaint 是 Paint 的可选扩展：带数值字重标记。
+
 type WhiteSpace uint8
     WhiteSpace 控制空白折叠与换行（white-space）。CSS Text §4.1 用三条正交
     行为描述这一族取值——「折叠空白」「保留换行」「软换行」：

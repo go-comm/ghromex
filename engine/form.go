@@ -62,8 +62,9 @@ func docGraphics(doc HTMLDocument) Graphics {
 	return NewFakeGraphics()
 }
 
-// fontOf 返回样式中的字号/粗体/字族（表单控件 UA 口径缺省 13px）。
-func fontOf(comp CSSStyleDeclaration) (fontPx int, bold bool, family string) {
+// fontOf 返回样式中的字号/数值字重/粗体/字族（表单控件 UA 口径缺省 13px）。
+// 返回顺序与 measureTextW/fontMetricsW 的 (fontPx, weightNum, bold, family) 一致。
+func fontOf(comp CSSStyleDeclaration) (fontPx int, weightNum int, bold bool, family string) {
 	fontPx = 13
 	if comp == nil {
 		return
@@ -71,6 +72,7 @@ func fontOf(comp CSSStyleDeclaration) (fontPx int, bold bool, family string) {
 	if s := resolveLen(comp.FontSize(), 0); s > 0 {
 		fontPx = s
 	}
+	weightNum = fontWeightNumOf(comp)
 	bold = comp.FontWeight() == FontWeightBold
 	family = comp.FontFamily()
 	return

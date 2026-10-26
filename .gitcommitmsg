@@ -1,0 +1,20 @@
+fix(engine): 数值字重贯通，600 落 Segoe UI Semibold
+
+会议纪要页 h1/th 的 font-weight:600 此前归档到 segoeuib Bold，拉丁段比
+Chrome 粗一圈且串宽 ~6%（214.6 vs Semibold 202.7 @32px）。现把数值字重
+从 CSS 解析贯通到后端字面选择：
+
+- core 新增可选接口 WeightedPaint/WeightedMeasurer（仿 StyledPaint 先例，
+  公开 Paint/Graphics 契约不变，不实现者退回两档口径）
+- 解析层 fontWeightNum 存数值原值，随级联继承与样式克隆；bolder 按继承
+  值升档（>=650→900，否则→700），非法值仍按 CSS 语义丢弃不覆盖
+- 度量与绘制同档位取面：measureTextW/fontMetricsW 贯穿全部测量点
+  （内联布局、表单控件、选区、SVG 导出），DrawText 从 paint 读数值字重
+- 后端 fontTierOf 归三档：<550 正体、550~649 半粗面（segoeui→
+  seguisb.ttf）、>=650 粗体面；半粗未命中的族按 Chrome 就近选面落粗体
+  面（600→700，如雅黑→msyhbd）；measureKey/texKey 以 tier 入键，防止
+  600/700 度量与纹理缓存串用
+
+回归：TestFontWeightNumericStorage、TestFontTierOf、TestSemiboldFacePath、
+TestMeasureTextWeightSemibold。无头截图验证会议纪要页 h1 拉丁段走
+seguisb.ttf，串宽 204px ≈ Chrome 实测 202.66。

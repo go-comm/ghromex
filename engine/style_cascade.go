@@ -154,6 +154,9 @@ func applyInheritedStyle(comp CSSStyleDeclaration, pc CSSStyleDeclaration) {
 	}
 	comp.SetFontFamily(pc.FontFamily())
 	comp.SetFontWeight(pc.FontWeight())
+	// 数值字重随两档一起继承：bolder/lighter 相对它升降档，子元素不
+	// 声明 font-weight 时也要保持父级的 600 语义（否则退化成 700）。
+	setFontWeightNumOf(comp, fontWeightNumOf(pc))
 	comp.SetFontStyle(pc.FontStyle())
 	// visibility 与 cursor 都是继承属性：父级 hidden 的子树默认不绘制，
 	// 子级声明 visible 才恢复；cursor 通常写在容器上（整块可拖拽区域）。

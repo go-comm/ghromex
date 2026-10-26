@@ -69,11 +69,11 @@ func SelectedText(doc HTMLDocument) (string, bool) {
 // textarea 走折行布局的行/列映射，单行 input 走可见窗口的前缀宽度映射。
 func controlCaretFromPoint(doc HTMLDocument, b *htmlElement, x, y int) int {
 	g := docGraphics(doc)
-	px, bold, family := fontOf(b.computed)
+	px, weightNum, bold, family := fontOf(b.computed)
 	if strings.EqualFold(b.tagName, "textarea") {
-		return layoutTextarea(g, b).caretFromPoint(g, x, y, px, bold, family)
+		return layoutTextarea(g, b).caretFromPoint(g, x, y, px, weightNum, bold, family)
 	}
-	return controlLayout(doc, b).caretFromPoint(g, x, y, px, bold, family)
+	return controlLayout(doc, b).caretFromPoint(g, x, y, px, weightNum, bold, family)
 }
 
 // OnDocumentMouseDown 在鼠标按下时准备潜在拖选：命中可编辑输入则聚焦、
@@ -166,14 +166,14 @@ func OnDocumentMouseUp(doc HTMLDocument) {
 }
 
 // textPrefixWidth 返回 runes 前 n 个字符的像素宽（n 已由调用方夹紧）。
-func textPrefixWidth(g Graphics, runes []rune, n, px int, bold bool, family string) int {
+func textPrefixWidth(g Graphics, runes []rune, n, px, weightNum int, bold bool, family string) int {
 	if n <= 0 {
 		return 0
 	}
 	if n > len(runes) {
 		n = len(runes)
 	}
-	w, _ := g.MeasureText(string(runes[:n]), px, bold, family)
+	w, _ := measureTextW(g, string(runes[:n]), px, weightNum, bold, family)
 	return w
 }
 
@@ -181,7 +181,7 @@ func textPrefixWidth(g Graphics, runes []rune, n, px int, bold bool, family stri
 // inputVisibleWindow 舍头保尾后的可见文本，cut 是它在完整显示值中的
 // 起始下标——高亮前缀宽必须与渲染文本同口径，否则超宽输入的选区会
 // 整体偏移到被裁掉的前缀上。
-func inputSelectionRects(g Graphics, val string, cut, tx, ty, th, px int,
+func inputSelectionRects(g Graphics, val string, cut, tx, ty, th, px, weightNum int,
 	bold bool, family string, lo, hi int) []clipRect {
 	runes := []rune(val)
 	from := lo - cut
@@ -195,8 +195,8 @@ func inputSelectionRects(g Graphics, val string, cut, tx, ty, th, px int,
 	if from >= to {
 		return nil
 	}
-	x1 := tx + textPrefixWidth(g, runes, from, px, bold, family)
-	x2 := tx + textPrefixWidth(g, runes, to, px, bold, family)
+	x1 := tx + textPrefixWidth(g, runes, from, px, weightNum, bold, family)
+	x2 := tx + textPrefixWidth(g, runes, to, px, weightNum, bold, family)
 	if x2 <= x1 {
 		return nil
 	}
@@ -209,7 +209,7 @@ func inputSelectionRects(g Graphics, val string, cut, tx, ty, th, px int,
 // clipOK 与渲染路径同口径：后端支持裁剪时只丢弃与盒子完全不相交的行，
 // 半截行交给裁剪；不支持裁剪时整行丢弃，避免高亮画到盒外。
 func textareaSelectionRects(g Graphics, b *htmlElement, l textareaLayout,
-	px int, bold bool, family string, clipOK bool) []clipRect {
+	px, weightNum int, bold bool, family string, clipOK bool) []clipRect {
 	lo, hi, ok := selectionRange(b)
 	if !ok {
 		return nil
@@ -244,8 +244,8 @@ func textareaSelectionRects(g Graphics, b *htmlElement, l textareaLayout,
 			to = ln.end
 		}
 		runes := []rune(ln.text)
-		x1 := l.x + textPrefixWidth(g, runes, from-ln.start, px, bold, family)
-		x2 := l.x + textPrefixWidth(g, runes, to-ln.start, px, bold, family)
+		x1 := l.x + textPrefixWidth(g, runes, from-ln.start, px, weightNum, bold, family)
+		x2 := l.x + textPrefixWidth(g, runes, to-ln.start, px, weightNum, bold, family)
 		if hi > ln.end {
 			x2 = l.x + ln.w // 选区包含本行行尾（换行符/折行点）
 		}

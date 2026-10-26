@@ -1179,17 +1179,35 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 			}
 		}
 	case "font-weight":
-		// 引擎只有正/粗两档字面，按 Chrome「就近选面」口径归档：可用字面
-		// 只有 400/700 时，600~900 都落粗体面（600 是 GitHub markdown 全部
-		// 标题/th 的写法，漏掉它会让作者的 600 覆盖 UA bold 后标题变细）；
-		// 400/500 及以下落正体。bolder/lighter 在二档模型下按相对继承值
-		// 升降的结论恒等于无条件取粗/正体（Normal→bolder=Bold，
+		// 引擎公开契约只有正/粗两档字面，按 Chrome「就近选面」口径归档：
+		// 可用字面只有 400/700 时，550~900 都落粗体面（600 是 GitHub
+		// markdown 全部标题/th 的写法，漏掉它会让作者的 600 覆盖 UA bold
+		// 后标题变细）；400/500 及以下落正体。bolder/lighter 在二档模型下
+		// 按相对继承值升降的结论恒等于无条件取粗/正体（Normal→bolder=Bold，
 		// Bold→bolder=Bold；Bold→lighter=Normal，Normal→lighter=Normal）。
+		//
+		// 同时把**数值**原值写进 fontWeightNum（私有不入公开接口）：后端
+		// 有 Semibold 等中间字面时据此就近选面（600 → Segoe UI Semibold，
+		// 见 core.WeightedPaint），比一律落 700 Bold 更贴 Chrome。
 		switch v {
-		case "bold", "bolder":
+		case "bold":
 			comp.SetFontWeight(FontWeightBold)
-		case "normal", "lighter":
+			setFontWeightNumOf(comp, 700)
+		case "bolder":
+			comp.SetFontWeight(FontWeightBold)
+			// bolder 在数值轴上的常见档位：400→700、600→900（Chrome
+			// 的 bolder 阶梯）；继承值 0（UA 直接 bold）按 400 起跳。
+			if n := fontWeightNumOf(comp); n >= 650 {
+				setFontWeightNumOf(comp, 900)
+			} else {
+				setFontWeightNumOf(comp, 700)
+			}
+		case "normal":
 			comp.SetFontWeight(FontWeightNormal)
+			setFontWeightNumOf(comp, 400)
+		case "lighter":
+			comp.SetFontWeight(FontWeightNormal)
+			setFontWeightNumOf(comp, 400)
 		default:
 			if n, err := strconv.Atoi(v); err == nil {
 				if n >= 550 { // >500 的就近搜索向上取 700；400/500 向下取 400
@@ -1197,9 +1215,10 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 				} else {
 					comp.SetFontWeight(FontWeightNormal)
 				}
+				setFontWeightNumOf(comp, n)
 			}
 			// 其余（var() 未展开、拼写错误）按 CSS 语义丢弃本条声明，
-			// 保留继承/UA 给的值，不覆盖成 normal。
+			// 保留继承/UA 给的值，不覆盖成 normal（数值字重也保留继承值）。
 		}
 	case "font-style":
 		if s, ok := parseFontStyle(v); ok {

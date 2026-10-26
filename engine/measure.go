@@ -175,7 +175,7 @@ func inputButtonTextWidth(g Graphics, el *htmlElement, comp CSSStyleDeclaration,
 	if s := resolveLen(comp.FontSize(), 0); s > 0 {
 		fontPx = s
 	}
-	w, _ := g.MeasureText(text, fontPx, comp.FontWeight() == FontWeightBold, comp.FontFamily())
+	w, _ := measureTextW(g, text, fontPx, fontWeightNumOf(comp), comp.FontWeight() == FontWeightBold, comp.FontFamily())
 	bd := resolveEdgeRect(comp.BorderStyleWidth(), pctW)
 	pd := resolveEdgeRect(comp.Padding(), pctW)
 	return w + arrowReserve + pd[eLeft] + pd[eRight] + bd[eLeft] + bd[eRight]
@@ -191,7 +191,7 @@ func defaultFormControlHeight(g Graphics, comp CSSStyleDeclaration, pctW int) in
 	if s := resolveLen(comp.FontSize(), 0); s > 0 {
 		fontPx = s
 	}
-	_, h := g.MeasureText("Mg", fontPx, comp.FontWeight() == FontWeightBold, comp.FontFamily())
+	_, h := measureTextW(g, "Mg", fontPx, fontWeightNumOf(comp), comp.FontWeight() == FontWeightBold, comp.FontFamily())
 	if h <= 0 {
 		h = fontPx
 	}
@@ -632,7 +632,7 @@ func inlineBoxBaseline(g Graphics, che *htmlElement, outerH int) (asc, desc int)
 	}
 	fontAsc, fontDesc := 0, 0
 	if g != nil {
-		fontAsc, fontDesc = g.FontMetrics("", fontPx, che.computed.FontWeight() == FontWeightBold, che.computed.FontFamily())
+		fontAsc, fontDesc = fontMetricsW(g, "", fontPx, fontWeightNumOf(che.computed), che.computed.FontWeight() == FontWeightBold, che.computed.FontFamily())
 	}
 	tag := strings.ToLower(che.tagName)
 	typ := ""
@@ -735,12 +735,14 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 
 	fontPx := 16
 	bold := false
+	weightNum := 0
 	family := ""
 	if el.computed != nil {
 		if s := resolveLen(el.computed.FontSize(), 0); s > 0 {
 			fontPx = s
 		}
 		bold = el.computed.FontWeight() == FontWeightBold
+		weightNum = fontWeightNumOf(el.computed)
 		family = el.computed.FontFamily()
 	}
 
@@ -755,7 +757,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		el.computed.ListStylePosition() == ListStyleInside &&
 		listItemStartsWithInline(el)
 	if el.listMarkerInside && g != nil {
-		mw, _ := g.MeasureText(el.listMarker, fontPx, bold, family)
+		mw, _ := measureTextW(g, el.listMarker, fontPx, weightNum, bold, family)
 		cursorX += mw + listMarkerInsideGap(fontPx)
 	}
 
@@ -768,7 +770,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	// 内容区不含 Leading）。
 	fontAsc, fontDesc := 0, 0
 	if g != nil {
-		fontAsc, fontDesc = g.FontMetrics("", fontPx, bold, family)
+		fontAsc, fontDesc = fontMetricsW(g, "", fontPx, weightNum, bold, family)
 	}
 	// line-height：把 strut 的基线上下高度按声明的行高重算——行距一半加在
 	// 文字之上、一半加在之下（CSS 2.1 §10.8.1）。normal 时原样返回。
@@ -883,8 +885,8 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	spaceAsc, spaceDesc := fontAsc, fontDesc
 	spaceLeadAsc, spaceLeadDesc := fontAsc, fontDesc
 	if g != nil {
-		spaceW, _ = g.MeasureText(" ", fontPx, bold, family)
-		spaceAsc, spaceDesc = g.FontMetrics(" ", fontPx, bold, family)
+		spaceW, _ = measureTextW(g, " ", fontPx, weightNum, bold, family)
+		spaceAsc, spaceDesc = fontMetricsW(g, " ", fontPx, weightNum, bold, family)
 		spaceLeadAsc, spaceLeadDesc = applyLeading(spaceAsc, spaceDesc, lhPx)
 	}
 	pendingSpace := false
@@ -1037,14 +1039,14 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	// 版 pre / pre-wrap 的文本落位与制表位测量。
 	preSpaceW := 0
 	if g != nil {
-		preSpaceW, _ = g.MeasureText(" ", fontPx, bold, family)
+		preSpaceW, _ = measureTextW(g, " ", fontPx, weightNum, bold, family)
 	}
 	// addPreToken 把一段 pre/pre-wrap 文本落到当前行。wrap=true（pre-wrap）
 	// 时参与软换行：放不下就断行回到行首，落点取断行后的游标；wrap=false
 	// （pre）不判断，直接溢出。
 	addPreToken := func(tn *textNode, tok string, w int, wrap bool) {
 		if w < 0 {
-			w, _ = g.MeasureText(tok, fontPx, bold, family)
+			w, _ = measureTextW(g, tok, fontPx, weightNum, bold, family)
 		}
 		if w < 0 {
 			w = 0
@@ -1054,7 +1056,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				flushLine()
 			}
 		}
-		asc, desc := g.FontMetrics(tok, fontPx, bold, family)
+		asc, desc := fontMetricsW(g, tok, fontPx, weightNum, bold, family)
 		leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
 		curLine = append(curLine, lineItem{tn: tn, token: tok,
 			x: cursorX, y: cursorY, w: w, asc: asc, desc: desc,
@@ -1180,11 +1182,11 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				flushPendingSpace()
 			}
 			for _, tok := range toks {
-				tw, _ := g.MeasureText(tok, fontPx, bold, family)
+				tw, _ := measureTextW(g, tok, fontPx, weightNum, bold, family)
 				if tw <= 0 {
 					continue
 				}
-				asc, desc := g.FontMetrics(tok, fontPx, bold, family)
+				asc, desc := fontMetricsW(g, tok, fontPx, weightNum, bold, family)
 				leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
 				addItem(lineItem{tn: tn, token: tok, x: cursorX, y: cursorY, w: tw,
 					asc: asc, desc: desc, leadAsc: leadAsc, leadDesc: leadDesc})
@@ -1221,11 +1223,11 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				flushPendingSpace()
 			}
 			for _, tok := range toks {
-				tw, _ := g.MeasureText(tok, fontPx, bold, family)
+				tw, _ := measureTextW(g, tok, fontPx, weightNum, bold, family)
 				if tw <= 0 {
 					continue
 				}
-				asc, desc := g.FontMetrics(tok, fontPx, bold, family)
+				asc, desc := fontMetricsW(g, tok, fontPx, weightNum, bold, family)
 				leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
 				addItem(lineItem{tn: tnc, token: tok, x: cursorX, y: cursorY, w: tw,
 					asc: asc, desc: desc, leadAsc: leadAsc, leadDesc: leadDesc})
