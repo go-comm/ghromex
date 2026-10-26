@@ -1,6 +1,9 @@
 package engine
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // 本文件锁定 display 驱动的完整表格模型（CSS 2.1 §17）。度量口径沿用
 // BufferGraphics 的估算：16px 字号下 CJK = 16、ASCII = 9、空格 = 8、
@@ -413,4 +416,96 @@ func sprintfSpan(tpl, v string) string {
 		out = append(out, tpl[i])
 	}
 	return string(out)
+}
+
+// TestDisplayTablePerSectionInstances 同一文档里多个 section 各带一个同构
+// display:table：每个表格都按内容量列、行高单行。回归（vm02 故障报告）：
+// section 曾缺 UA block 落位，第二个表格被行内原子 remain=0 试排后
+// 列宽塌等分、行高按 1px 换行测得虚胖（封面 66 vs 尾页 514）。
+func TestDisplayTablePerSectionInstances(t *testing.T) {
+	cells := `<div id="%s1" style="display:table-cell">AAAAAAAA</div>` +
+		`<div id="%s2" style="display:table-cell">BB</div>` +
+		`<div id="%s3" style="display:table-cell">CCCCCCCCCC</div>`
+	one := func(p string) string {
+		return `<section><div style="display:table;width:100%;border-spacing:24px 0">` +
+			fmt.Sprintf(cells, p, p, p) + `</div></section>`
+	}
+	src := `<!doctype html><html><body style="margin:0">` + one("a") + one("b") + `</body></html>`
+	doc, _ := tableLayout(t, src, 900, 600)
+
+	var prev [3]int
+	for i, p := range []string{"a", "b"} {
+		var ws [3]int
+		for j := 0; j < 3; j++ {
+			_, _, w, h := tableBox(tableEl(t, doc, fmt.Sprintf("%s%d", p, j+1)))
+			ws[j] = w
+			if h > 20 {
+				t.Errorf("%s%d 格高 = %d, want 单行 ≤20（虚胖即列宽塌陷）", p, j+1, h)
+			}
+		}
+		if ws[0] == ws[1] || ws[1] == ws[2] {
+			t.Errorf("%s 列宽塌成等分：%v（应按内容 72/18/90 比例）", p, ws)
+		}
+		if i == 1 && ws != prev {
+			t.Errorf("第二个表格列宽 %v ≠ 第一个 %v", ws, prev)
+		}
+		prev = ws
+	}
+}
+
+// TestDisplayTableAfterInlineAtomicTrial 行内原子的「remain 试排 → 换行全宽
+// 重排」双遍布局：layoutTableBox 中途会把格 computed 覆写成槽宽，退出前必须
+// 还原，否则重排把试排槽宽当作者声明测量。回归同报告的引擎侧根因（不依赖
+// UA 修复，双保险）。
+func TestDisplayTableAfterInlineAtomicTrial(t *testing.T) {
+	src := `<!doctype html><html><body style="margin:0">
+		<div style="display:inline-block;width:898px">
+			<div style="display:table;width:100%;border-spacing:24px 0">
+				<div style="display:table-cell">AAAAAAAA</div>
+				<div style="display:table-cell">BB</div>
+				<div style="display:table-cell">CCCCCCCCCC</div>
+			</div>
+		</div><div style="display:inline-block">
+			<div style="display:table;width:100%;border-spacing:24px 0">
+				<div id="b1" style="display:table-cell">AAAAAAAA</div>
+				<div id="b2" style="display:table-cell">BB</div>
+				<div id="b3" style="display:table-cell">CCCCCCCCCC</div>
+			</div>
+		</div>
+	</body></html>`
+	doc, _ := tableLayout(t, src, 900, 600)
+	_, _, w1, h1 := tableBox(tableEl(t, doc, "b1"))
+	_, _, w2, _ := tableBox(tableEl(t, doc, "b2"))
+	_, _, w3, h3 := tableBox(tableEl(t, doc, "b3"))
+	if h1 > 20 || h3 > 20 {
+		t.Errorf("重排后格高 = %d/%d, want 单行 ≤20（试排的 1px 槽宽泄漏）", h1, h3)
+	}
+	if w3 <= w1 || w1 <= w2 {
+		t.Errorf("列宽未按内容测得：%d/%d/%d, want b3>b1>b2", w1, w2, w3)
+	}
+}
+
+// TestUASemanticBlockDefaults HTML5 块级语义标签的 UA 默认 display:block
+// （未收录标签按 CSS 初始值 inline，会让容器与兄弟挤进行内原子布局）。
+// h4~h6 字号/外边距同 Chrome 取整口径。
+func TestUASemanticBlockDefaults(t *testing.T) {
+	src := `<!doctype html><html><body>
+		<section id="s"></section><aside id="a"></aside><nav id="n"></nav>
+		<main id="m"></main><header id="hd"></header><footer id="ft"></footer>
+		<address id="ad">x</address><h4 id="h4">x</h4><h5 id="h5">x</h5><h6 id="h6">x</h6>
+	</body></html>`
+	doc, _ := tableLayout(t, src, 400, 300)
+	for _, id := range []string{"s", "a", "n", "m", "hd", "ft", "ad", "h4", "h5", "h6"} {
+		if d := tableEl(t, doc, id).computed.Display(); d != DisplayBlock {
+			t.Errorf("%s display = %d, want block(%d)", id, d, DisplayBlock)
+		}
+	}
+	if fs := tableEl(t, doc, "ad").computed.FontStyle(); fs != FontStyleItalic {
+		t.Errorf("address font-style = %d, want italic", fs)
+	}
+	for id, want := range map[string]int{"h4": 16, "h5": 13, "h6": 11} {
+		if sz := tableEl(t, doc, id).computed.FontSize(); sz.Pixel() != want {
+			t.Errorf("%s 字号 = %d, want %d", id, sz.Pixel(), want)
+		}
+	}
 }

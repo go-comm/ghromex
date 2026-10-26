@@ -5,6 +5,25 @@
 
 ## 未发布
 
+**表格修复：UA 块级语义标签缺失导致第二份 `display:table` 塌陷**：
+真实故障报告（vm02 宿主机文件系统）暴露——同一文档里第一个
+`display:table` 正常、之后每个都列宽等分、行高虚胖（尾页 66 → 514）。
+根因两层：
+
+1. `section/article/aside/header/footer/main/nav/address/h4~h6` 等未收录进
+   UA 样式表，按 CSS 初始值 `inline` 参与行内原子布局；第二个块与兄弟挤到
+   游标右缘后吃到 `remain=0` 试排，内部表格在 1px 容器里测天然宽。补齐
+   HTML5 渲染规范的 block 落位（`address` 同时补上注释早已声明却缺失的
+   italic；`h4~h6` 按 Chrome 口径 16/13/11px）。
+2. `layoutTableBox` 的二、三遍会把格的 computed 宽/高/盒模型/display 覆写成
+   槽位值且不还原，泄漏到下一轮布局的「天然宽测量」——试排污染后无法自愈。
+   现在入口快照、退出还原（pin/restore），任何中途试排过的表格重排都从
+   作者声明重新量起。
+
+回归测试：`TestDisplayTablePerSectionInstances`（同构双表格逐格一致）、
+`TestDisplayTableAfterInlineAtomicTrial`（inline 试排后重排按内容量列）、
+`TestUASemanticBlockDefaults`（UA 落位与字号）。
+
 **布局与交互补齐：`float`/`clear`、`opacity`、`visibility`、`cursor`、`font-style: italic`**：
 五项此前只解析不生效（或完全没解析）的 CSS 能力，现在都有实际行为。
 

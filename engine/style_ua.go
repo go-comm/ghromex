@@ -74,6 +74,18 @@ h3 { display: block; font-size: 19px; font-weight: bold; margin: 19px 0; } /* 1.
   pre { display: block; font-family: monospace; font-size: 13px; margin: 16px 0; white-space: pre; }
   figure { display: block; margin: 16px 40px; }
   figcaption { display: block; }
+  /* 块级语义容器（HTML5 渲染规范）：引擎对未收录标签按 CSS 初始值 inline
+     处理——这些容器标签不落位 block 会与兄弟挤进行内原子布局，游标顶到右缘
+     后按 remain=0 试排（换行重排），内部 display:table 的天然宽测量随即塌陷
+     （列宽等分、行高虚胖）。address 同时补斜体（上文注释早已声明 Chrome 把
+     address 置 italic，规则此前缺失）。h4~h6 的字号/外边距按 Chrome 的
+     1em/0.83em/0.67em 与 1.33em/1.67em/2.33em（基 16px，引擎字号取整）。 */
+  section, article, aside, header, footer, main, nav, hgroup, details, summary,
+  fieldset, legend, dialog, center { display: block; }
+  address { display: block; font-style: italic; }
+  h4 { display: block; font-size: 16px; font-weight: bold; margin: 21px 0; }
+  h5 { display: block; font-size: 13px; font-weight: bold; margin: 22px 0; }
+  h6 { display: block; font-size: 11px; font-weight: bold; margin: 25px 0; }
   hr { display: block; margin: 8px 0; border: 1px solid #767676; }
   strong { font-weight: bold; } /* Chrome UA: bolder(700) */
 b { font-weight: bold; }

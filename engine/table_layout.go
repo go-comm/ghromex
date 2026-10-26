@@ -988,6 +988,37 @@ func layoutTableBox(g Graphics, tbl *htmlElement, outerW, outerH, ox, oy, pctW, 
 		}
 	}
 
+	// 布局过程会把格与题注的 computed 宽/高/盒模型临时覆写成槽位值（第二、
+	// 三遍按槽宽测量与定格）。函数退出前必须还原：否则同轮内的下一次布局
+	// （行内原子的换行重排、remain=0 试排）或下一轮 Refresh 的第一遍天然宽
+	// 测量会把上一轮槽宽当成作者声明——试排槽宽 1px 会让整表列塌等分、
+	// 行高按 1px 换行测得虚胖（vm02 故障报告尾页 title-meta 495px 的根因）。
+	type pinnedStyle struct {
+		el        *htmlElement
+		w, h      Size
+		boxSizing BoxSizing
+		disp      Display
+	}
+	var pinned []pinnedStyle
+	pin := func(e *htmlElement) {
+		if e == nil || e.computed == nil {
+			return
+		}
+		pinned = append(pinned, pinnedStyle{e, e.computed.Width(), e.computed.Height(),
+			e.computed.BoxSizing(), e.computed.Display()})
+	}
+	defer func() {
+		for _, p := range pinned {
+			p.el.computed.SetWidth(p.w)
+			p.el.computed.SetHeight(p.h)
+			p.el.computed.SetBoxSizing(p.boxSizing)
+			p.el.computed.SetDisplay(p.disp)
+		}
+	}()
+	for _, c := range cells {
+		pin(c.el)
+	}
+
 	// 第一遍：天然尺寸（内容收缩测量，以可用宽为上限）。
 	for _, c := range cells {
 		w, h := layoutBox(g, c.el, availW, 0, 0, 0, pctBase, -1, nil)
