@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-26 12:12
+> 生成时间: 2026-10-26 12:24
 
 ---
 
@@ -825,6 +825,17 @@ func (win *Window) SetBackdrop(s *core.Sprite)
     SetBackdrop 设置窗口背景图（nil 清除）。清屏之后、文档之前贴在 (0,0)。
 
     背景图不参与布局：宽高应与窗口视口一致，像素格式为 RGBA8888 且 alpha=255（见 backdrop 字段的说明）。传新精灵后下一帧生效。
+
+func (win *Window) SetFrameHandler(f func() bool)
+    SetFrameHandler 注册每帧回调：每轮事件队列排空后、布局与重绘之前调用一次。 返回 true
+    表示「本帧之后还有事要做」——主循环会把空闲休眠从 10ms 降到 1ms （实测 SDL_Delay(1) 约
+    1.06ms），让后续鼠标事件尽快落成动作。传 nil 取消。
+
+    用途：把高频输入合并成「每帧一次」的动作。拖动无边框窗口就是典型： 每个 motion 事件都调 MoveTo
+    会让窗口在一个事件批次里被重定位好几次， 而空闲休眠又是 10ms 一档——鼠标 125Hz（8ms 一个事件）时窗口位置被量化 成 10~20ms
+    一跳，看起来就是拖动一顿一顿的。改成在回调里按帧移动一次， 并在拖动期间保持 1ms 轮询，窗口就跟手了。
+
+    回调里可以改 DOM（变更会让文档计数 +1，本帧随后自然重排重绘）。
 
 func (win *Window) SetKeyHandler(f func(key int, mods uint16) bool)
     SetKeyHandler 注册应用级按键处理器：key 为引擎键码（字母是 rune）， mods

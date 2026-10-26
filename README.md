@@ -65,6 +65,8 @@ go run ./examples/kit -shot out.png
 go run ./examples/snip -source examples/kit/screenshot.png -shot-overlay overlay.png -shot-preview preview.png
 ```
 
+预览窗口的拖动走 `browser.Window.SetFrameHandler`：鼠标事件只记目标位置，帧末合并成一次 `MoveTo`，拖动期间主循环以 1ms 轮询（空闲时 10ms）——逐事件移动窗口 + 10ms 休眠会把窗口位置量化成 10~20ms 一跳，看起来一顿一顿。选区遮罩只压暗 30%，底层内容仍然看得清。
+
 交互示例：`examples/browser` 用 `SetOnNavigate` 接管链接点击：读取目标 HTML 并在同一窗口重新 `OpenDocument`，外壳用 `ui.Install` 装配——后退/前进/刷新/首页是带图标与可用态的 `ui.Tool`，示例页面下拉和地址栏是嵌在工具栏里的 `ui.Slot` 控件，状态栏显示页面标题（引擎没有独立的窗口 chrome 层，换页时重装一套工作台；页面靠 `Spec.NoBodyReset` 保住自己的 body 排版），浏览历史支持后退/前进/刷新/首页（没有可后退的页面时按钮置灰），地址栏里按回车直接打开当前输入的地址，未知协议与读取失败会生成带返回链接的提示页；`examples/portal` 用固定顶栏 + 绝对定位侧栏组成购物门户，搜索框聚焦后显示热门提示，所有「加入购物车」按钮共享一个计数徽标。
 
 `examples/notepad` 是最"应用"的一个：菜单、工具栏、快捷键和状态栏交给 `ui`（`ui.Install` 生成工作台，`ui.Spec` 声明命令），示例只保留记事本自己的部分——编辑区几何由程序按窗口尺寸算出（CSS 没有 `calc`，固定栏高度取 `ui.Theme`），查找替换栏与撤销/重做栈由应用层维护（引擎不内置撤销），文件读写与剪贴板走平台能力（`runtime/dialog` 的原生文件对话框 / `runtime/clipboard` 的系统剪贴板）。`ui.Workbench.SetStatusVisible` 支撑「视图 → 显示状态栏」，快捷键由 `Workbench.HandleKey` 接到窗口。

@@ -118,6 +118,9 @@ func run(delay time.Duration, source, dumpCapture, overlayPath, previewPath stri
 
 	win.SetKeyHandler(a.onKey)
 	win.SetMouseHandler(a.onMouse)
+	// 拖动预览窗口：鼠标事件只记目标位置，帧末合并成一次 MoveTo（见
+	// previewState.onFrame）；拖动期间主循环以 1ms 轮询，窗口才跟手。
+	win.SetFrameHandler(a.onFrame)
 	if exitAfter > 0 {
 		win.SetAutoExit(exitAfter)
 	}
@@ -138,6 +141,15 @@ func (a *app) onMouse(ev browser.MouseEvent) bool {
 		return a.prev.onMouse(a, ev)
 	}
 	return a.onOverlayMouse(ev)
+}
+
+// onFrame 是主循环的每帧回调：预览页拖动窗口时把本帧的目标位置落成一次
+// MoveTo（返回值告诉主循环「还在拖动，别睡 10ms」）。
+func (a *app) onFrame() bool {
+	if a.phase != phasePreview || a.prev == nil {
+		return false
+	}
+	return a.prev.onFrame(a.win)
 }
 
 func (a *app) onKey(key int, mods uint16) bool {

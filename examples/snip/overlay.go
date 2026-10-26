@@ -31,7 +31,9 @@ type overlay struct {
 
 const overlayHTML = `<!doctype html><html><head><style>
 html,body{margin:0;padding:0;}
-#shade-t,#shade-b,#shade-l,#shade-r{position:absolute;background:rgba(10,16,30,0.46);}
+/* 遮罩只做「轻微压暗」：0.30 的深蓝黑既能把桌面推后、又看得清底层内容
+   （0.46 时整屏像蒙了层灰，用户反馈"暗得太多"）。 */
+#shade-t,#shade-b,#shade-l,#shade-r{position:absolute;background:rgba(10,16,30,0.30);}
 #sel{position:absolute;display:none;border:1px solid #3B82F6;}
 #size{position:absolute;display:none;background:rgba(15,23,42,0.9);color:#FFFFFF;font-size:12px;line-height:18px;padding:2px 8px;border-radius:4px;}
 #hx,#hy{position:absolute;display:none;background:rgba(255,255,255,0.35);}

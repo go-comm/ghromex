@@ -23,7 +23,12 @@ type previewState struct {
 
 	x, y         int // 当前窗口位置
 	dragging     bool
-	lastX, lastY int
+	grabX, grabY int // 按下时窗口左上角相对光标的偏移（窗口内坐标）
+	// targetX/targetY 是本帧要落成的窗口位置，movePending 表示有待应用的
+	// 位移。拖动时不在鼠标事件里直接 MoveTo：一个事件批次常有多条 motion，
+	// 逐条重定位窗口会让它在一毫秒内跳好几次；帧末合并成一次（见 onFrame）。
+	targetX, targetY int
+	movePending      bool
 }
 
 // startPreview 把当前窗口从“整屏选区”原地缩成悬浮预览。
@@ -121,22 +126,23 @@ func (p *previewState) onMouse(a *app, ev browser.MouseEvent) bool {
 			return false
 		}
 		p.dragging = true
-		p.lastX, p.lastY = ev.X, ev.Y
+		// 抓取偏移 = 按下时光标相对窗口左上角的偏移。之后窗口位置取
+		// 「当前窗口位置 + 光标位移」：窗口跟着光标走，事件坐标是相对
+		// 当前窗口的，所以只要 p.x 与真实窗口位置同步（帧末应用过），
+		// 这个式子就不会累积误差，也不会因丢事件而漂移。
+		p.grabX, p.grabY = ev.X, ev.Y
+		p.movePending = false
 		return true
 
 	case browser.MouseMove:
 		if !p.dragging {
 			return false
 		}
-		// 用相邻事件的增量：MoveTo 之后 SDL 报的是相对新窗口的坐标，
-		// “起点 + 偏移”会算错；增量与窗口移动无关。
-		dx, dy := ev.X-p.lastX, ev.Y-p.lastY
-		if dx != 0 || dy != 0 {
-			p.x += dx
-			p.y += dy
-			a.win.MoveTo(p.x, p.y)
-			p.lastX, p.lastY = ev.X, ev.Y
-		}
+		// 只记目标位置，不在事件里 MoveTo：一个批次常有多条 motion，
+		// 逐条 SetWindowPosition 会让窗口在 1ms 内跳好几次，配合主循环
+		// 10ms 的空闲休眠就是「一顿一顿」。帧末由 onFrame 合并成一次。
+		p.targetX, p.targetY = p.x+ev.X-p.grabX, p.y+ev.Y-p.grabY
+		p.movePending = true
 		return true
 
 	case browser.MouseUp:
@@ -147,4 +153,18 @@ func (p *previewState) onMouse(a *app, ev browser.MouseEvent) bool {
 		return false
 	}
 	return false
+}
+
+// onFrame 是主循环的每帧回调：把拖动期间记下的目标位置落成一次窗口移动。
+//
+// 返回 true 表示还在拖动——主循环据此把空闲休眠从 10ms 降到 1ms。鼠标
+// 125Hz 时事件间隔 8ms，10ms 休眠会把窗口位置量化成 10~20ms 一跳，
+// 看起来就是不跟手。
+func (p *previewState) onFrame(win *browser.Window) bool {
+	if p.movePending {
+		p.x, p.y = p.targetX, p.targetY
+		win.MoveTo(p.x, p.y)
+		p.movePending = false
+	}
+	return p.dragging
 }

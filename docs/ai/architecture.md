@@ -140,6 +140,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 | 新平台能力 | `runtime/xxx` 收口 + `backend/xxx` 平台实现，非本平台返回 `ErrUnsupported` | 参照 `runtime/dialog` + `backend/dialog` |
 | 页面导航回调 | `SetOnNavigate`（导航在 click 冒泡之后执行） | `engine` 文档 API |
 | 应用层变更信号 | `SetOnChanged`（内容**或视口尺寸**变化都通知） | `engine` 文档 API |
+| 高频输入按帧合并（拖动窗口等） | `browser.Window.SetFrameHandler`：事件排空后每帧调一次，返回 true 时主循环改用 1ms 轮询（空闲 10ms） | `browser/window.go`、`examples/snip/preview.go` |
 
 ## 无头模式与测试
 

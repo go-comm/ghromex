@@ -71,6 +71,11 @@ type Window struct {
 	// 引擎的 OnDocumentMouseDown/Up 面向文本选择（Up 还不带坐标），画
 	// 截图选区需要按下/移动/抬起的原始坐标，所以在事件循环这一层留口。
 	mouseHandler func(ev MouseEvent) bool
+
+	// frameHandler 是每帧回调：事件队列排空后、布局/重绘之前调用一次，
+	// 返回 true 表示「还有每帧任务」（主循环据此把空闲休眠从 10ms 降到 1ms）。
+	// 拖动无边框窗口这类高频动作在这里把一批事件合并成一次窗口移动。
+	frameHandler func() bool
 }
 
 // Options 是建窗参数。零值表示位于 (0,0) 的固定尺寸普通窗口（带边框）；
@@ -184,6 +189,29 @@ type MouseEvent struct {
 // 放在这一层而不是引擎：选区/拖动悬浮窗这类交互属于应用，不需要页面元素
 // 参与；引擎也不该为每个工具加一套专用事件。
 func (win *Window) SetMouseHandler(f func(ev MouseEvent) bool) { win.mouseHandler = f }
+
+// SetFrameHandler 注册每帧回调：每轮事件队列排空后、布局与重绘之前调用一次。
+// 返回 true 表示「本帧之后还有事要做」——主循环会把空闲休眠从 10ms 降到 1ms
+// （实测 SDL_Delay(1) 约 1.06ms），让后续鼠标事件尽快落成动作。传 nil 取消。
+//
+// 用途：把高频输入合并成「每帧一次」的动作。拖动无边框窗口就是典型：
+// 每个 motion 事件都调 MoveTo 会让窗口在一个事件批次里被重定位好几次，
+// 而空闲休眠又是 10ms 一档——鼠标 125Hz（8ms 一个事件）时窗口位置被量化
+// 成 10~20ms 一跳，看起来就是拖动一顿一顿的。改成在回调里按帧移动一次，
+// 并在拖动期间保持 1ms 轮询，窗口就跟手了。
+//
+// 回调里可以改 DOM（变更会让文档计数 +1，本帧随后自然重排重绘）。
+func (win *Window) SetFrameHandler(f func() bool) { win.frameHandler = f }
+
+// idleDelay 返回空闲休眠毫秒数：有每帧任务（拖动窗口等）时 1ms 轮询，
+// 否则 10ms 省 CPU。抽成函数是为了让这条策略可测——休眠粒度直接决定
+// 拖动是否跟手，而它在主循环里没法稳定断言。
+func idleDelay(busy bool) int {
+	if busy {
+		return 1
+	}
+	return 10
+}
 
 // SetBackdrop 设置窗口背景图（nil 清除）。清屏之后、文档之前贴在 (0,0)。
 //
@@ -348,6 +376,12 @@ func (win *Window) Run() error {
 		}
 
 		pending := false
+		// 每帧回调：事件队列排空后、布局之前调用一次。拖动窗口这类高频
+		// 交互在这里把一批 motion 事件合并成一次 MoveTo（见 SetFrameHandler）。
+		busy := false
+		if win.frameHandler != nil {
+			busy = win.frameHandler()
+		}
 		var dLayout, dClear, dRender, dPresent, dIdle time.Duration
 		if doc := win.doc; doc != nil {
 			if c := doc.ChangeCount(); c != win.lastChange {
@@ -401,7 +435,7 @@ func (win *Window) Run() error {
 
 		if !pending {
 			t0 := time.Now()
-			win.sdl.Delay(10)
+			win.sdl.Delay(idleDelay(busy))
 			dIdle = time.Since(t0)
 		}
 
