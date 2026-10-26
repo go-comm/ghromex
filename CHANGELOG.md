@@ -5,6 +5,26 @@
 
 ## 未发布
 
+**input 长文本窗口跟随光标（scroll-follows-caret，Chrome 同口径）**：
+此前单行 input 值超宽时窗口固定「舍头保尾」，光标索引能回到 0 但画面永远
+滚不回首字（examples/browser 反馈"光标移动不到首字"）。改造三点：
+1. `htmlElement` 新增 `textScrollX` / `textScrollSet` 记录横向窗口偏移与
+   是否已被光标定位；未定位保持旧「保尾」口径（静态展示与地址栏兼容），
+   已定位则纯窗口跟随。
+2. `inputVisibleWindow` 按 `textScrollX` 在 rune 边界舍头；保尾模式
+   （`target==maxScroll`）向上取整，保证末字完整可见；保头模式（`target=0`，
+   Home/左移回首字）不再强制舍满，首字必须可见；中间位置由绘制层按内盒
+   裁剪兜底（单字溢出 ≤ 1 字符宽）。
+3. `ensureCaretVisible` 扩展到 input：光标越出左/右缘时把 `textScrollX`
+   推回 `pre` / `pre-avail`，并在首次定位时标记 `textScrollSet=true`；
+   绘制层（`render.go`）对 `text/password` input 的文本/光标/选区统一按
+   padding 盒 `pushClip` 裁剪，保证右溢出字符不外漏（与旧口径 `tw≤avail`
+   等价，无感知差异）。
+`svg_dump.go` 同步尾部按可用宽截断，保持导出与屏幕一致。
+回归：`TestInputCaretInVisibleWindow`（旧点击右缘键入落尾）、
+`TestInputCaretScrollsWindow`（Home/End/聚焦三态）、
+`TestInputCaretCharByCharLeftScroll`（逐字左移全程窗口跟随）。
+
 **表格修复：UA 块级语义标签缺失导致第二份 `display:table` 塌陷**：
 真实故障报告（vm02 宿主机文件系统）暴露——同一文档里第一个
 `display:table` 正常、之后每个都列宽等分、行高虚胖（尾页 66 → 514）。

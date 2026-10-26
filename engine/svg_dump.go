@@ -592,6 +592,20 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 		return
 	}
 	buttonLike := typ == "submit" || typ == "reset" || typ == "button"
+	// 窗口按 rune 取整、光标跟随保头后可见文本宽会超出控件内盒：渲染把溢出
+	// 字符按控件内盒裁掉（render.go 的 textClip），dump 同口径「看不见就不
+	// 导出」——从尾部舍掉溢出字符（按钮型 auto 宽恰好放得下，不触发）。
+	if !buttonLike && base.width > 0 && w > base.width-4 {
+		runes := []rune(val)
+		for len(runes) > 1 {
+			if tw, _ := fakeMeasureText(string(runes), fs); tw <= base.width-4 {
+				break
+			}
+			runes = runes[:len(runes)-1]
+		}
+		val = string(runes)
+		w, h = fakeMeasureText(val, fs)
+	}
 	tx := base.x
 	if buttonLike && base.width > w {
 		tx = base.x + (base.width-w)/2

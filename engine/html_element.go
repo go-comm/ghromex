@@ -161,6 +161,13 @@ type htmlElement struct {
 	scrollTop int
 	// scrollLeft 为横向滚动偏移（像素），语义同 scrollTop。
 	scrollLeft int
+	// textScrollX 是单行 input 文本窗口的横向偏移（像素，rune 边界向下取整）。
+	// 值超宽时窗口跟随光标（ensureCaretVisible 驱动，Chrome 的 scroll-follows-
+	// caret 语义）；渲染与光标映射都经 inputVisibleWindow 按它舍头，同一口径。
+	textScrollX int
+	// textScrollSet 表示 textScrollX 已被光标操作定位过。未定位时窗口保持
+	// "舍头保尾"旧口径（静态展示长值 input 与地址栏历史显示的兼容性）。
+	textScrollSet bool
 	// scrollAnimTop/scrollAnimLeft 是**平滑滚动的当前视觉位置**（整像素）：
 	// 滚动目标在 scrollTop/scrollLeft，实际位移由每轮布局按时间推进（Chrome 的
 	// 动画式滚动；引擎此前整档跳变，观感生硬）。scrollAnimOn 表示动画在途。
@@ -600,6 +607,8 @@ func (element *htmlElement) Clone() HTMLElement {
 	c.selAnchor = 0
 	c.scrollTop = 0
 	c.scrollLeft = 0
+	c.textScrollX = 0
+	c.textScrollSet = false
 	c.contentW = 0
 	c.contentH = 0
 	c.self = &c

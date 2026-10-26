@@ -527,6 +527,14 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 				// 映射共用 inputVisibleWindow——同一口径，避免光标落到被裁掉的
 				// 前缀里（插入字符会落到错误位置）。
 				val, cut, tw, th := inputVisibleWindow(g, base, size, p.Bold(), p.FontFamily())
+				// 窗口按 rune 取整后（或光标保头时）可见文本可能超出控件内盒
+				// 一个字符宽：按 padding 盒裁剪，文字不外漏（Chrome 的 input
+				// 文本不越右缘）。舍头保尾旧口径 tw ≤ avail，不触发此裁剪。
+				textClip := false
+				if tw > base.width-4 && base.width > 0 {
+					textClip = pushClip(g, bx+bd[eLeft], by+bd[eTop],
+						bw-bd[eLeft]-bd[eRight], bh-bd[eTop]-bd[eBottom])
+				}
 				fullRunes := []rune(displayValue(base))
 				// 按钮型 value 文本水平居中（对齐 Chrome 按钮文字）；按钮型
 				// 不截断（auto 宽已按 value 外盒测量），故此处不会被裁短。
@@ -581,6 +589,9 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 					if th > 2 {
 						g.DrawColor(cx, ty, 1, th-2, cc)
 					}
+				}
+				if textClip {
+					popClip(g)
 				}
 			}
 		}

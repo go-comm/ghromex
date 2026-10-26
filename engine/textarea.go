@@ -337,30 +337,70 @@ func setSelection(doc HTMLDocument, el *htmlElement, anchor, focus int) {
 	ensureCaretVisible(doc, el)
 }
 
-// ensureCaretVisible 为 textarea 调整 scrollTop 使光标行可见。
+// ensureCaretVisible 保证光标在可视区内：textarea 调 scrollTop（纵向），
+// 单行 input 调 textScrollX（横向，Chrome scroll-follows-caret 同口径）。
+// 没有这一步，长值 input 的窗口会固定在末尾，光标索引回到 0 也永远滚不回
+// 首字（examples/browser 反馈"光标移动不到首字"）。
 func ensureCaretVisible(doc HTMLDocument, el *htmlElement) {
-	if el == nil || !strings.EqualFold(el.tagName, "textarea") {
+	if el == nil {
 		return
 	}
 	g := docGraphics(doc)
-	l := layoutTextarea(g, el)
-	if len(l.lines) == 0 {
+	if strings.EqualFold(el.tagName, "textarea") {
+		l := layoutTextarea(g, el)
+		if len(l.lines) == 0 {
+			return
+		}
+		row := caretRow(l.lines, el.caret)
+		top := row * l.lh
+		scroll := el.scrollTop
+		if top < scroll {
+			scroll = top
+		}
+		if top+l.lh > scroll+el.height {
+			scroll = top + l.lh - el.height
+		}
+		if scroll < 0 {
+			scroll = 0
+		}
+		if scroll != el.scrollTop {
+			el.scrollTop = scroll
+			el.onChanged()
+		}
 		return
 	}
-	row := caretRow(l.lines, el.caret)
-	top := row * l.lh
-	scroll := el.scrollTop
-	if top < scroll {
-		scroll = top
+	// 单行可编辑 input：窗口横向跟随光标。按钮型不滚动（auto 宽不溢出）。
+	if !strings.EqualFold(el.tagName, "input") || !editableInput(el) {
+		return
 	}
-	if top+l.lh > scroll+el.height {
-		scroll = top + l.lh - el.height
+	switch strings.ToLower(el.GetAttribute("type")) {
+	case "submit", "reset", "button":
+		return
+	}
+	px, bold, family := fontOf(el.computed)
+	full := []rune(displayValue(el))
+	caret := clampCaret(el.caret, len(full))
+	pre, _ := g.MeasureText(string(full[:caret]), px, bold, family)
+	fullW, _ := g.MeasureText(string(full), px, bold, family)
+	avail := el.width - 4
+	if avail < 1 {
+		avail = 1
+	}
+	scroll := el.textScrollX
+	if pre < scroll {
+		scroll = pre // 光标越出左缘：滚回（Home/左移/点击行首由此滚回首字）
+	} else if pre > scroll+avail {
+		scroll = pre - avail // 越出右缘：光标贴窗口右缘（输入/右移/End 推窗口）
+	}
+	if maxScroll := fullW - avail; scroll > maxScroll {
+		scroll = maxScroll
 	}
 	if scroll < 0 {
 		scroll = 0
 	}
-	if scroll != el.scrollTop {
-		el.scrollTop = scroll
+	if scroll != el.textScrollX || !el.textScrollSet {
+		el.textScrollX = scroll
+		el.textScrollSet = true
 		el.onChanged()
 	}
 }
