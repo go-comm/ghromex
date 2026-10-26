@@ -87,8 +87,8 @@ func (d Display) isTableRowGroup() bool {
 type CaptionSide uint8
 
 const (
-	CaptionSideTop CaptionSide = iota // 默认：题注在网格上方
-	CaptionSideBottom                 // 题注在网格下方
+	CaptionSideTop    CaptionSide = iota // 默认：题注在网格上方
+	CaptionSideBottom                    // 题注在网格下方
 )
 
 // EmptyCells 是 empty-cells 的取值（继承属性，只作用于表格单元格）。
@@ -132,7 +132,7 @@ type ListStylePosition uint8
 
 const (
 	ListStyleOutside ListStylePosition = iota // 默认：标记在内容盒外
-	ListStyleInside                            // 标记在内容盒内、首行之前
+	ListStyleInside                           // 标记在内容盒内、首行之前
 )
 
 type Position uint8
@@ -154,6 +154,51 @@ type FontWeight uint8
 const (
 	FontWeightNormal FontWeight = iota
 	FontWeightBold
+)
+
+// FontStyle 是 font-style 的计算值。引擎只区分正体与斜体：italic 与
+// oblique 都落到 FontStyleItalic，由绘制后端用**合成斜体**（SDL_ttf 的
+// TTF_STYLE_ITALIC）呈现——引擎不带真正的斜体字面（italic face），
+// 合成斜体的字形前进宽度与正体一致，因此布局度量不需要区分字形样式。
+type FontStyle uint8
+
+const (
+	FontStyleNormal FontStyle = iota
+	FontStyleItalic
+)
+
+// Visibility 是 visibility 的计算值。hidden/collapse 的盒子照常参与布局
+// （占位、影响兄弟位置），只是自身与（默认继承的）子树不绘制、不参与
+// 命中；子级显式声明 visible 可以重新显示（CSS 语义）。
+type Visibility uint8
+
+const (
+	VisibilityVisible Visibility = iota
+	VisibilityHidden
+	// VisibilityCollapse 对非表格元素等同 hidden（引擎没有行/列折叠布局）。
+	VisibilityCollapse
+)
+
+// FloatSide 是 float 的计算值：左浮动、右浮动或不分浮动。
+// 浮动盒脱流：不推进游标、不占行高，但会影响同一块格式化上下文里
+// 后续行盒的左右边界（文字绕排）与 clear 的下移。
+type FloatSide uint8
+
+const (
+	FloatNone FloatSide = iota
+	FloatLeft
+	FloatRight
+)
+
+// ClearSide 是 clear 的计算值：块级元素的上外边距边被下推到指定方向上
+// 所有浮动盒的下缘之下。
+type ClearSide uint8
+
+const (
+	ClearNone ClearSide = iota
+	ClearLeft
+	ClearRight
+	ClearBoth
 )
 
 type TextAlign uint8
@@ -352,6 +397,27 @@ type CSSStyleDeclaration interface {
 	SetFontFamily(family string) CSSStyleDeclaration
 	FontWeight() FontWeight
 	SetFontWeight(weight FontWeight) CSSStyleDeclaration
+	// FontStyle 是 font-style 的计算值（normal/italic），沿父链继承。
+	// 斜体由绘制后端合成（见 FontStyle 的说明）。
+	FontStyle() FontStyle
+	SetFontStyle(style FontStyle) CSSStyleDeclaration
+	// Visibility 决定元素自身是否绘制/可命中（hidden/collapse），沿父链
+	// 继承；布局位置不受影响，子级可声明 visible 重新显示。
+	Visibility() Visibility
+	SetVisibility(v Visibility) CSSStyleDeclaration
+	// FloatSide 是 float 的计算值（none/left/right），不继承。
+	Float() FloatSide
+	SetFloat(f FloatSide) CSSStyleDeclaration
+	// Clear 是 clear 的计算值（none/left/right/both），不继承。
+	Clear() ClearSide
+	SetClear(c ClearSide) CSSStyleDeclaration
+	// Opacity 是 opacity 的计算值（0~1），不继承。引擎没有图层合成，
+	// 按「子树所有绘制颜色的 alpha 乘以该值」近似（见 README 已知限制）。
+	Opacity() float32
+	SetOpacity(o float32) CSSStyleDeclaration
+	// Cursor 是 cursor 的计算值（命中时使用的系统指针形状），沿父链继承。
+	Cursor() Cursor
+	SetCursor(c Cursor) CSSStyleDeclaration
 	TextAlign() TextAlign
 	SetTextAlign(align TextAlign) CSSStyleDeclaration
 	BorderRadius() Size
@@ -441,6 +507,9 @@ func newStyle() CSSStyleDeclaration {
 	style.inset = newAutoRect()
 	style.borderSpacingH = NewZeroSize()
 	style.borderSpacingV = NewZeroSize()
+	// opacity 初始值为 1（完全不透明）：0 是合法声明值（全透明），不能
+	// 用零值当默认。
+	style.opacity = 1
 	return style
 }
 
@@ -472,6 +541,12 @@ type cssStyleDeclaration struct {
 	fontSizeExplicit bool
 	fontFamily       string
 	fontWeight       FontWeight
+	fontStyle        FontStyle
+	visibility       Visibility
+	floatSide        FloatSide
+	clearSide        ClearSide
+	opacity          float32
+	cursor           Cursor
 	textAlign        TextAlign
 	borderRadius     Size
 	position         Position
@@ -515,6 +590,12 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetFontSize(s.FontSize())
 	c.SetFontFamily(s.FontFamily())
 	c.SetFontWeight(s.FontWeight())
+	c.SetFontStyle(s.FontStyle())
+	c.SetVisibility(s.Visibility())
+	c.SetFloat(s.Float())
+	c.SetClear(s.Clear())
+	c.SetOpacity(s.Opacity())
+	c.SetCursor(s.Cursor())
 	c.SetTextAlign(s.TextAlign())
 	c.SetBorderRadius(s.BorderRadius())
 	c.SetPosition(s.Position())
@@ -732,6 +813,60 @@ func (style *cssStyleDeclaration) FontWeight() FontWeight {
 
 func (style *cssStyleDeclaration) SetFontWeight(weight FontWeight) CSSStyleDeclaration {
 	style.fontWeight = weight
+	return style
+}
+
+func (style *cssStyleDeclaration) FontStyle() FontStyle {
+	return style.fontStyle
+}
+
+func (style *cssStyleDeclaration) SetFontStyle(s FontStyle) CSSStyleDeclaration {
+	style.fontStyle = s
+	return style
+}
+
+func (style *cssStyleDeclaration) Visibility() Visibility {
+	return style.visibility
+}
+
+func (style *cssStyleDeclaration) SetVisibility(v Visibility) CSSStyleDeclaration {
+	style.visibility = v
+	return style
+}
+
+func (style *cssStyleDeclaration) Float() FloatSide {
+	return style.floatSide
+}
+
+func (style *cssStyleDeclaration) SetFloat(f FloatSide) CSSStyleDeclaration {
+	style.floatSide = f
+	return style
+}
+
+func (style *cssStyleDeclaration) Clear() ClearSide {
+	return style.clearSide
+}
+
+func (style *cssStyleDeclaration) SetClear(c ClearSide) CSSStyleDeclaration {
+	style.clearSide = c
+	return style
+}
+
+func (style *cssStyleDeclaration) Opacity() float32 {
+	return style.opacity
+}
+
+func (style *cssStyleDeclaration) SetOpacity(o float32) CSSStyleDeclaration {
+	style.opacity = o
+	return style
+}
+
+func (style *cssStyleDeclaration) Cursor() Cursor {
+	return style.cursor
+}
+
+func (style *cssStyleDeclaration) SetCursor(c Cursor) CSSStyleDeclaration {
+	style.cursor = c
 	return style
 }
 

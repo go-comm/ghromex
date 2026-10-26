@@ -5,6 +5,43 @@
 
 ## 未发布
 
+**布局与交互补齐：`float`/`clear`、`opacity`、`visibility`、`cursor`、`font-style: italic`**：
+五项此前只解析不生效（或完全没解析）的 CSS 能力，现在都有实际行为。
+
+- `float(left/right/none)`：浮动盒脱流（不推进游标、不撑父级 auto 高度）、
+  auto 宽按 shrink-to-fit 收缩，落点从当前游标向下找第一个能容纳外盒宽度的
+  位置（放不下就下移到挡路浮动的最低底边）。行盒按浮动边缘收缩（左浮动抬高
+  左界、右浮动压低右界），`text-align` 也按收缩后的可用行宽计算；行内元素
+  内部的行盒继续避让外层浮动，inline-block / inline-table 建立新 BFC、内部
+  不避让。
+- `clear(left/right/both/none)`：块盒顶边下推到相关浮动下缘之下；产生 clearance
+  时相邻外边距不再折叠。
+- `opacity(0~1/百分比)`：无图层合成，按「子树每次绘制动作的颜色 alpha 乘
+  opacity」近似（`engine/opacity.go` 的 `withOpacity` 包装 Graphics）；定位子树
+  不在主 pass 递归里，按父链乘积补包（`ancestorOpacity`）。
+- `visibility(visible/hidden/collapse)`：hidden/collapse 自身不绘制、不可命中，
+  但照常占位；子级显式 `visible` 可恢复显示与命中。命中测试与渲染同口径。
+- `cursor`：新增 `core.CursorShape` 与可选接口 `core.CursorSetter`；引擎
+  `engine.CursorAt` 按命中结果给形状，browser 层在鼠标移动时调用，SDL2 后端用
+  `SDL_CreateSystemCursor`/`SDL_SetCursor` 落到系统指针（按枚举值缓存句柄）。
+  支持 `default/auto/pointer/text/move/wait/crosshair/not-allowed/grab/
+  grabbing/ew|ns|nwse|nesw-resize`，`url()` 退回 `auto`。UA 给 `a` 设 pointer、
+  表单控件设 text。
+- `font-style(normal/italic/oblique)`：新增可选接口 `core.StyledPaint`
+  （`Italic`/`SetItalic`），SDL2 后端用 `TTF_SetFontStyle(TTF_STYLE_ITALIC)`
+  合成斜体（无真斜体字形的中文字体同样生效）。合成斜体不改变字形前进宽度，
+  布局度量与正体一致；UA 给 `i/cite/em/var/dfn` 设 italic、表单控件设 normal。
+- SVG 导出与屏幕渲染同构：斜体输出 `font-style="italic"`、hidden 跳过自身绘制、
+  opacity 包 `<g opacity>` 组（定位层补祖先 opacity 乘积）。
+- 顺带修掉一个行盒换行缺陷：间隙空格把游标顶到右边界后，换行判断
+  （`right > it.x`）永久失效，整段文字粘成一行溢出容器（stylebook 的说明段落
+  曾整行冲出边框）。现在间隙空格放不下就丢弃（行首空格按 CSS 折叠），超宽
+  单词/原子盒之后的项也会回到新行。
+- 回归测试：`engine/props_internal_test.go`（解析/简写/初始值/copyStyle）、
+  `engine/float_visibility_test.go`（float 绕排与高度、clear、visibility 占位
+  与命中、cursor 跟随命中、opacity 像素、满行/超宽后的换行、SVG 同构）。
+- 文档：README 支持范围与已知限制、stylebook 新增对应演示节同步更新。
+
 **每帧回调 `browser.Window.SetFrameHandler`（拖动窗口跟手）**：新增每帧回调
 （事件队列排空后、布局之前调用一次，返回 `true` 表示还有每帧任务）。主循环
 据此把空闲休眠从 10ms 降到 1ms（实测 `SDL_Delay(1)` 约 1.06ms），供「拖动

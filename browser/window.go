@@ -543,6 +543,11 @@ func (win *Window) onMouseMove(ev sdl2.Event) {
 	// 悬停态：无论是否在拖选都更新（:hover 样式要跟手）。悬停目标没变
 	// 时引擎不触发重排，移动事件因此不带来额外开销。
 	engine.OnDocumentMouseMove(win.doc, ev.X, ev.Y)
+	// cursor 形状跟随命中结果（CSS cursor）：后端实现 core.CursorSetter 时
+	// 落到系统指针上；不实现（无头/软件光栅化）则静默忽略。
+	if cs, ok := win.sdl.Graphics().(engine.CursorSetter); ok {
+		cs.SetCursor(engine.CursorAt(win.doc, ev.X, ev.Y))
+	}
 	if !win.mouseDown || !win.selecting {
 		return
 	}

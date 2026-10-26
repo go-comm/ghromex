@@ -22,14 +22,15 @@
   · CSS 属性：display、position+偏移+z-index、box-sizing、width/height、
     margin/padding、border 全套、border-radius、border-collapse、
     background-color/background（颜色）、color、box-shadow、
-    font-size/family/weight、line-height、text-align、text-decoration、
-    vertical-align、overflow、white-space、pointer-events
+    font-size/family/weight/style、line-height、text-align、text-decoration、
+    vertical-align、overflow、white-space、pointer-events、
+    float/clear、opacity、visibility、cursor
   · 选择器：类型/#id/.class/后代/子代/分组/复合/[attr]/[attr=v]、
     特异度、!important；伪类 :hover :focus :active :checked :disabled
     :enabled :first-child :last-child :only-child :root :empty
   · 值：#3/#4/#6/#8、rgb()/rgba()、具名色、transparent；
     px/pt/dp/%/0/无单位
-  · 末节「不支持清单」：float/flex/grid、opacity、transform/transition、
+  · 末节「不支持清单」：flex/grid、transform/transition、
     background-image、em/rem/vh、calc()/var()、伪元素、:not()/:nth-child()、
     + ~ 组合器、通配 *、@media/@font-face 等——Chrome 对照到这些差异属预期。
 
@@ -39,7 +40,7 @@
     Chrome 立体边框为单色）
   · 表格完整模型：display 家族（table/inline-table/table-row/table-cell 等）、
     colspan/rowspan、border-spacing、col 宽度、caption-side、empty-cells
-  · 无斜体字形（i/em 只保证不换行）、无 webfont/@font-face
+  · 斜体为 SDL_ttf 合成斜体（不改变字形前进宽度）；无 webfont/@font-face
   · img/svg/canvas/iframe/video 无渲染链路，只有 CSS 盒
   · 悬停/按下默认反馈是引擎有意分歧（Chrome UA 无 hover 规则）
 -->
@@ -70,7 +71,7 @@
 	<h2>行内与文本语义标签 <span class="badge b-full">支持</span></h2>
 	<div class="inline-demo">
 		<p>
-			<strong>strong</strong> / <b>b</b> · <em>em</em> / <i>i</i>（引擎无斜体字形）·
+			<strong>strong</strong> / <b>b</b> · <em>em</em> / <i>i</i>（UA 给斜体）·
 			<u>u</u> · <s>s</s> / <strike>strike</strike> · <span class="hl">mark 高亮</span> ·
 			<code class="inl">code</code> <kbd>kbd</kbd> <samp>samp</samp> <var>var</var>
 		</p>
@@ -88,7 +89,7 @@
 		<p>强制换行：第一行<br>第二行 · 混排 a<code class="inl">b</code>c 与中文 English 换行点对照</p>
 	</div>
 	<p class="note">行内标签全部走 <span class="code">display: inline</span> 的 UA 规则；
-		<code class="inl">i</code>/<code class="inl">em</code> 不换行但无斜体字形（v1 边界）；
+		<code class="inl">i</code>/<code class="inl">em</code> 走合成斜体（<code class="inl">font-style: italic</code>，前进宽度不变）；
 		<code class="inl">sub/sup</code> 有基线位移；<code class="inl">a:hover</code> 底色变化见「伪类」节。</p>
 </div>
 
@@ -379,6 +380,65 @@ a  b   c    d</pre>
 		（整数；<code class="inl">auto</code> 按 0）。<b>不支持</b> min/max-width/height（末节清单）。</p>
 </div>
 
+<!-- ===== 浮动与可见性 ===== -->
+<div class="sec" id="sec-float">
+	<h2>浮动、透明度与可见性 <span class="badge b-full">支持</span></h2>
+
+	<p class="cap"><span class="code">float: left</span>（后续行盒按浮动右缘收缩，文字绕排）：</p>
+	<div class="fl-wrap">
+		<div class="fl-left">float: left<br>80×56</div>
+		<p class="fl-text">左浮动后面的段落文字按浮动边缘收缩换行：浮动盒脱离常规流，
+			行盒的可用宽度从浮动右缘算起，所以文字会贴着浮动盒的右侧排下去，
+			排满整行后再回到容器左缘——这一段要足够长才能看出绕排效果。</p>
+	</div>
+
+	<p class="cap"><span class="code">float: right</span> 与 <span class="code">clear: both</span>：</p>
+	<div class="fl-wrap">
+		<div class="fl-right">float: right</div>
+		<p class="fl-text">右浮动的盒贴在容器右边，行盒右界被压低，文字只占左侧剩余宽度。</p>
+		<div class="fl-clear">clear: both —— 顶边被推到所有浮动下缘之下</div>
+	</div>
+
+	<p class="cap"><span class="code">opacity</span>（0.25 / 0.5 / 1）：</p>
+	<div class="op-row">
+		<span class="op op-25">opacity: .25</span>
+		<span class="op op-50">opacity: .5</span>
+		<span class="op op-100">opacity: 1</span>
+	</div>
+
+	<p class="cap"><span class="code">visibility</span>（hidden 照常占位，子级 visible 可恢复）：</p>
+	<div class="vis-row">
+		<span class="vis-h">visibility: hidden（占位不可见）
+			<span class="vis-v">子级 visible 恢复</span></span>
+		<span class="vis-n">后面的兄弟位置不变</span>
+	</div>
+
+	<p class="cap"><span class="code">cursor</span>（把鼠标移到各块上看系统指针）：</p>
+	<p class="tline">
+		<span class="cur cur-pointer">pointer</span>
+		<span class="cur cur-text">text</span>
+		<span class="cur cur-move">move</span>
+		<span class="cur cur-wait">wait</span>
+		<span class="cur cur-no">not-allowed</span>
+	</p>
+
+	<p class="cap"><span class="code">font-style: italic / oblique</span>（合成斜体，前进宽度与正体一致）：</p>
+	<p class="tline"><span class="it">italic 斜体 ABC 甲乙丙</span> ·
+		<span class="ob">oblique 斜体 ABC 甲乙丙</span> ·
+		<span>正体 ABC 甲乙丙</span> ·
+		<em>em 默认斜体</em> · <i>i 默认斜体</i></p>
+
+	<p class="note">支持 <span class="code">float(left/right/none)</span> 与
+		<span class="code">clear(left/right/both/none)</span>：浮动脱流、auto 宽按 shrink-to-fit
+		收缩，行盒按浮动边缘收缩，clear 把块顶边推到浮动下缘之下；浮动不撑父级 auto 高度
+		（与 Chrome 同口径）。<span class="code">opacity</span> 是<b>近似</b>——没有图层合成，
+		按子树每次绘制动作的 alpha 乘 opacity，重叠内容会各自透出下层。
+		<span class="code">visibility:hidden/collapse</span> 不绘制、不可命中但照常占位；
+		<span class="code">cursor</span> 是系统指针子集（<code class="inl">url()</code> 退回 auto）。
+		斜体为 SDL_ttf 合成斜体，不改变字形前进宽度。<b>不支持</b> float 向祖先兄弟外溢、
+		opacity 分组合成、自定义光标图片。</p>
+</div>
+
 <!-- ===== 边框与圆角 ===== -->
 <div class="sec" id="sec-border">
 	<h2>边框与圆角 <span class="badge b-part">部分</span></h2>
@@ -482,7 +542,8 @@ a  b   c    d</pre>
 		<code class="inl">line-height</code>（normal/倍数/%/px，<b>em/rem/vh 整条忽略</b>）、
 		<code class="inl">font-weight</code>（二分）、<code class="inl">font-family</code>、
 		<code class="inl">text-align</code>、<code class="inl">text-decoration</code>（随父继承）、
-		<code class="inl">vertical-align</code>。均随级联继承。<b>不支持</b> font-style/斜体、
+		<code class="inl">vertical-align</code>。均随级联继承。
+		<code class="inl">font-style</code>（normal/italic/oblique，斜体为合成斜体）。<b>不支持</b>
 		letter-spacing、text-transform、text-shadow（末节清单）。</p>
 </div>
 
@@ -496,8 +557,8 @@ a  b   c    d</pre>
 		右边 <span class="pe-auto">auto（默认）</span></p>
 	<p class="note">支持单值与双值 <span class="code">overflow(-x/-y)</span>（visible/hidden/clip/scroll/auto），
 		裁剪生效；<b>通用容器不画滚动条滑块，滚轮是唯一驱动源</b>（textarea 才有覆盖式滚动条，见表单节）。
-		<code class="inl">pointer-events</code> 只区分 none/auto 两态。<b>不支持</b>
-		<code class="inl">visibility</code>、<code class="inl">cursor</code>（末节清单）。</p>
+		<code class="inl">pointer-events</code> 只区分 none/auto 两态。
+		<code class="inl">visibility</code> 与 <code class="inl">cursor</code> 见「浮动、透明度与可见性」节。</p>
 </div>
 
 <!-- ===== 颜色与单位 ===== -->
@@ -629,14 +690,12 @@ a  b   c    d</pre>
 			<tr><th>能力</th><th>Chrome</th><th>引擎</th></tr>
 		</thead>
 		<tbody>
-			<tr><td><code class="inl">float</code> / <code class="inl">clear</code></td><td>浮动布局</td><td class="x">忽略，仍按正常流</td></tr>
+			<tr><td><code class="inl">float</code> 向祖先兄弟外溢</td><td>浮动影响后续兄弟与祖先高度</td><td class="x">浮动作用域限于父元素自己的 BFC（见「浮动」节）</td></tr>
 			<tr><td><code class="inl">display: flex / grid</code> 及 flex*/grid*</td><td>弹性/网格布局</td><td class="x">display 只认 none/inline/inline-block/block 与表格家族，其余忽略</td></tr>
-			<tr><td><code class="inl">opacity</code> / <code class="inl">visibility</code></td><td>半透明/可见性</td><td class="x">忽略（半透明改用 rgba 颜色）</td></tr>
-			<tr><td><code class="inl">cursor</code></td><td>光标样式</td><td class="x">忽略，光标恒默认</td></tr>
+			<tr><td><code class="inl">opacity</code> 分组合成 / 自定义 <code class="inl">cursor: url()</code></td><td>整棵子树先合成再混合 / 图片光标</td><td class="x">opacity 按逐动作 alpha 近似；url() 退回 auto</td></tr>
 			<tr><td><code class="inl">transform</code> / <code class="inl">transition</code> / <code class="inl">animation</code> / <code class="inl">filter</code></td><td>变换/过渡/动画/滤镜</td><td class="x">忽略</td></tr>
 			<tr><td><code class="inl">background-image</code> / 渐变 / <code class="inl">url()</code> / background-position/size/repeat</td><td>图片与渐变背景</td><td class="x">background 简写只取颜色 token</td></tr>
 			<tr><td><code class="inl">list-style-image</code></td><td>图片标记</td><td class="x">解析但忽略（标记按 type 画）</td></tr>
-			<tr><td><code class="inl">font-style: italic</code></td><td>斜体</td><td class="x">不解析、无斜体字形</td></tr>
 			<tr><td><code class="inl">letter-spacing</code> / <code class="inl">word-spacing</code> / <code class="inl">text-transform</code> / <code class="inl">text-shadow</code></td><td>字距/大小写/文字阴影</td><td class="x">忽略</td></tr>
 			<tr><td><code class="inl">min/max-width</code> / <code class="inl">min/max-height</code></td><td>尺寸钳制</td><td class="x">忽略</td></tr>
 			<tr><td><code class="inl">em</code> / <code class="inl">rem</code> / <code class="inl">ex</code> / <code class="inl">ch</code> / <code class="inl">vh</code> / <code class="inl">vw</code></td><td>相对/视口单位</td><td class="x">不解析（只认 px/pt/dp/%/0/无单位）</td></tr>

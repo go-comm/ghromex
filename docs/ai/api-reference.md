@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-26 12:24
+> 生成时间: 2026-10-26 12:53
 
 ---
 
@@ -413,6 +413,9 @@ func (g *Graphics) Present()
 
 func (g *Graphics) PushClip(x, y, w, h int)
     PushClip 实现 core.Clipper：与当前裁剪区求交后下推并应用。 裁剪区由引擎在 padding 盒/滚动容器上给出，坐标即渲染坐标。
+
+func (g *Graphics) SetCursor(shape core.CursorShape) bool
+    SetCursor 实现 core.CursorSetter：把系统指针切换为指定形状。
 
 type Window struct {
 	// Has unexported fields.
@@ -901,6 +904,37 @@ type Color interface {
 func NewColor(r, g, b, a uint8) Color
     NewColor 造一个 RGBA 颜色。
 
+type CursorSetter interface {
+	SetCursor(shape CursorShape) bool
+}
+    CursorSetter 是 Graphics 的可选扩展：把系统鼠标指针切换为指定形状。
+
+    不实现该接口的后端（无头、软件光栅化、非 Windows 平台）静默忽略—— 指针形状纯属交互装饰，缺它不影响渲染与命中。返回 false 表示该形状
+    在本平台不可用（调用方无需重试）。
+
+type CursorShape uint8
+    CursorShape 是系统鼠标指针的形状（CSS cursor 的可用子集）。
+
+    放在 core 而不是 engine：形状由浏览器层按命中结果决定、由平台后端 （SDL2）落到真实指针上，两边都只依赖 core，不互相依赖。
+
+const (
+	CursorShapeDefault    CursorShape = iota
+	CursorShapeText                   // I 形文本光标（CSS text）
+	CursorShapePointer                // 手型（CSS pointer）
+	CursorShapeMove                   // 四向移动（CSS move）
+	CursorShapeNotAllowed             // 禁止（CSS not-allowed）
+	CursorShapeWait                   // 等待（CSS wait）
+	CursorShapeHelp                   // 帮助（CSS help）
+	CursorShapeCrosshair              // 十字（CSS crosshair）
+	CursorShapeGrab                   // 抓取（CSS grab）
+	CursorShapeGrabbing               // 抓取中（CSS grabbing）
+	CursorShapeEWResize               // 水平缩放（CSS e-resize/w-resize/ew-resize）
+	CursorShapeNSResize               // 垂直缩放（CSS n-resize/s-resize/ns-resize）
+	CursorShapeNESWResize             // 左下-右上缩放（CSS ne-resize/sw-resize）
+	CursorShapeNWSEResize             // 左上-右下缩放（CSS nw-resize/se-resize）
+)
+    指针形状。默认值（0）是系统箭头，对应 CSS 的 auto/default。
+
 type Graphics interface {
 	DrawText(x, y, w, h int, paint Paint, text string)
 	DrawColor(x, y, w, h int, color Color)
@@ -993,6 +1027,17 @@ type SpriteDrawer interface {
 	DrawSprite(x, y int, s *Sprite)
 }
     SpriteDrawer 是 Graphics 的可选扩展：支持位图 blit 的后端实现它。 不实现的后端回落到逐像素绘制（结果一致，只是慢）。
+
+type StyledPaint interface {
+	Paint
+	Italic() bool
+	SetItalic(italic bool)
+}
+    StyledPaint 是 Paint 的可选扩展：除字号/粗细/字族外还带**斜体**标记 （CSS font-style: italic）。SDL2
+    后端用 SDL_ttf 的合成斜体（TTF_STYLE_ITALIC） 绘制。
+
+    为什么用可选接口而不是直接给 Paint 加方法：Paint 是公开契约，直接加方法 会让仓库外自定义的 Paint
+    实现全部编译失败。引擎侧按类型断言启用，拿不到 标记时退化为正体（只是少了斜体观感）。
 
 type Viewport interface {
 	ViewportWidth() int
@@ -1098,6 +1143,25 @@ engine 的测试全是纯 Go，不需要显示器：
     等公开入口驱动，不要直接调内部函数——白盒绕过命中与焦点链路会漏掉 真实 bug。
 
 CONSTANTS
+
+const (
+	CursorAuto       = core.CursorShapeDefault
+	CursorDefault    = core.CursorShapeDefault
+	CursorText       = core.CursorShapeText
+	CursorPointer    = core.CursorShapePointer
+	CursorMove       = core.CursorShapeMove
+	CursorNotAllowed = core.CursorShapeNotAllowed
+	CursorWait       = core.CursorShapeWait
+	CursorHelp       = core.CursorShapeHelp
+	CursorCrosshair  = core.CursorShapeCrosshair
+	CursorGrab       = core.CursorShapeGrab
+	CursorGrabbing   = core.CursorShapeGrabbing
+	CursorEWResize   = core.CursorShapeEWResize
+	CursorNSResize   = core.CursorShapeNSResize
+	CursorNESWResize = core.CursorShapeNESWResize
+	CursorNWSEResize = core.CursorShapeNWSEResize
+)
+    指针形状（与 core 同名常量，类型一致）。
 
 const (
 	SIZE_PIXEL       = core.SIZE_PIXEL
@@ -1478,6 +1542,27 @@ type CSSStyleDeclaration interface {
 	SetFontFamily(family string) CSSStyleDeclaration
 	FontWeight() FontWeight
 	SetFontWeight(weight FontWeight) CSSStyleDeclaration
+	// FontStyle 是 font-style 的计算值（normal/italic），沿父链继承。
+	// 斜体由绘制后端合成（见 FontStyle 的说明）。
+	FontStyle() FontStyle
+	SetFontStyle(style FontStyle) CSSStyleDeclaration
+	// Visibility 决定元素自身是否绘制/可命中（hidden/collapse），沿父链
+	// 继承；布局位置不受影响，子级可声明 visible 重新显示。
+	Visibility() Visibility
+	SetVisibility(v Visibility) CSSStyleDeclaration
+	// FloatSide 是 float 的计算值（none/left/right），不继承。
+	Float() FloatSide
+	SetFloat(f FloatSide) CSSStyleDeclaration
+	// Clear 是 clear 的计算值（none/left/right/both），不继承。
+	Clear() ClearSide
+	SetClear(c ClearSide) CSSStyleDeclaration
+	// Opacity 是 opacity 的计算值（0~1），不继承。引擎没有图层合成，
+	// 按「子树所有绘制颜色的 alpha 乘以该值」近似（见 README 已知限制）。
+	Opacity() float32
+	SetOpacity(o float32) CSSStyleDeclaration
+	// Cursor 是 cursor 的计算值（命中时使用的系统指针形状），沿父链继承。
+	Cursor() Cursor
+	SetCursor(c Cursor) CSSStyleDeclaration
 	TextAlign() TextAlign
 	SetTextAlign(align TextAlign) CSSStyleDeclaration
 	BorderRadius() Size
@@ -1559,6 +1644,15 @@ const (
 	CaptionSideTop    CaptionSide = iota // 默认：题注在网格上方
 	CaptionSideBottom                    // 题注在网格下方
 )
+type ClearSide uint8
+    ClearSide 是 clear 的计算值：块级元素的上外边距边被下推到指定方向上 所有浮动盒的下缘之下。
+
+const (
+	ClearNone ClearSide = iota
+	ClearLeft
+	ClearRight
+	ClearBoth
+)
 type Clipper = core.Clipper
     Clipper 是 Graphics 的可选扩展：矩形裁剪栈。
 
@@ -1579,6 +1673,21 @@ func ParseColor(v string) Color
 
     给应用把「主题里的颜色字符串」变成引擎 Color 用——绘制层 API（如 SetTooltipColors）收的是 Color 而不是 CSS
     文本。
+
+type Cursor = core.CursorShape
+    Cursor 是系统鼠标指针形状（CSS cursor 的可用子集）。
+
+func CursorAt(root HTMLElement, x, y int) Cursor
+    CursorAt 返回 (x, y) 处应使用的系统指针形状：取命中元素的计算值
+    cursor（该属性沿父链继承，级联后已是最终值）。未命中返回默认箭头。
+
+    与命中测试同口径（ElementAt）：不可见/pointer-events:none 的元素不会被 选中，指针也就不会因为它们改变形状。
+
+type CursorSetter = core.CursorSetter
+    CursorSetter 是 Graphics 的可选扩展：切换系统鼠标指针。
+
+type CursorShape = core.CursorShape
+    CursorShape 是 Cursor 的别名（语义化写法）。
 
 type Display uint8
     Display 是 display 计算值。前四个是常规流值；其余为表格家族（CSS 2.1
@@ -1677,6 +1786,25 @@ func (g *FakeGraphics) PopClip()
 func (g *FakeGraphics) PushClip(x, y, w, h int)
     PushClip/PopClip 实现 Clipper（空后端无需真裁剪，但保持接口一致， 让"后端是否支持裁剪"不因测试替身而改变）。
 
+type FloatSide uint8
+    FloatSide 是 float 的计算值：左浮动、右浮动或不分浮动。 浮动盒脱流：不推进游标、不占行高，但会影响同一块格式化上下文里
+    后续行盒的左右边界（文字绕排）与 clear 的下移。
+
+const (
+	FloatNone FloatSide = iota
+	FloatLeft
+	FloatRight
+)
+type FontStyle uint8
+    FontStyle 是 font-style 的计算值。引擎只区分正体与斜体：italic 与
+    oblique 都落到 FontStyleItalic，由绘制后端用**合成斜体**（SDL_ttf
+    的 TTF_STYLE_ITALIC）呈现——引擎不带真正的斜体字面（italic face），
+    合成斜体的字形前进宽度与正体一致，因此布局度量不需要区分字形样式。
+
+const (
+	FontStyleNormal FontStyle = iota
+	FontStyleItalic
+)
 type FontWeight uint8
 
 const (
@@ -2106,6 +2234,9 @@ type Sprite = core.Sprite
 type SpriteDrawer = core.SpriteDrawer
     SpriteDrawer 是 Graphics 的可选扩展：支持位图 blit。
 
+type StyledPaint = core.StyledPaint
+    StyledPaint 是 Paint 的可选扩展：带斜体标记。
+
 type Stylesheet struct {
 	// Has unexported fields.
 }
@@ -2185,6 +2316,16 @@ type Viewport = core.Viewport
     接口本体在 core 包（见 core.Viewport）：平台后端只依赖 core，不反向 依赖 engine。这里的别名保证对外 API
     不变、两边实现的是同一类型。
 
+type Visibility uint8
+    Visibility 是 visibility 的计算值。hidden/collapse 的盒子照常参与布局
+    （占位、影响兄弟位置），只是自身与（默认继承的）子树不绘制、不参与 命中；子级显式声明 visible 可以重新显示（CSS 语义）。
+
+const (
+	VisibilityVisible Visibility = iota
+	VisibilityHidden
+	// VisibilityCollapse 对非表格元素等同 hidden（引擎没有行/列折叠布局）。
+	VisibilityCollapse
+)
 type WhiteSpace uint8
     WhiteSpace 控制空白折叠与换行（white-space）。只实现对照需要的两档： normal 为 CSS
     默认（连续空白折叠为一个空格、可软换行）；pre 保留空白与 换行、不做软换行（<pre> 的 UA 值）。缺这一档时 <pre> 里的换行与缩进会

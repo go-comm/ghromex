@@ -116,7 +116,17 @@ func dumpSelectPopup(b *strings.Builder, sel *htmlElement, ctr *int) {
 // dumpSVGPositioned 导出定位元素；若它建立层叠上下文，再按同一模型
 // 递归导出上下文内部的定位子树。
 func dumpSVGPositioned(b *strings.Builder, e HTMLElement, ctr *int) {
+	// 定位子树不在父级的 <g opacity> 里（它由 DumpSVG 的定位层单独导出），
+	// 祖先 opacity 要按父链乘积补一个组。递归时不把该组套在外层，避免
+	// 下一层重复相乘（它自己会重新按整条父链计算）。
+	k := ancestorOpacity(e)
+	if k < 1 {
+		fmt.Fprintf(b, `<g opacity="%.2f">`+"\n", k)
+	}
 	dumpSVGNode(b, e, ancestorSVGClips(e, ctr), ctr)
+	if k < 1 {
+		b.WriteString("</g>\n")
+	}
 	if createsStackingContext(e) {
 		for _, pb := range collectPositioned(e) {
 			dumpSVGPositioned(b, pb.e, ctr)
@@ -144,9 +154,14 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 	}
 
 	if tn, ok := e.(*textNode); ok {
+		// visibility:hidden/collapse 继承到文本节点：不落墨（与渲染路径同口径）。
+		if base.computed != nil && base.computed.Visibility() != VisibilityVisible {
+			return
+		}
 		fs := 16
 		fill := "#000000"
 		fw := ""
+		fsAttr := ""
 		fam := ""
 		if base.computed != nil {
 			if s := resolveLen(base.computed.FontSize(), 0); s > 0 {
@@ -158,6 +173,9 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 			}
 			if base.computed.FontWeight() == FontWeightBold {
 				fw = ` font-weight="bold"`
+			}
+			if base.computed.FontStyle() == FontStyleItalic {
+				fsAttr = ` font-style="italic"`
 			}
 			fam = base.computed.FontFamily()
 		}
@@ -178,11 +196,22 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 			// y 是 SVG 的基线坐标：基线 = 片段顶边 + 该片段的 ascent
 			// （与下划线等装饰同口径，见 drawDecoration）。用片段底边
 			// （y+h）会把文字整体画低一个 descent。
-			fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d"%s%s%s fill="%s">%s</text>`+"\n",
-				run.x, run.y+run.asc, fs, ff, fw, decAttr, fill, escapeXML(run.text))
+			fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d"%s%s%s%s fill="%s">%s</text>`+"\n",
+				run.x, run.y+run.asc, fs, ff, fw, fsAttr, decAttr, fill, escapeXML(run.text))
 		}
 		return
 	}
+
+	// opacity：整棵子树包一层 <g opacity>（SVG 组不透明度与 CSS 的组合成
+	// 语义一致，比屏幕路径的逐动作近似更精确）。必须在子节点递归之前开、
+	// 之后关，元素自身的背景/边框也属于这一组。
+	opacityGroup := comp != nil && comp.Opacity() < 1
+	if opacityGroup {
+		fmt.Fprintf(b, `<g opacity="%.2f">`+"\n", comp.Opacity())
+	}
+	// visibility:hidden/collapse 只挡自身绘制，子级显式 visible 仍可显示
+	// （与渲染路径同口径）。
+	visible := comp == nil || comp.Visibility() == VisibilityVisible
 
 	if comp != nil {
 		pd, bd := resolvedEdges(base, comp)
@@ -202,81 +231,85 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 		// 阴影在背景之前导出：与渲染路径同序。SVG 用 feGaussianBlur 表达
 		// 模糊，标准偏差取 CSS 模糊半径的一半（CSS 规范：模糊半径 = 2σ）。
 		shadows := comp.BoxShadow()
-		for i := len(shadows) - 1; i >= 0; i-- {
-			sh := shadows[i]
-			if sh.Inset {
-				continue
-			}
-			c := sh.Color
-			if c == nil {
-				c = comp.Color()
-			}
-			if c == nil {
-				c = NewColor(0, 0, 0, 255)
-			}
-			r, g, bl, al := c.RGBA()
-			if al == 0 {
-				continue
-			}
-			sw, shh := bw+2*sh.Spread, bh+2*sh.Spread
-			if sw <= 0 || shh <= 0 {
-				continue
-			}
-			sr := br + sh.Spread
-			if sr < 0 {
-				sr = 0
-			}
-			if lim := minInt(sw, shh) / 2; sr > lim {
-				sr = lim
-			}
-			sx, sy := bx+sh.X-sh.Spread, by+sh.Y-sh.Spread
-			srx := ""
-			if sr > 0 {
-				srx = fmt.Sprintf(` rx="%d"`, sr)
-			}
-			// 外阴影只画在边框盒之外：用 mask 的白矩形表示阴影形状，
-			// 再用黑矩形（元素边框盒）挖洞。mask 加在 filter 之后，
-			// 等价于浏览器「先模糊、再按边框盒裁切」。
-			pad := maxZero(sh.Blur)
-			filterDef := ""
-			filterAttr := ""
-			if sh.Blur > 0 {
-				fid := fmt.Sprintf("bshadow%d", *ctr)
+		if visible {
+			for i := len(shadows) - 1; i >= 0; i-- {
+				sh := shadows[i]
+				if sh.Inset {
+					continue
+				}
+				c := sh.Color
+				if c == nil {
+					c = comp.Color()
+				}
+				if c == nil {
+					c = NewColor(0, 0, 0, 255)
+				}
+				r, g, bl, al := c.RGBA()
+				if al == 0 {
+					continue
+				}
+				sw, shh := bw+2*sh.Spread, bh+2*sh.Spread
+				if sw <= 0 || shh <= 0 {
+					continue
+				}
+				sr := br + sh.Spread
+				if sr < 0 {
+					sr = 0
+				}
+				if lim := minInt(sw, shh) / 2; sr > lim {
+					sr = lim
+				}
+				sx, sy := bx+sh.X-sh.Spread, by+sh.Y-sh.Spread
+				srx := ""
+				if sr > 0 {
+					srx = fmt.Sprintf(` rx="%d"`, sr)
+				}
+				// 外阴影只画在边框盒之外：用 mask 的白矩形表示阴影形状，
+				// 再用黑矩形（元素边框盒）挖洞。mask 加在 filter 之后，
+				// 等价于浏览器「先模糊、再按边框盒裁切」。
+				pad := maxZero(sh.Blur)
+				filterDef := ""
+				filterAttr := ""
+				if sh.Blur > 0 {
+					fid := fmt.Sprintf("bshadow%d", *ctr)
+					*ctr++
+					filterAttr = fmt.Sprintf(` filter="url(#%s)"`, fid)
+					// 用 userSpaceOnUse 把滤镜区域按 blur 扩到阴影外接盒，
+					// 不能写 -50%/200%：小盒子配大模糊时百分比区域不够，
+					// 模糊尾巴会被 SVG 裁掉。
+					filterDef = fmt.Sprintf(`<filter id="%s" filterUnits="userSpaceOnUse" x="%d" y="%d" width="%d" height="%d">`+
+						`<feGaussianBlur stdDeviation="%.1f"/></filter>`,
+						fid, sx-pad, sy-pad, sw+2*pad, shh+2*pad, float64(sh.Blur)/2)
+				}
+				mid := fmt.Sprintf("bshadowmask%d", *ctr)
 				*ctr++
-				filterAttr = fmt.Sprintf(` filter="url(#%s)"`, fid)
-				// 用 userSpaceOnUse 把滤镜区域按 blur 扩到阴影外接盒，
-				// 不能写 -50%/200%：小盒子配大模糊时百分比区域不够，
-				// 模糊尾巴会被 SVG 裁掉。
-				filterDef = fmt.Sprintf(`<filter id="%s" filterUnits="userSpaceOnUse" x="%d" y="%d" width="%d" height="%d">`+
-					`<feGaussianBlur stdDeviation="%.1f"/></filter>`,
-					fid, sx-pad, sy-pad, sw+2*pad, shh+2*pad, float64(sh.Blur)/2)
+				// 白色矩形铺满整个 mask 区域（含模糊外扩），黑色矩形挖掉
+				// 元素边框盒。若白矩形只画阴影本体，模糊到本体外的尾巴会被
+				// mask 的透明区裁掉，软边变成硬边。
+				maskDef := fmt.Sprintf(`<mask id="%s" maskUnits="userSpaceOnUse" x="%d" y="%d" width="%d" height="%d">`+
+					`<rect x="%d" y="%d" width="%d" height="%d" fill="#ffffff"/>`+
+					`<rect x="%d" y="%d" width="%d" height="%d" fill="#000000"%s/></mask>`,
+					mid, sx-pad, sy-pad, sw+2*pad, shh+2*pad,
+					sx-pad, sy-pad, sw+2*pad, shh+2*pad,
+					bx, by, bw, bh, rxAttr)
+				fmt.Fprintf(b, `<defs>%s%s</defs>`+"\n", filterDef, maskDef)
+				fmt.Fprintf(b, `<g mask="url(#%s)"><rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.2f"%s%s/></g>`+"\n",
+					mid, sx, sy, sw, shh, hexColor(r, g, bl), float64(al)/255, srx, filterAttr)
 			}
-			mid := fmt.Sprintf("bshadowmask%d", *ctr)
-			*ctr++
-			// 白色矩形铺满整个 mask 区域（含模糊外扩），黑色矩形挖掉
-			// 元素边框盒。若白矩形只画阴影本体，模糊到本体外的尾巴会被
-			// mask 的透明区裁掉，软边变成硬边。
-			maskDef := fmt.Sprintf(`<mask id="%s" maskUnits="userSpaceOnUse" x="%d" y="%d" width="%d" height="%d">`+
-				`<rect x="%d" y="%d" width="%d" height="%d" fill="#ffffff"/>`+
-				`<rect x="%d" y="%d" width="%d" height="%d" fill="#000000"%s/></mask>`,
-				mid, sx-pad, sy-pad, sw+2*pad, shh+2*pad,
-				sx-pad, sy-pad, sw+2*pad, shh+2*pad,
-				bx, by, bw, bh, rxAttr)
-			fmt.Fprintf(b, `<defs>%s%s</defs>`+"\n", filterDef, maskDef)
-			fmt.Fprintf(b, `<g mask="url(#%s)"><rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.2f"%s%s/></g>`+"\n",
-				mid, sx, sy, sw, shh, hexColor(r, g, bl), float64(al)/255, srx, filterAttr)
 		}
 		// empty-cells: hide 的单元格不导出背景/边框（与渲染路径同口径）。
-		if bg := comp.BackgroundColor(); bg != nil && bw > 0 && bh > 0 && !base.noCellDeco {
-			r, g, bl, al := bg.RGBA()
-			if al > 0 {
-				fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.2f"%s/>`+"\n",
-					bx, by, bw, bh, hexColor(r, g, bl), float64(al)/255, rxAttr)
+		if visible && bw > 0 && bh > 0 && !base.noCellDeco {
+			if bg := comp.BackgroundColor(); bg != nil {
+				r, g, bl, al := bg.RGBA()
+				if al > 0 {
+					fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.2f"%s/>`+"\n",
+						bx, by, bw, bh, hexColor(r, g, bl), float64(al)/255, rxAttr)
+				}
 			}
 		}
 		// 内阴影画在背景之上（与渲染路径同序）：mask 挖出「不投影形状」，
 		// 模糊后按 padding 盒（含圆角）裁切。
-		if !base.noCellDeco && bw > 0 && bh > 0 {
+		if visible && !base.noCellDeco && bw > 0 && bh > 0 {
 			ipx := bx + bd[eLeft]
 			ipy := by + bd[eTop]
 			ipw := bw - bd[eLeft] - bd[eRight]
@@ -298,7 +331,7 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 				dumpSVGInsetShadow(b, ctr, ipx, ipy, ipw, iph, ipr, sh, r, g, bl, al)
 			}
 		}
-		if bw > 0 && bh > 0 && !base.noCellDeco {
+		if visible && bw > 0 && bh > 0 && !base.noCellDeco {
 			paintBD, colors, has := borderPaintState(comp, bd)
 			if has {
 				uniform := true
@@ -348,7 +381,7 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 	// 列表标记：与渲染路径同口径（outside 画在内容左缘左侧、右对齐，间隙
 	// 按标记类型分别取 Chrome 实测值；inside 画在内容盒内首行行首），否则
 	// SVG 导出与屏幕渲染不同构（看不到圆点/序号）。
-	if base.listMarker != "" {
+	if visible && base.listMarker != "" {
 		fpx, _, ffam := fontOf(comp)
 		mw, _ := fakeMeasureText(base.listMarker, fpx)
 		_, lh := fakeMeasureText("Mg", fpx)
@@ -376,7 +409,7 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 		clips = openSVGClip(b, clips, makeSVGClip(base, ctr))
 	}
 
-	if comp != nil && isFormControl(base) {
+	if visible && comp != nil && isFormControl(base) {
 		pd, bd := resolvedEdges(base, comp)
 		dumpControlText(b, base, comp,
 			base.x-pd[eLeft]-bd[eLeft], base.y-pd[eTop]-bd[eTop],
@@ -394,6 +427,9 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 		dumpSVGNodeFill(b, child, clips, ctr, fillOverride)
 	}
 	if clipped {
+		b.WriteString("</g>\n")
+	}
+	if opacityGroup {
 		b.WriteString("</g>\n")
 	}
 }

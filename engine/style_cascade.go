@@ -140,6 +140,11 @@ func applyInheritedStyle(comp CSSStyleDeclaration, pc CSSStyleDeclaration) {
 	}
 	comp.SetFontFamily(pc.FontFamily())
 	comp.SetFontWeight(pc.FontWeight())
+	comp.SetFontStyle(pc.FontStyle())
+	// visibility 与 cursor 都是继承属性：父级 hidden 的子树默认不绘制，
+	// 子级声明 visible 才恢复；cursor 通常写在容器上（整块可拖拽区域）。
+	comp.SetVisibility(pc.Visibility())
+	comp.SetCursor(pc.Cursor())
 	comp.SetTextAlign(pc.TextAlign())
 	comp.SetTextDecoration(pc.TextDecoration())
 	comp.SetWhiteSpace(pc.WhiteSpace())

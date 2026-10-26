@@ -77,7 +77,10 @@ h3 { display: block; font-size: 19px; font-weight: bold; margin: 19px 0; } /* 1.
   hr { display: block; margin: 8px 0; border: 1px solid #767676; }
   strong { font-weight: bold; } /* Chrome UA: bolder(700) */
 b { font-weight: bold; }
-a { display: inline; color: #0000EE; text-decoration: underline; } /* Chrome 默认链接色 #0000EE */
+/* 斜体语义标签：Chrome UA 把 i/cite/em/var/address/dfn 置为 italic。
+   引擎用绘制后端的合成斜体呈现（见 FontStyle），字形前进宽度不变。 */
+i, cite, em, var, dfn { font-style: italic; }
+a { display: inline; color: #0000EE; text-decoration: underline; cursor: pointer; } /* Chrome 默认链接色 #0000EE */
 /* 等宽与变小字号：Chrome UA 实测 code/kbd/samp 的计算字号为 13.33px、
    字体族为 monospace；small 为 smaller（同 13.33px）；pre 的计算字号为
    13px（其 monospace 通用族的默认字号）。引擎字号取整为 13px。 */
@@ -101,17 +104,17 @@ sup { vertical-align: super; }
    Chrome 的 border 实为 2px outset/inset，引擎目前只支持平面 solid，用 1px 近似。
    box-sizing:border-box 与 Chrome UA 样式表对表单控件的默认一致：
    width:100% 声明的控件不再叠加 padding/border 溢出容器。 */
-button { display: inline-block; box-sizing: border-box; font-family: Arial, system-ui, sans-serif; font-size: 13px; color: #000000; text-align: center; background-color: #EFEFEF; border: 1px solid #767676; border-radius: 2px; padding: 3px 6px; }
+button { display: inline-block; box-sizing: border-box; font-family: Arial, system-ui, sans-serif; font-size: 13px; font-style: normal; color: #000000; text-align: center; background-color: #EFEFEF; border: 1px solid #767676; border-radius: 2px; padding: 3px 6px; }
 /* input 无文字子节点，引擎不会为空元素预留行盒（浏览器靠字体撑出约 21px），
    故显式给 height 让外盒=21px。type 间的尺寸/外观差异见 applyInputTypeDefaults
    （选择器不支持属性选择器，无法用 input[type=...] 表达）。 */
-input { display: inline-block; box-sizing: border-box; font-family: Arial, system-ui, sans-serif; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; width: 177px; height: 21px; }
+input { display: inline-block; box-sizing: border-box; font-family: Arial, system-ui, sans-serif; font-size: 13px; font-style: normal; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; width: 177px; height: 21px; cursor: text; }
 /* select/textarea 同 input 口径：border-box + 13px Arial + 177px 宽。
    select 高 21px（外盒），展开的选项浮层由 layoutSelectPopups 单独定位，
    option 为 block 以免进入常规流参与行盒排布；textarea 两行高。 */
- select { display: inline-block; box-sizing: border-box; font-family: Arial, system-ui, sans-serif; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; height: 19px; }
-option { display: block; box-sizing: border-box; font-family: Arial, system-ui, sans-serif; font-size: 13px; color: #000000; padding: 3px 6px; }
- textarea { display: inline-block; box-sizing: border-box; font-family: Arial, system-ui, sans-serif; font-size: 13px; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 2px 4px; width: 161px; height: 36px; overflow: hidden; }
+ select { display: inline-block; box-sizing: border-box; font-family: Arial, system-ui, sans-serif; font-size: 13px; font-style: normal; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 1px 2px; height: 19px; }
+option { display: block; box-sizing: border-box; font-family: Arial, system-ui, sans-serif; font-size: 13px; font-style: normal; color: #000000; padding: 3px 6px; }
+ textarea { display: inline-block; box-sizing: border-box; font-family: Arial, system-ui, sans-serif; font-size: 13px; font-style: normal; color: #000000; background-color: #FFFFFF; border: 1px solid #767676; border-radius: 2px; padding: 2px 4px; width: 161px; height: 36px; overflow: hidden; cursor: text; }
 /* textarea 的 overflow 走 hidden 而非浏览器的 auto：折行内容的滚动由
    textarea 自身 scrollTop 机制驱动（光标跟随 + 滚轮，见 scroll.go），
    通用 overflow 滚动对原子控件不生效（scrollMax 对原子控件恒 0），

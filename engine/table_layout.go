@@ -56,16 +56,16 @@ const (
 // tableCell 是网格里的一格：真实格（td/th/display:table-cell）或匿名格载体。
 type tableCell struct {
 	el       *htmlElement
-	spanW    int // 声明列宽（colspan；fullSpan 列建格后扩为全部列）
-	spanH    int // 声明行高（rowspan；9999→3000）
-	infinite bool  // rowspan=0：延伸到网格末行
-	fullSpan bool  // 匿名「占整行」格：spanW 建格完成后扩为列数
-	row      int   // 落位后的起始行/列
+	spanW    int  // 声明列宽（colspan；fullSpan 列建格后扩为全部列）
+	spanH    int  // 声明行高（rowspan；9999→3000）
+	infinite bool // rowspan=0：延伸到网格末行
+	fullSpan bool // 匿名「占整行」格：spanW 建格完成后扩为列数
+	row      int  // 落位后的起始行/列
 	col      int
-	natW     int // 测量外宽（内容自然宽，边框盒）
-	natH     int // 槽宽重量后的外高（含拉伸前）
-	va       int8  // tblV* 三档
-	empty    bool  // 空单元格（empty-cells 用，仅真实格）
+	natW     int  // 测量外宽（内容自然宽，边框盒）
+	natH     int  // 槽宽重量后的外高（含拉伸前）
+	va       int8 // tblV* 三档
+	empty    bool // 空单元格（empty-cells 用，仅真实格）
 }
 
 // tableRow 是网格的一行：真实 tr 或隐式/匿名行（el=nil 不写盒）。
@@ -990,7 +990,7 @@ func layoutTableBox(g Graphics, tbl *htmlElement, outerW, outerH, ox, oy, pctW, 
 
 	// 第一遍：天然尺寸（内容收缩测量，以可用宽为上限）。
 	for _, c := range cells {
-		w, h := layoutBox(g, c.el, availW, 0, 0, 0, pctBase, -1)
+		w, h := layoutBox(g, c.el, availW, 0, 0, 0, pctBase, -1, nil)
 		c.natW, c.natH = w, h
 	}
 
@@ -1067,7 +1067,7 @@ func layoutTableBox(g Graphics, tbl *htmlElement, outerW, outerH, ox, oy, pctW, 
 		w := slotW(c)
 		c.el.computed.SetBoxSizing(BoxSizingBorderBox)
 		c.el.computed.SetWidth(NewSize(SIZE_PIXEL, w, 0))
-		_, h := layoutBox(g, c.el, w, 0, 0, 0, pctBase, -1)
+		_, h := layoutBox(g, c.el, w, 0, 0, 0, pctBase, -1, nil)
 		c.natH = h
 	}
 
@@ -1131,7 +1131,7 @@ func layoutTableBox(g Graphics, tbl *htmlElement, outerW, outerH, ox, oy, pctW, 
 		cmg := resolveEdgeRect(caption.computed.Margin(), pctW)
 		caption.computed.SetBoxSizing(BoxSizingBorderBox)
 		caption.computed.SetWidth(NewSize(SIZE_PIXEL, capOuterW, 0))
-		_, h := layoutBox(g, caption, capOuterW+cmg[eLeft]+cmg[eRight], 0, cx, cy, capOuterW, -1)
+		_, h := layoutBox(g, caption, capOuterW+cmg[eLeft]+cmg[eRight], 0, cx, cy, capOuterW, -1, nil)
 		capH = h
 	}
 
@@ -1177,7 +1177,7 @@ func layoutTableBox(g Graphics, tbl *htmlElement, outerW, outerH, ox, oy, pctW, 
 		el.computed.SetBoxSizing(BoxSizingBorderBox)
 		el.computed.SetWidth(NewSize(SIZE_PIXEL, w, 0))
 		el.computed.SetHeight(NewSize(SIZE_PIXEL, bandH, 0))
-		layoutBox(g, el, w, bandH, x, rowY, pctBase, bandH)
+		layoutBox(g, el, w, bandH, x, rowY, pctBase, bandH, nil)
 		// 格盒已拉伸到行带，内容自然落在顶部；middle/bottom 把内容整体下移。
 		pdC, bdC := resolvedEdges(el, el.computed)
 		avail := bandH - pdC[eTop] - pdC[eBottom] - bdC[eTop] - bdC[eBottom]

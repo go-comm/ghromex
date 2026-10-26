@@ -479,6 +479,126 @@ func parseOverflow(v string) Overflow {
 	}
 }
 
+// parseFontStyle 解析 font-style。italic 与 oblique 都按斜体处理（引擎用
+// 合成斜体，两者观感一致）；非法值返回 ok=false，保留继承来的值。
+func parseFontStyle(v string) (FontStyle, bool) {
+	switch v {
+	case "normal":
+		return FontStyleNormal, true
+	case "italic", "oblique":
+		return FontStyleItalic, true
+	}
+	return FontStyleNormal, false
+}
+
+// parseVisibility 解析 visibility。collapse 对非表格元素等同 hidden。
+func parseVisibility(v string) (Visibility, bool) {
+	switch v {
+	case "visible":
+		return VisibilityVisible, true
+	case "hidden":
+		return VisibilityHidden, true
+	case "collapse":
+		return VisibilityCollapse, true
+	}
+	return VisibilityVisible, false
+}
+
+// parseFloatSide 解析 float。left/right 之外的关键字（none/inline-start…）
+// 返回 ok=false，调用方保留原值（CSS 的初始值是 none）。
+func parseFloatSide(v string) (FloatSide, bool) {
+	switch v {
+	case "left":
+		return FloatLeft, true
+	case "right":
+		return FloatRight, true
+	case "none":
+		return FloatNone, true
+	}
+	return FloatNone, false
+}
+
+// parseClearSide 解析 clear。
+func parseClearSide(v string) (ClearSide, bool) {
+	switch v {
+	case "left":
+		return ClearLeft, true
+	case "right":
+		return ClearRight, true
+	case "both":
+		return ClearBoth, true
+	case "none":
+		return ClearNone, true
+	}
+	return ClearNone, false
+}
+
+// parseOpacity 解析 opacity：0~1 的数字或百分比（50% = 0.5），越界钳到
+// [0,1]。非法值返回 ok=false（保留原值）。
+func parseOpacity(v string) (float32, bool) {
+	s := strings.TrimSpace(v)
+	scale := float64(1)
+	if strings.HasSuffix(s, "%") {
+		s = strings.TrimSuffix(s, "%")
+		scale = 0.01
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, false
+	}
+	f *= scale
+	if f < 0 {
+		f = 0
+	}
+	if f > 1 {
+		f = 1
+	}
+	return float32(f), true
+}
+
+// parseCursor 解析 cursor 关键字。引擎只支持系统指针形状；url(...) 自定义
+// 光标与其余关键字回退 auto（返回 ok=true，避免整条声明被当成非法丢掉）。
+func parseCursor(v string) (Cursor, bool) {
+	// cursor: url(x.png) 4 4, pointer —— 取逗号后的最后一个关键字（回退值）。
+	if i := strings.LastIndexByte(v, ','); i >= 0 {
+		v = strings.TrimSpace(v[i+1:])
+	}
+	if strings.HasPrefix(v, "url(") {
+		return CursorAuto, true
+	}
+	switch v {
+	case "auto", "default":
+		return CursorAuto, true
+	case "text", "vertical-text":
+		return CursorText, true
+	case "pointer", "hand":
+		return CursorPointer, true
+	case "move", "all-scroll":
+		return CursorMove, true
+	case "not-allowed", "no-drop":
+		return CursorNotAllowed, true
+	case "wait", "progress":
+		return CursorWait, true
+	case "help":
+		return CursorHelp, true
+	case "crosshair", "cell", "precision":
+		return CursorCrosshair, true
+	case "grab":
+		return CursorGrab, true
+	case "grabbing":
+		return CursorGrabbing, true
+	case "e-resize", "w-resize", "ew-resize", "col-resize":
+		return CursorEWResize, true
+	case "n-resize", "s-resize", "ns-resize", "row-resize":
+		return CursorNSResize, true
+	case "ne-resize", "sw-resize", "nesw-resize":
+		return CursorNESWResize, true
+	case "nw-resize", "se-resize", "nwse-resize":
+		return CursorNWSEResize, true
+	}
+	return CursorAuto, false
+}
+
 // parseListStyleType 解析 list-style-type 关键字。只认引擎能画的方案：
 // 三种符号（disc/circle/square）、数字（decimal/decimal-leading-zero）、
 // 字母（lower/upper-alpha，lower/upper-latin 为别名）与罗马数字
@@ -964,6 +1084,32 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 			comp.SetFontWeight(FontWeightBold)
 		} else {
 			comp.SetFontWeight(FontWeightNormal)
+		}
+	case "font-style":
+		if s, ok := parseFontStyle(v); ok {
+			comp.SetFontStyle(s)
+		}
+	case "visibility":
+		if vis, ok := parseVisibility(v); ok {
+			comp.SetVisibility(vis)
+		}
+	case "float":
+		// CSS 还允许 inline-start/inline-end 等逻辑值；引擎按水平书写处理，
+		// 未识别的值保留原值（初始值 none）。
+		if f, ok := parseFloatSide(v); ok {
+			comp.SetFloat(f)
+		}
+	case "clear":
+		if c, ok := parseClearSide(v); ok {
+			comp.SetClear(c)
+		}
+	case "opacity":
+		if o, ok := parseOpacity(v); ok {
+			comp.SetOpacity(o)
+		}
+	case "cursor":
+		if c, ok := parseCursor(v); ok {
+			comp.SetCursor(c)
 		}
 	case "font-family":
 		comp.SetFontFamily(strings.Trim(strings.TrimSpace(value), "\"'"))

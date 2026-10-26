@@ -31,7 +31,50 @@ type (
 	Graphics = core.Graphics
 	// Clipper 是 Graphics 的可选扩展：矩形裁剪栈。
 	Clipper = core.Clipper
+	// Cursor 是系统鼠标指针形状（CSS cursor 的可用子集）。
+	Cursor = core.CursorShape
+	// CursorShape 是 Cursor 的别名（语义化写法）。
+	CursorShape = core.CursorShape
+	// CursorSetter 是 Graphics 的可选扩展：切换系统鼠标指针。
+	CursorSetter = core.CursorSetter
+	// StyledPaint 是 Paint 的可选扩展：带斜体标记。
+	StyledPaint = core.StyledPaint
 )
+
+// 指针形状（与 core 同名常量，类型一致）。
+const (
+	CursorAuto       = core.CursorShapeDefault
+	CursorDefault    = core.CursorShapeDefault
+	CursorText       = core.CursorShapeText
+	CursorPointer    = core.CursorShapePointer
+	CursorMove       = core.CursorShapeMove
+	CursorNotAllowed = core.CursorShapeNotAllowed
+	CursorWait       = core.CursorShapeWait
+	CursorHelp       = core.CursorShapeHelp
+	CursorCrosshair  = core.CursorShapeCrosshair
+	CursorGrab       = core.CursorShapeGrab
+	CursorGrabbing   = core.CursorShapeGrabbing
+	CursorEWResize   = core.CursorShapeEWResize
+	CursorNSResize   = core.CursorShapeNSResize
+	CursorNESWResize = core.CursorShapeNESWResize
+	CursorNWSEResize = core.CursorShapeNWSEResize
+)
+
+// setPaintItalic 在 Paint 支持斜体标记时写入该标记；自定义 Paint 实现
+// 不实现 StyledPaint 时静默忽略（退化为正体）。
+func setPaintItalic(p Paint, italic bool) {
+	if sp, ok := p.(StyledPaint); ok {
+		sp.SetItalic(italic)
+	}
+}
+
+// paintItalic 读取 Paint 的斜体标记；不支持时返回 false。
+func paintItalic(p Paint) bool {
+	if sp, ok := p.(StyledPaint); ok {
+		return sp.Italic()
+	}
+	return false
+}
 
 // 尺寸单位（与 core 同名常量，类型一致）。
 const (

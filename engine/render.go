@@ -169,13 +169,18 @@ func RenderNode(g Graphics, node HTMLElement) {
 // 里的脱流内容会画到盒外。
 func paintPositioned(g Graphics, e HTMLElement, focus HTMLElement, vpW, vpH int) {
 	n := pushAncestorClips(g, e)
-	renderNode(g, e, nil, focus, vpW, vpH)
+	// 定位子树不在主 pass 的递归里，祖先 opacity 的包装不会自动套上，
+	// 这里按父链乘积补包（不含 e 自身——renderNode 会按它自己的
+	// computed 再套一层）。递归时不传包装后的 g：下一层重新按整条父链
+	// 计算，避免重复相乘。
+	pg := withOpacity(g, ancestorOpacity(e))
+	renderNode(pg, e, nil, focus, vpW, vpH)
 	// 定位元素画完后，给它最近的「圆角 + 裁剪」祖先补盖四角：定位内容
 	// 是在定位 pass 里画的（主 pass 早已补盖过一次），不补盖就会盖回
 	// 圆角（大黑卡的右上角被溢出到角外的圆形装饰盖成方角）。
 	// 只在定位元素确实压到角区时才补（否则每个定位元素都要多画一遍）。
 	if box := nearestRoundedClipAncestor(e); box != nil && overlapsCornerAreas(e, box) {
-		drawClipCornerMask(g, box, false)
+		drawClipCornerMask(pg, box, false)
 	}
 	if createsStackingContext(e) {
 		for _, pb := range collectPositioned(e) {
@@ -183,6 +188,17 @@ func paintPositioned(g Graphics, e HTMLElement, focus HTMLElement, vpW, vpH int)
 		}
 	}
 	popClips(g, n)
+}
+
+// ancestorOpacity 返回 e 的祖先链上 opacity 的乘积（不含 e 自身）。
+func ancestorOpacity(e HTMLElement) float64 {
+	k := 1.0
+	for p := e.ParentElement(); p != nil; p = p.ParentElement() {
+		if b := inner(p); b != nil && b.computed != nil {
+			k *= float64(b.computed.Opacity())
+		}
+	}
+	return k
 }
 
 // nearestRoundedClipAncestor 返回最近的「圆角 + 裁剪」祖先（overflow 非
@@ -318,6 +334,20 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		return
 	}
 
+	// opacity：引擎没有图层合成，按「本子树所有绘制颜色的 alpha 乘算」
+	// 近似（见 opacity.go 的说明）。必须在任何绘制之前包装：元素自身的
+	// 背景/边框也属于这一组。
+	if comp != nil {
+		if op := comp.Opacity(); op < 1 {
+			g = withOpacity(g, float64(op))
+		}
+	}
+
+	// visibility:hidden/collapse 的盒子照常占位，只是自身不绘制、不参与
+	// 命中；子级显式 visible 仍可显示（CSS 语义），因此这里只挡自身绘制，
+	// 子节点照常递归。
+	visible := comp == nil || comp.Visibility() == VisibilityVisible
+
 	// 组装本节点绘制属性：继承 + 自身样式
 	p := NewPaint()
 	if parentPaint != nil {
@@ -325,6 +355,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		p.SetColor(parentPaint.Color())
 		p.SetFontFamily(parentPaint.FontFamily())
 		p.SetBold(parentPaint.Bold())
+		setPaintItalic(p, paintItalic(parentPaint))
 		p.SetBackground(parentPaint.Background())
 	}
 	if comp != nil {
@@ -336,6 +367,9 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		}
 		p.SetFontFamily(comp.FontFamily())
 		p.SetBold(comp.FontWeight() == FontWeightBold)
+		// font-style 是继承属性，computed 里已是最终值：直接按它写标记，
+		// 不能只「斜体时置位」——父级斜体、子级 normal 时必须能复位。
+		setPaintItalic(p, comp.FontStyle() == FontStyleItalic)
 		// 背景供文字合成用：自身有实底则覆盖继承值（文字落在本元素背景上）。
 		// 半透明背景不做精确合成（LCD 仍用它近似），v1 取实底即可。
 		if c := comp.BackgroundColor(); c != nil {
@@ -350,6 +384,9 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 
 	// 文本节点：绘制布局阶段生成的行片段 + 文本装饰（下划线/删除线）
 	if tn, ok := e.(*textNode); ok {
+		if comp != nil && comp.Visibility() != VisibilityVisible {
+			return // 继承来的 hidden/collapse：文本不落墨
+		}
 		dec := TextDecorationNone
 		if comp != nil {
 			dec = comp.TextDecoration()
@@ -406,7 +443,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		// 因此单独按阴影包围盒做视口裁剪——盒子本体在屏外时阴影仍可能
 		// 露在视口里。
 		shadows := comp.BoxShadow()
-		if len(shadows) > 0 {
+		if visible && len(shadows) > 0 {
 			if sx, sy, sw, sh, ok := shadowBounds(shadows, bx, by, bw, bh); ok &&
 				!offscreenBox(sx, sy, sw, sh, vpW, vpH) {
 				paintBoxShadows(g, bx, by, bw, bh, r, shadows, comp.Color())
@@ -417,7 +454,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 
 		// empty-cells: hide 的单元格：背景与边框不画（CSS 2.1 §17.5.1.1），
 		// 几何与命中照旧（Chrome 同口径）。
-		if inView && !base.noCellDeco {
+		if visible && inView && !base.noCellDeco {
 			if bg := comp.BackgroundColor(); bg != nil {
 				fillRoundedRect(g, bx, by, bw, bh, r, bg)
 			}
@@ -428,7 +465,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 
 		// 内阴影（inset）画在背景/边框之后、内容之前：CSS 把内阴影铺在
 		// padding 盒内（边框内侧），压在背景上、让内容落在它上面。
-		if inView && !base.noCellDeco && len(shadows) > 0 {
+		if visible && inView && !base.noCellDeco && len(shadows) > 0 {
 			ipx := bx + bd[eLeft]
 			ipy := by + bd[eTop]
 			ipw := bw - bd[eLeft] - bd[eRight]
@@ -445,14 +482,14 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		// overflow:hidden，裁剪区是 padding 盒，画在边框盒上的聚焦框会被整圈
 		// 裁掉（此前聚焦框在裁剪栈内绘制 → textarea 永远看不到聚焦指示）。
 		// 单选/复选此前就没有聚焦框（Chrome 同款圆环由选中标记承担），保持。
-		if inView && focused && isFormControl(base) && bw > 0 && bh > 0 && checkKind(base) == "" {
+		if visible && inView && focused && isFormControl(base) && bw > 0 && bh > 0 && checkKind(base) == "" {
 			strokeRoundedRect(g, bx, by, bw, bh, r, edges{1, 1, 1, 1}, focusBlue)
 		}
 
 		// 列表标记：引擎无 list-item 概念，标记文本由布局期算出（ul → "•"，
 		// ol → "1." "2."…），画在内容左缘左侧、右对齐到 −0.75em 处
 		//（Chrome 实测：标记盒右缘 = 内容左缘 − 0.5em）。
-		if inView {
+		if visible && inView {
 			if mx, my, mw, mh, ok := listMarkerBox(g, base, comp); ok {
 				g.DrawText(mx, my, mw, mh, p, base.listMarker)
 			}
@@ -470,7 +507,7 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		// 聚焦蓝框，宽度溢出舍头保尾；按钮型居中不截断；radio/checkbox 选中
 		// 时补画强调色与勾选标记）；textarea 画折行文本 + 光标；
 		// select 画选中文本 + 右侧下拉箭头。
-		if inView && isFormControl(base) && bw > 0 && bh > 0 {
+		if visible && inView && isFormControl(base) && bw > 0 && bh > 0 {
 			typ := strings.ToLower(base.GetAttribute("type"))
 			switch {
 			case strings.EqualFold(base.tagName, "select"):
@@ -561,7 +598,9 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 	if clipped {
 		// 圆角裁剪盒：把四角"圆角形状之外"的部分用元素背后的底色盖掉，
 		// 等效于按 border-radius 裁剪（详见 clipCornerMask 的说明）。
-		if r > 0 {
+		// hidden 元素自身不落墨，四角补盖也一并跳过（否则会在父背景上
+		// 留下一块与背景同色的"补丁"，把下层内容盖掉）。
+		if visible && r > 0 {
 			drawClipCornerMask(g, base, focused)
 		}
 		popClip(g)

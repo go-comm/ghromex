@@ -252,7 +252,7 @@ func layoutSelectOptions(g Graphics, sel *htmlElement, vw, vh int) {
 	y := by + bh
 	for _, o := range opts {
 		ob := inner(o)
-		layoutBox(g, ob, bw, maxInt(vh, 0), bx, y, bw, vh)
+		layoutBox(g, ob, bw, maxInt(vh, 0), bx, y, bw, vh, nil)
 		y += ob.layoutH
 	}
 	total := y - (by + bh)

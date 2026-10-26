@@ -41,8 +41,12 @@ func ElementAt(root HTMLElement, x, y int) HTMLElement {
 			// pointer-events:none 的元素自己不作为命中目标（占位块、分隔线
 			// 这类只为排版/装饰存在的盒子不该吃掉点击），但仍然要下钻：
 			// 该属性沿父链继承，子级自己声明 auto 时又能被点到。
-			hitSelf := cb == nil || cb.computed == nil ||
-				cb.computed.PointerEvents() != PointerEventsNone
+			// visibility:hidden/collapse 同理：自身不绘制也就不可命中，
+			// 子级显式 visible 仍可命中（walk 照常下钻）。
+			hitSelf := (cb == nil || cb.computed == nil ||
+				cb.computed.PointerEvents() != PointerEventsNone) &&
+				(cb == nil || cb.computed == nil ||
+					cb.computed.Visibility() == VisibilityVisible)
 			if hitSelf && wd > 0 && hh > 0 && x >= l && x < l+wd && y >= t && y < t+hh {
 				hit = child
 			}
@@ -77,6 +81,22 @@ func clipsContain(clips []clipRect, x, y int) bool {
 		}
 	}
 	return true
+}
+
+// CursorAt 返回 (x, y) 处应使用的系统指针形状：取命中元素的计算值
+// cursor（该属性沿父链继承，级联后已是最终值）。未命中返回默认箭头。
+//
+// 与命中测试同口径（ElementAt）：不可见/pointer-events:none 的元素不会被
+// 选中，指针也就不会因为它们改变形状。
+func CursorAt(root HTMLElement, x, y int) Cursor {
+	hit := ElementAt(root, x, y)
+	if hit == nil {
+		return CursorAuto
+	}
+	if b := inner(hit); b != nil && b.computed != nil {
+		return b.computed.Cursor()
+	}
+	return CursorAuto
 }
 
 // OnDocumentClick 在文档上派发一次点击事件：从最深命中元素向上冒泡，

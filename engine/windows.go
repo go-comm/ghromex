@@ -65,7 +65,7 @@ func LayoutDocument(doc HTMLDocument) {
 		g = NewFakeGraphics()
 	}
 	resolveStylesTree(doc, nil, doc.Stylesheet())
-	layoutBox(g, base, v.ViewportWidth(), v.ViewportHeight(), 0, 0, v.ViewportWidth(), v.ViewportHeight())
+	layoutBox(g, base, v.ViewportWidth(), v.ViewportHeight(), 0, 0, v.ViewportWidth(), v.ViewportHeight(), nil)
 	layoutPositioned(g, base, v.ViewportWidth(), v.ViewportHeight())
 	applyScrollOffsets(g, base, v.ViewportWidth(), v.ViewportHeight())
 	layoutSelectPopups(g, base, v.ViewportWidth(), v.ViewportHeight())

@@ -232,6 +232,9 @@ type Graphics struct {
 	// spriteUploads 统计纹理上传次数（测试用）：精灵像素不变，纹理只该
 	// 上传一次——每次绘制都上传会把帧预算吃光（实测 300 次/帧 ≈ 2ms）。
 	spriteUploads int
+	// cursors 缓存已创建的系统光标（SDL_SystemCursor 枚举值 → SDL_Cursor*）。
+	// 按实例缓存：SDL_Quit 后句柄失效，跨实例复用会拿到野指针。
+	cursors map[uintptr]uintptr
 
 	// env* 是文本渲染相关的环境变量取值，每帧刷新一次（见 refreshEnv）。
 	envLCD      bool
@@ -254,6 +257,9 @@ type faceKey struct {
 	path string
 	size int
 	bold bool
+	// italic 只在 !reuseFaces（旧版 SDL_ttf 无 TTF_SetFontSize）时进 key：
+	// 复用路径下一个 face 用 TTF_SetFontStyle 动态切粗体/斜体，样式不进 key。
+	italic bool
 	// hint = hinting 档位（fontHinting()）：hinting 是 face 级状态，档位进了
 	// key 才能在运行中切 GHROMEX_HINT 时重建 face（否则改了环境变量无效果，
 	// 与 GHROMEX_CONTRAST 可运行中切换的语义不一致）。
@@ -265,6 +271,12 @@ type fontFace struct {
 	path   string // 实际打开的字体文件（粗体可能是真粗体变体）
 	size   int
 	bold   bool
+	// italic 记 handle 当前的合成斜体位（TTF_STYLE_ITALIC），切换时才调
+	// TTF_SetFontStyle（与 bold 同一套「记实际样式位」的逻辑）。
+	italic bool
+	// realBold 表示 handle 打开的是真粗体字文件：此时不应再叠加
+	// TTF_STYLE_BOLD（会糊成双倍粗），但斜体仍要能合成。
+	realBold bool
 }
 
 // lcdText 报告 LCD 子像素渲染是否启用（TTF_RenderUTF8_LCD + LIGHT_SUBPIXEL
@@ -334,6 +346,7 @@ type texKey struct {
 	text     string
 	size     int
 	bold     bool
+	italic   bool
 	lcd      bool
 	// hint = hinting 档位（fontHinting()）：同 faceKey 的理由——运行中切
 	// GHROMEX_HINT 后必须重建纹理，否则仍命中旧 hinting 栅格化的缓存。
@@ -372,6 +385,7 @@ func NewGraphics(renderer uintptr, fontPath string) *Graphics {
 		sprites:      make(map[*core.Sprite]*spriteTex),
 		measures:     make(map[measureKey]measureVal),
 		familyPaths:  make(map[string]string),
+		cursors:      make(map[uintptr]uintptr),
 		reuseFaces:   hasTTFSetFontSize,
 	}
 	g.refreshEnv()
@@ -462,7 +476,7 @@ func (g *Graphics) facePath(path string, size int, bold bool) string {
 // face 取得（并按需创建/切换）字体句柄。reuseFaces 时一个 (文件, hinting
 // 档位) 一个 face，用 TTF_SetFontSize / TTF_SetFontStyle 动态切换，避免同一
 // TTC 按字号重复加载；hinting 档位进 key 是为支持运行中切 GHROMEX_HINT。
-func (g *Graphics) face(path string, size int, bold bool) *fontFace {
+func (g *Graphics) face(path string, size int, bold, italic bool) *fontFace {
 	// 粗体优先用真粗体字文件（见 boldVariants）：合成加粗比真粗体重得多，
 	// 中文尤甚。命中时该 face 本身就是粗体，不再叠加 TTF_STYLE_BOLD。
 	realBold := false
@@ -476,7 +490,7 @@ func (g *Graphics) face(path string, size int, bold bool) *fontFace {
 	}
 	key := faceKey{path: path, hint: uint8(g.envHint)}
 	if !g.reuseFaces {
-		key.size, key.bold = size, bold
+		key.size, key.bold, key.italic = size, bold, italic
 	}
 	f, ok := g.faces[key]
 	if !ok {
@@ -494,7 +508,7 @@ func (g *Graphics) face(path string, size int, bold bool) *fontFace {
 		// 非 bold 请求翻转标记、再来一次 bold 请求才纠正；那次翻转通常发生在
 		// 首次点击触发的重排，表现为"点一下标题位移/变粗"的首帧不一致。
 		// 真粗体字文件本身就是粗体：直接记 true，后续不再切样式。
-		f = &fontFace{handle: h, path: path, size: size, bold: realBold}
+		f = &fontFace{handle: h, path: path, size: size, bold: realBold, realBold: realBold}
 		if hasTTFHinting {
 			// 档位见 fontHinting：默认 NORMAL（对齐 Chrome 灰度轮廓，矩阵实测
 			// 见 .temp/gray-vs-chrome），GHROMEX_HINT 可切 light/mono/none 扫描
@@ -510,13 +524,17 @@ func (g *Graphics) face(path string, size int, bold bool) *fontFace {
 		ttfSetFontSize(f.handle, uintptr(size))
 		f.size = size
 	}
-	if f.bold != bold {
+	if f.bold != bold || f.italic != italic {
 		style := uintptr(0)
-		if bold {
-			style = ttfStyleBold
+		if bold && !f.realBold {
+			style |= ttfStyleBold
+		}
+		if italic {
+			style |= ttfStyleItalic
 		}
 		ttfSetFontStyle(f.handle, style)
 		f.bold = bold
+		f.italic = italic
 	}
 	return f
 }
@@ -662,7 +680,7 @@ func (g *Graphics) MeasureText(text string, fontSize int, bold bool, family stri
 	} else {
 		for _, seg := range splitScripts(text) {
 			path := g.segFontPath(seg, family)
-			f := g.face(path, fontSize, bold)
+			f := g.face(path, fontSize, bold, false)
 			if f == nil {
 				// 字体句柄打开失败是暂时性的（文件被占用等）：本次按估算
 				// 返回但不入缓存，后续帧还有机会拿到真实度量。
@@ -747,7 +765,7 @@ func (g *Graphics) lineMetricsOf(path string, size int, bold bool) (int, int, bo
 	if !hasTTFFontAscent || !hasTTFFontDescent {
 		return 0, 0, false
 	}
-	f := g.face(path, size, bold)
+	f := g.face(path, size, bold, false)
 	if f == nil {
 		return 0, 0, false
 	}
@@ -783,6 +801,7 @@ func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string) {
 	}
 	family := paint.FontFamily()
 	bold := paint.Bold()
+	italic := paintItalic(paint)
 
 	segs := splitScripts(text)
 	// 第一段（standard 段）的基线作为对齐参考；取各段中最大的 ascent
@@ -812,7 +831,7 @@ func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string) {
 	hint := uint8(g.envHint)
 	for _, seg := range segs {
 		path := g.segFontPath(seg, family)
-		key := texKey{fontPath: path, text: seg.text, size: size, bold: bold, lcd: lcd,
+		key := texKey{fontPath: path, text: seg.text, size: size, bold: bold, italic: italic, lcd: lcd,
 			hint:     hint,
 			contrast: uint16(kc * 100),
 			r:        cr, g: cg, b: cb, a: ca}
@@ -827,7 +846,7 @@ func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string) {
 			info.lastUsed = g.nextTexClock()
 			g.textures[key] = info
 		} else {
-			f := g.face(path, size, bold)
+			f := g.face(path, size, bold, italic)
 			if f == nil {
 				continue
 			}
@@ -904,6 +923,15 @@ func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string) {
 
 // ascentOf 读取指定字体当前样式的基线（TTF_FontAscent）。
 // 与 lineMetricsOf 同源，保证绘制基线与布局行盒使用同一个 face 的度量。
+// paintItalic 读取 Paint 的斜体标记；自定义 Paint 不实现 core.StyledPaint
+// 时按正体处理（只是少了斜体观感）。
+func paintItalic(p core.Paint) bool {
+	if sp, ok := p.(core.StyledPaint); ok {
+		return sp.Italic()
+	}
+	return false
+}
+
 func (g *Graphics) ascentOf(path string, size int, bold bool) int32 {
 	asc, _, ok := g.lineMetricsOf(path, size, bold)
 	if !ok {

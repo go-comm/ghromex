@@ -122,12 +122,26 @@ type Paint interface {
 	SetBackground(color Color)
 }
 
+// StyledPaint 是 Paint 的可选扩展：除字号/粗细/字族外还带**斜体**标记
+// （CSS font-style: italic）。SDL2 后端用 SDL_ttf 的合成斜体（TTF_STYLE_ITALIC）
+// 绘制。
+//
+// 为什么用可选接口而不是直接给 Paint 加方法：Paint 是公开契约，直接加方法
+// 会让仓库外自定义的 Paint 实现全部编译失败。引擎侧按类型断言启用，拿不到
+// 标记时退化为正体（只是少了斜体观感）。
+type StyledPaint interface {
+	Paint
+	Italic() bool
+	SetItalic(italic bool)
+}
+
 // paint 是 Paint 的实现。
 type paint struct {
 	size   Size
 	color  Color
 	family string
 	bold   bool
+	italic bool
 	bg     Color
 }
 
@@ -152,6 +166,8 @@ func (p *paint) FontFamily() string     { return p.family }
 func (p *paint) SetFontFamily(f string) { p.family = f }
 func (p *paint) Bold() bool             { return p.bold }
 func (p *paint) SetBold(bold bool)      { p.bold = bold }
+func (p *paint) Italic() bool           { return p.italic }
+func (p *paint) SetItalic(italic bool)  { p.italic = italic }
 func (p *paint) Background() Color      { return p.bg }
 func (p *paint) SetBackground(c Color)  { p.bg = c }
 

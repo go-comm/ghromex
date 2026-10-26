@@ -15,7 +15,7 @@ func MeasureNode(g Graphics, node HTMLElement, mw, mh int) {
 	if base.computed == nil {
 		resolveStylesTree(node, nil, nil)
 	}
-	layoutBox(g, base, mw, mh, 0, 0, mw, mh)
+	layoutBox(g, base, mw, mh, 0, 0, mw, mh, nil)
 	layoutPositioned(g, base, mw, mh)
 	applyScrollOffsets(g, node, mw, mh)
 	layoutSelectPopups(g, node, mw, mh)
@@ -32,7 +32,7 @@ func MeasureDocumentWithStylesheet(g Graphics, doc HTMLDocument, mw, mh int) {
 		sheet = d.sheet
 	}
 	resolveStylesTree(doc, nil, sheet)
-	layoutBox(g, base, mw, mh, 0, 0, mw, mh)
+	layoutBox(g, base, mw, mh, 0, 0, mw, mh, nil)
 	layoutPositioned(g, base, mw, mh)
 	applyScrollOffsets(g, doc, mw, mh)
 	layoutSelectPopups(g, doc, mw, mh)
@@ -216,7 +216,7 @@ func defaultFormControlHeight(g Graphics, comp CSSStyleDeclaration, pctW int) in
 // pctH 为**高度**百分比的解析基数（包含块内容高；<0 表示包含块高度不确定，
 // 此时百分比高度按 auto 处理，CSS 2.1 §10.5）。
 // 返回外边距盒宽高，并写入内容盒的 x/y/width/height 与 layoutH。
-func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH int) (retW, retH int) {
+func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH int, excl []floatRect) (retW, retH int) {
 	comp := el.computed
 	if comp == nil {
 		comp = newStyle()
@@ -269,8 +269,9 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH i
 			if contentW < 0 {
 				contentW = 0
 			}
-			// 非块级与脱流盒（absolute/fixed）：auto 宽度按内容收缩
-			if disp != DisplayBlock || comp.Position().isOutFlow() {
+			// 非块级与脱流盒（absolute/fixed）：auto 宽度按内容收缩。
+			// 浮动盒同样收缩（float 的 auto 宽 = shrink-to-fit）。
+			if disp != DisplayBlock || comp.Position().isOutFlow() || comp.Float() != FloatNone {
 				shrinkWrap = true
 			}
 		}
@@ -335,7 +336,7 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH i
 	} else {
 		// 子元素的百分比高度基数 = 本元素内容高（declaredH；auto 时为 -1
 		// 表示包含块高度不确定，子元素的百分比高按 auto 处理）。
-		flowW, flowH = layoutChildren(g, el, contentW, remainH, declaredH, cx, cy, align)
+		flowW, flowH = layoutChildren(g, el, contentW, remainH, declaredH, cx, cy, align, excl)
 	}
 	// 未裁剪内容尺寸：overflow 滚动的夹紧依据（每轮布局重算，滚动偏移
 	// 由 applyScrollOffsets 按它 clamp）。
@@ -373,7 +374,9 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH i
 	outerBoxH := contentH + pd[eTop] + pd[eBottom] + bd[eTop] + bd[eBottom] + mg[eTop] + mg[eBottom]
 	el.layoutH = outerBoxH
 
-	if disp == DisplayBlock {
+	// 块级盒返回父给的可用宽（占满一行）；浮动/行内盒返回真实外盒宽，
+	// 供父级放置与避让计算。
+	if disp == DisplayBlock && comp.Float() == FloatNone {
 		return outerW, outerBoxH
 	}
 	return outerBoxW, outerBoxH
@@ -491,7 +494,7 @@ func layoutAbsBox(g Graphics, e HTMLElement, el *htmlElement, vw, vh int) {
 	// layoutBox 对 block 返回的占位空间宽不可用于锚定回推，忽略之。
 	// 高度百分比以包含块高度 cbH 为基数（CSS 2.1 §10.5）——不是"剩余可用
 	// 高度"：同一元素只改 top 就不该得到不同的高度。
-	_, oh := layoutBox(g, el, maxInt(availX, 0), maxInt(availY, 0), ox, oy, cbW, cbH)
+	_, oh := layoutBox(g, el, maxInt(availX, 0), maxInt(availY, 0), ox, oy, cbW, cbH, nil)
 	if !lok && rok {
 		// right 锚定：目标右缘 cbX+cbW-r 减去盒子当前位置（ox+真实宽）。
 		// 注意必须含 ox：包含块不在原点时漏它会整体偏移 ox（CB 在 (40,40)
@@ -675,9 +678,42 @@ func inlineBoxBaseline(g Graphics, che *htmlElement, outerH int) (asc, desc int)
 	}
 }
 
+// floatRect 是一个浮动盒在布局中的占位矩形（**外边距盒**坐标，绝对像素）。
+// 行盒按它的左右边缘收缩、clear 按它的下缘下移。
+//
+// 浮动的可见范围按「每个父元素自己的块格式化上下文」实现：子元素内部产生
+// 的浮动只影响该子元素自己的行盒，不向父级兄弟传播（真实 CSS 里若子块
+// 没有建立新 BFC，浮动会外溢）。这是已知简化，见 README 已知限制。
+type floatRect struct {
+	x, y, w, h int
+	side       FloatSide
+}
+
+// clearOffset 返回让块盒避开指定方向的浮动所需的新游标 Y：取所有相关
+// 浮动（仍延伸到游标之下者）的下缘最大值。无相关浮动时原样返回 y。
+func clearOffset(floats []floatRect, y int, clear ClearSide) int {
+	ny := y
+	for _, f := range floats {
+		if f.y+f.h <= y {
+			continue // 已整体在游标上方，不会挡住本块
+		}
+		if clear == ClearLeft && f.side != FloatLeft {
+			continue
+		}
+		if clear == ClearRight && f.side != FloatRight {
+			continue
+		}
+		if f.y+f.h > ny {
+			ny = f.y + f.h
+		}
+	}
+	return ny
+}
+
 // layoutChildren 排布子节点。contentH 为父内容区的**可用**高度（auto 高度
 // 撑开时逐行消耗）；pctH 为子元素高度百分比的基数（父元素内容高，<0 表示
-// 包含块高度不确定 → 子的百分比高按 auto 处理）。
+// 包含块高度不确定 → 子的百分比高按 auto 处理）；excl 是祖先块格式化上下文
+// 里已存在的浮动盒（本容器的行盒要避让它们，CSS 2.1 §9.5）。
 // isButtonElement 判断是否是 <button> 元素。button 的内容按 HTML 规范
 // 垂直居中（Chrome/Edge 同款），定高按钮尤其明显——行盒贴在内容盒顶部
 // 时文字会偏上。
@@ -685,11 +721,14 @@ func isButtonElement(el *htmlElement) bool {
 	return el != nil && strings.EqualFold(el.tagName, "button")
 }
 
-func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, cy int, align TextAlign) (flowW, flowH int) {
+func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, cy int, align TextAlign, excl []floatRect) (flowW, flowH int) {
 	cursorX := cx
 	cursorY := cy
 	var curLine []lineItem
 	maxRight := cx
+	// floats 是本容器自己的块格式化上下文里的浮动盒（含从祖先继承来的）。
+	// 必须复制一份：append 可能复用底层数组，直接写会污染父级的列表。
+	floats := append([]floatRect(nil), excl...)
 	// prevBlockMB：上一个相邻块级子的 margin-bottom；-1 = 尚无
 	//（或中间隔了行内内容/为首个子），此时不折叠。
 	prevBlockMB := -1
@@ -746,6 +785,78 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	// descent 为负（文字溢出行盒，Chrome 同样允许），不能被 0 顶掉。
 	lineAsc, lineDesc := minInt(0, strutAsc), minInt(0, strutDesc)
 
+	// lineBounds 返回行盒在 y 处的可用左右边界（绝对坐标）：避让与本行
+	// 纵向重叠的浮动盒（CSS 2.1 §9.5「行盒按浮动边缘收缩」）。行高未知时
+	// 用 strut 估（行盒至少有一个 strut 高）。
+	lineBounds := func(y int) (left, right int) {
+		left, right = cx, cx+contentW
+		lh := strutAsc + strutDesc
+		if h := lineAsc + lineDesc; h > lh {
+			lh = h
+		}
+		if lh <= 0 {
+			lh = 1
+		}
+		for _, f := range floats {
+			if y >= f.y+f.h || y+lh <= f.y {
+				continue
+			}
+			if f.side == FloatLeft {
+				if f.x+f.w > left {
+					left = f.x + f.w
+				}
+			} else if f.x < right {
+				right = f.x
+			}
+		}
+		if right < left {
+			right = left
+		}
+		return left, right
+	}
+	// 起始游标也要避让浮动（前面兄弟的浮动可能覆盖内容区顶部）。
+	if l, _ := lineBounds(cursorY); l > cursorX {
+		cursorX = l
+	}
+
+	// placeFloat 为浮动盒找落点：从当前游标向下找第一个能容纳其外盒宽度的
+	// 位置（不与已有浮动重叠）。同一高度放不下就下移到挡路浮动的最低底边。
+	placeFloat := func(ow, oh int, side FloatSide) (int, int) {
+		fy := cursorY
+		for {
+			left, right := cx, cx+contentW
+			blocked := false
+			lowest := fy
+			for _, f := range floats {
+				if fy >= f.y+f.h || fy+oh <= f.y {
+					continue
+				}
+				blocked = true
+				if f.side == FloatLeft {
+					if f.x+f.w > left {
+						left = f.x + f.w
+					}
+				} else if f.x < right {
+					right = f.x
+				}
+				if f.y+f.h > lowest {
+					lowest = f.y + f.h
+				}
+			}
+			if !blocked || right-left >= ow {
+				fx := left
+				if side == FloatRight {
+					fx = right - ow
+				}
+				if fx < left {
+					fx = left
+				}
+				return fx, fy
+			}
+			fy = lowest
+		}
+	}
+
 	// 行内格式上下文里的空格：CSS 把连续空白折叠为单个空格，且只保留在
 	// 行内内容之间。tokenizeText 会丢弃首尾空白，纯空白文本节点因此整体
 	// 消失（`<span>A</span> <span>B</span>` 的空格被吞）。这里用
@@ -774,6 +885,12 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		if spaceW <= 0 || pendingTN == nil {
 			return
 		}
+		// 间隙空格也要参与换行判断：游标已排到右边界时把它丢弃（行首空格
+		// 按 CSS 折叠），下一项会触发换行。否则空格把游标顶出右界后，
+		// addItem 的 right >= it.x 恒为 false，整行都不再换行（行尾溢出）。
+		if _, right := lineBounds(cursorY); len(curLine) > 0 && cursorX+spaceW > right {
+			return
+		}
 		curLine = append(curLine, lineItem{tn: pendingTN, token: " ",
 			x: cursorX, y: cursorY, w: spaceW, asc: spaceAsc, desc: spaceDesc,
 			leadAsc: spaceLeadAsc, leadDesc: spaceLeadDesc})
@@ -790,10 +907,12 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	}
 
 	flushLine := func() {
-		// text-align：行宽不足内容宽时整体平移（溢出时 dx 钳 0，左对齐语义不变）
+		// text-align：行宽不足可用行宽时整体平移（溢出时 dx 钳 0，左对齐语义
+		// 不变）。可用行宽按浮动收缩后的右边界算（见 lineBounds）。
 		dx := 0
 		if align != TextAlignLeft && len(curLine) > 0 {
-			if free := contentW - (cursorX - cx); free > 0 {
+			_, right := lineBounds(cursorY)
+			if free := right - cursorX; free > 0 {
 				if align == TextAlignCenter {
 					dx = free / 2
 				} else {
@@ -886,7 +1005,11 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 		lineAsc, lineDesc = minInt(0, strutAsc), minInt(0, strutDesc)
 		curLine = curLine[:0]
+		// 换行后游标回到行首；有左浮动时让到其右缘。
 		cursorX = cx
+		if l, _ := lineBounds(cursorY); l > cursorX {
+			cursorX = l
+		}
 	}
 
 	// ---- white-space: pre ----
@@ -978,7 +1101,12 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	}
 
 	addItem := func(it lineItem) {
-		if len(curLine) > 0 && it.x+it.w-cx > contentW && contentW > 0 {
+		_, right := lineBounds(it.y)
+		// 放不下就换行。这里不排除「游标已在右界之外」的情形：上一项本身
+		// 超宽（长单词/原子盒）时，后续项必须回到新行，否则整段都会粘在
+		// 同一行溢出（游标一旦越过右界，right >= it.x 之类的守卫会永久
+		// 关闭换行）。
+		if len(curLine) > 0 && it.x+it.w > right {
 			flushLine()
 			it.x = cursorX
 			it.y = cursorY
@@ -1073,13 +1201,50 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			continue
 		}
 
+		// 浮动盒：脱离常规流（不推进游标、不占行高），只登记为后续行盒与
+		// clear 的避让区域。浮动自身建立新的块格式化上下文，内部行盒不
+		// 避让外层浮动（excl 传 nil）。
+		if fside := che.computed.Float(); fside != FloatNone {
+			flushLine()
+			che.hasEff = false
+			ow, oh := layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH, nil)
+			if ow <= 0 || oh <= 0 {
+				// 零尺寸浮动不占避让区域（Chrome 同样不为空浮动让位）。
+				che.setX(cx)
+				che.setY(cursorY)
+				prevBlockMB = -1
+				lastInline = false
+				continue
+			}
+			fx, fy := placeFloat(ow, oh, fside)
+			if fx != cx || fy != cursorY {
+				shiftBox(che, fx-cx, fy-cursorY)
+			}
+			floats = append(floats, floatRect{x: fx, y: fy, w: ow, h: oh, side: fside})
+			// 浮动不计入父高度，但计入未裁剪内容宽（横向滚动的依据）。
+			if fx+ow > maxRight {
+				maxRight = fx + ow
+			}
+			prevBlockMB = -1
+			lastInline = false
+			continue
+		}
+
 		if cdisp == DisplayBlock || cdisp == DisplayTable {
 			flushLine()
+			// clear：把块盒的顶边下推到相关浮动的下缘之下（CSS 2.1 §9.5.2）。
+			// 有 clearance 时相邻外边距不再折叠（§8.3.1），故清掉 prevBlockMB。
+			if cl := che.computed.Clear(); cl != ClearNone {
+				if ny := clearOffset(floats, cursorY, cl); ny > cursorY {
+					cursorY = ny
+					prevBlockMB = -1
+				}
+			}
 			// 表格：专用布局（列对齐 + 行堆叠），不走常规流，也不参与
 			// 外边距折叠（CSS 2.1 §17.5.2：表格的 margin 不与兄弟折叠）。
 			if cdisp == DisplayTable {
 				che.hasEff = false
-				layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH)
+				layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH, floats)
 				cursorY += che.layoutH
 				prevBlockMB = -1
 				pendingSpace = false
@@ -1133,7 +1298,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			if prevBlockMB >= 0 {
 				cursorY -= minInt(prevBlockMB, effTop)
 			}
-			layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH)
+			layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH, floats)
 			cursorY += che.layoutH
 			prevBlockMB = effBot
 			// 块级子元素结束行内格式上下文：行尾空格被 CSS 移除，且后续内容
@@ -1166,13 +1331,19 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		if remain < 0 {
 			remain = 0
 		}
-		ow, oh := layoutBox(g, che, remain, maxZero(contentH-(cursorY-cy)), cursorX, cursorY, contentW, pctH)
+		// 行内元素不建立新的块格式化上下文：内部行盒仍要避让外层浮动；
+		// inline-block / inline-table 建立新 BFC，内部不避让（传 nil）。
+		var childExcl []floatRect
+		if cdisp == DisplayInline {
+			childExcl = floats
+		}
+		ow, oh := layoutBox(g, che, remain, maxZero(contentH-(cursorY-cy)), cursorX, cursorY, contentW, pctH, childExcl)
 		if ow <= 0 && oh <= 0 {
 			continue // 零尺寸且无外盒的原子盒（如空 head）不占行高
 		}
-		if len(curLine) > 0 && cursorX+ow-cx > contentW && contentW > 0 {
+		if _, right := lineBounds(cursorY); len(curLine) > 0 && cursorX+ow > right {
 			flushLine()
-			ow, oh = layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH)
+			ow, oh = layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH, childExcl)
 		}
 		asc, desc := inlineBoxBaseline(g, che, maxInt(oh, 1))
 		// vertical-align：算盒相对基线的位移（正=向上抬高）以及计入行盒

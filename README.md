@@ -493,10 +493,23 @@ absolute/fixed 相对包含块锚定，right/bottom 回推)、`z-index`（非 0 
 `overflow(visible/hidden/clip/scroll/auto：单值作用两轴、两值为 overflow-x overflow-y、
 overflow-x/overflow-y 分轴；hidden 只裁不滚，scroll 恒可滚，auto 溢出时可滚，
 文档级滚动不受 html overflow 关键字约束)；
+`float(left/right/none)`/`clear(left/right/both/none)`（浮动盒脱流、auto 宽按
+shrink-to-fit 收缩，行盒按浮动边缘收缩、块盒按 `clear` 下推到浮动下缘之下；
+浮动不撑开父级 auto 高度——与 Chrome 同口径，作用域简化见「已知限制」）、
+`opacity(0~1 数字/百分比，越界钳到 [0,1])`（不做图层合成，按「子树每次绘制
+动作的颜色 alpha 乘 opacity」近似，见「已知限制」）、
+`visibility(visible/hidden/collapse)`（hidden/collapse 自身不绘制、不可命中，
+但照常占位；子级显式 `visible` 可恢复显示与命中）、
+`cursor`（系统指针子集：`default/auto/pointer/text/move/wait/crosshair/
+not-allowed/grab/grabbing/ew|ns|nwse|nesw-resize`；`url()` 自定义光标退回
+`auto`，逗号后的回退关键字优先。SDL2 后端落到系统指针，无头/软件光栅化忽略）、
+`font-style(normal/italic/oblique)`（italic/oblique 都走 SDL_ttf 的合成斜体，
+不改变字形前进宽度——布局度量与正体一致，只有绘制与 SVG 导出体现倾斜）、
 inline-block 的百分比宽度按包含块内容宽解析（而非行内剩余宽）；
 UA 默认样式表覆盖浏览器 Windows 侧的常用规则：body 外边距 8px、
 h1-h3 字号/外边距、p 段距、a 蓝色下划线、strong/b 加粗、
-em/i/code/small/sub/sup 等行内语义标签为 inline（sub/sup 另按 Chrome 实测做
+em/i/cite/var/dfn 给 `font-style: italic`、`a` 给 `cursor: pointer`、表单控件给
+`cursor: text`/`font-style: normal`；em/i/code/small/sub/sup 等行内语义标签为 inline（sub/sup 另按 Chrome 实测做
 基线位移：上标 `父字号/3+1`、下标 `父字号/5+1`，字号取 smaller 的 13px）、
 dt **不加粗**（Chrome UA 实测计算权重 400；HTML4 的 UA 才加粗 dt）、
 dd 缩进 40px、ul/ol 缩进 40px、blockquote/pre/figure 外边距、
@@ -609,7 +622,9 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
   节）+ 抄头文件对偏移 ✓
 - **`-race` 跑不了（已知缺口）**：race 检测需要 cgo（C 工具链），本仓库的 Windows 纯 Go 环境没有 gcc。替代路径（谁有条件谁跑）：`CGO_ENABLED=1 CC=tcc go test -race ./...`（tcc 约 1MB）或 `docker run --rm -v $PWD:/src -w /src golang:1.24 sh -c "apt update && apt install -y gcc && CGO_ENABLED=1 go test -race ./..."`。注意那只覆盖**纯 Go 包**（engine/core/runtime/browser 的非 Windows 标签部分）；`backend/sdl2` 与 browser 的窗口类测试是 `//go:build windows`，需要真实窗口，只能在 Windows 上跑。引擎是单线程设计（事件派发与每帧 `TickScroll` 同一 goroutine），本地按 goroutine 逐处核对过，但「核对过」不等于「跑过 race」——这个缺口记在这里，别当它不存在
 - 布局为块级 + 行内/inline-block 流式布局 + 定位子集；无 flex/grid；**textarea 有覆盖式滚动条**（内容溢出即显示，轨道点击跳转 + 滑块拖拽，见 engine/textarea.go），通用容器滚动仍仅滚轮驱动（无滚动条 UI、无 PageUp/PageDown 翻页键、无触控板惯性），wheel 步长 100px/档（与 Chrome/Windows 一致）；文档级滚动为**动画式**：**基于时间的缓动 + 目标位置累加**（Chrome 同款）——滚轮只把目标（`scrollTop`/`scrollLeft`）累加一档，每帧按「已推进的动画时间 / 150ms」求进度 t∈[0,1]，位置 = 起点 + (目标 − 起点) × easeOutQuad(t)；时长用**墙钟时间**算而非帧计数（高刷屏不会滚太快、掉帧不会变速），不用「固定帧数每帧加 11px」（那样在高刷/掉帧时会变速）；连续滚动时新的一档目标继续累加、缓动段从**当前视觉位置**重新起算（位置连续、不跳）；60Hz 下一档 100px 的累计位移是 21.0、39.5、55.6、69.1、80.2、88.9、95.1、98.8、100（每帧增量 21、19、16、13、11、9、6、4、1，单调不增——可见位移按「每帧位移取整」而非「累积位置取整」，后者会在 floor/ceil 之间来回跳，看着像抖）；**两轴各自计时**（frame clock 与缓动进度都分轴：只滚纵向不会把横向的动画重新计时，也不会截断横向的帧间隔——触控板 momentum 时 wheel 比帧还密，共用时钟会让另一轴几乎停住）；单帧推进量有上限（20ms 动画进度：卡顿的一帧——新内容进视口要现建纹理/字模，可能上百毫秒——不会让内容跳过一整段距离；代价是**低于 50Hz 的屏上动画会被拉长**，45Hz 约 165ms、30Hz 约 250ms）；滚动只平移子树——**动画帧不重排**（`engine.TickScroll` 按增量平移已布局的盒子，级联与布局只在内容变化时跑）；绘制时按**视口裁剪**（完全落在视口外的盒子不画，滚动时页面下半部分不再白画一遍：portal 页每帧绘制调用 2624 → 1014）；字体路径解析与文本度量已缓存（文本度量按「文本+字号+粗细+family」），examples/ua 单次重排约 1~2ms。但滚动偏移无对外 DOM API（`scrollTop`/`scrollLeft` 未导出，仅由 wheel 与 textarea 光标跟随内部驱动），亦无 `scroll`/`wheel` 之外的滚动事件；引擎是**单线程**的（事件派发与每帧的 `TickScroll` 必须在同一 goroutine，否则要自行加锁）
-- position v1 边界：absolute 双锚（left+right 同给）时 auto 宽按内容收缩而非拉伸；未实现嵌套层叠上下文（opacity/transform 成组、负 z-index 压至祖先背景之下）；命中测试未按 z-index 取最上层元素（select 选项浮层例外，按浮层层序优先）
+- position v1 边界：absolute 双锚（left+right 同给）时 auto 宽按内容收缩而非拉伸；未实现嵌套层叠上下文（负 z-index 压至祖先背景之下；`opacity` 不做图层合成，见下条）；命中测试未按 z-index 取最上层元素（select 选项浮层例外，按浮层层序优先）
+- `opacity` 是**近似**：引擎没有离屏图层/分组合成，实现为「子树里每次绘制动作的颜色 alpha 乘 opacity」——纯色背景、边框、文字、阴影的观感与浏览器基本一致，但**重叠内容会各自透出下层**（真实 CSS 是整个子树先合成成一张图再按 opacity 混合，重叠处不该叠出更深的颜色），半透明子元素叠加时偏差更明显。SVG 导出走 `<g opacity>`，语义与浏览器一致（导出比屏幕更准）
+- `float`/`clear` 的作用域是**每个父元素自己的块格式化上下文**：子元素内部产生的浮动只影响该子元素自己的行盒，不向父级的兄弟传播（真实 CSS 里子块未建立新 BFC 时浮动会外溢、影响后续兄弟与祖先高度）。另外浮动前的待排内容会先结束当前行（浮动总从新行开始），`float` 与 `display:inline-block` 同款 shrink-to-fit 宽度；浮动不参与外边距折叠
 - 行内盒的基线：inline-block 的基线取「盒底 − 字体 descent」（内容高度 = 行高时与 Chrome 的「最后一行基线」同值）；**定高盒装不下内容**（文字折行溢出盒外）时，Chrome 的基线是**最后一行**的基线（CSS 2.1 §10.8.1），引擎仍取盒底 → 同行的后续盒不会被推下去（差一整个行高）
 - 伪类只实现了常用的一组（`:hover`/`:focus`/`:active`/`:checked`/`:disabled`/`:enabled`/`:first-child`/`:last-child`/`:only-child`/`:root`/`:empty`），伪元素实现了 `::before`/`::after`（`content` 支持字符串与 `attr()`；`counter()`/`url()` 等未实现，未知伪元素一律不匹配）：`:not()`/`:nth-child()`/`:is()` 未实现；`:hover`/`:active` 沿父链继承但**不跨 shadow DOM/iframe 边界**（引擎无这些概念）；焦点扩展到 button/链接后，**Tab 仍只在可编辑输入之间循环**（浏览器会把按钮也纳入 Tab 序——引擎保留原行为以免打断记事本的「Tab 在文本框间移动」习惯）；悬停态变化会触发**整页重排**（级联是全量重算，见下条），大页面 + 高频鼠标移动时开销明显；`:focus` 只改样式，**按钮/链接不画焦点框**（引擎只给可编辑控件画蓝框）
 - `<input>` 可编辑仅支持 text/password 类型；radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate / 表单重置；无剪切（Ctrl+X）、无按词扩展选区（Ctrl+Shift+方向键）
@@ -641,8 +656,10 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
   透出阴影）；内阴影退化为 padding 盒内形状之外的实色带（忽略模糊与形状
   圆角），后端连 `Clipper` 都没有时不画内阴影
 - 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；
-  无 webfont 加载、无斜体渲染（font-style 仅解析不渲染）；
-  `monospace`/`cursive` 映射到 simsun.ttc 的 face 0（SimSun），Chrome 用的是
+  无 webfont 加载；斜体（`font-style: italic/oblique`）用 SDL_ttf 的合成斜体
+  （`TTF_SetFontStyle(TTF_STYLE_ITALIC)`）——中文等无真斜体字形的字体靠倾斜
+  变换得到，观感比浏览器（同样合成）略硬，且斜体**不改变字形前进宽度**（度量
+  与正体一致）；`monospace`/`cursive` 映射到 simsun.ttc 的 face 0（SimSun），Chrome 用的是
   同一文件里的新宋体（NSimSun）——行高与整串宽度一致，但单字 ink 高度与
   短串宽度有微差（对照页 `<code>元素</code>` 等宽串 61 vs Chrome 63、ink 高 15 vs 13）
 - 表格是**完整模型**（CSS 2.1 §17），角色只由 `display` 判定：HTML 标签靠 UA

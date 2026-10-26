@@ -225,6 +225,9 @@ func flowBlockChildren(el *htmlElement) []*htmlElement {
 		if cb.computed.Position().isOutFlow() {
 			continue // 脱流盒不占位，不阻断也不参与折叠
 		}
+		if cb.computed.Float() != FloatNone {
+			continue // 浮动盒同样脱流，不参与外边距折叠
+		}
 		if cb.computed.Display() != DisplayBlock {
 			break // 行内盒隔开块级上下文
 		}

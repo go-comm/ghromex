@@ -1249,3 +1249,115 @@ table.unsup td.x {
 .ls-roman { list-style-type: upper-roman; }
 .ls-inside { list-style-position: inside; }
 .ls-none { list-style: none; }
+
+/* ===== 浮动与可见性 ===== */
+.fl-wrap {
+	border: 1px solid #d7dbe0;
+	background-color: #f7f8fa;
+	padding: 8px;
+	margin: 6px 0;
+	font-size: 13px;
+}
+
+.fl-left {
+	float: left;
+	width: 80px;
+	height: 56px;
+	margin-right: 10px;
+	padding: 4px;
+	border: 1px solid #2f7d4f;
+	background-color: #eef7f0;
+	font-size: 12px;
+}
+
+.fl-right {
+	float: right;
+	width: 96px;
+	height: 40px;
+	margin-left: 10px;
+	padding: 4px;
+	border: 1px solid #2f7d4f;
+	background-color: #eef7f0;
+	font-size: 12px;
+}
+
+.fl-text {
+	margin: 0;
+	line-height: 20px;
+}
+
+.fl-clear {
+	clear: both;
+	margin-top: 6px;
+	padding: 4px 8px;
+	border: 1px solid #b07a12;
+	background-color: #fdf0e3;
+}
+
+.op-row {
+	margin: 6px 0;
+}
+
+.op {
+	display: inline-block;
+	width: 96px;
+	margin-right: 8px;
+	padding: 8px 0;
+	text-align: center;
+	background-color: #0b57d0;
+	color: #ffffff;
+	font-size: 12px;
+}
+
+.op-25 { opacity: 0.25; }
+.op-50 { opacity: 0.5; }
+.op-100 { opacity: 1; }
+
+.vis-row {
+	margin: 6px 0;
+}
+
+.vis-h {
+	display: inline-block;
+	width: 180px;
+	margin-right: 8px;
+	padding: 8px;
+	background-color: #0b57d0;
+	color: #ffffff;
+	font-size: 12px;
+	visibility: hidden;
+}
+
+.vis-v {
+	display: inline-block;
+	padding: 2px 6px;
+	background-color: #d93025;
+	color: #ffffff;
+	visibility: visible;
+}
+
+.vis-n {
+	display: inline-block;
+	padding: 8px;
+	border: 1px solid #d7dbe0;
+	background-color: #f7f8fa;
+	font-size: 12px;
+}
+
+.cur {
+	display: inline-block;
+	margin-right: 6px;
+	padding: 4px 10px;
+	border: 1px solid #d7dbe0;
+	background-color: #f7f8fa;
+	font-size: 12px;
+}
+
+.cur-pointer { cursor: pointer; }
+.cur-text { cursor: text; }
+.cur-move { cursor: move; }
+.cur-wait { cursor: wait; }
+.cur-no { cursor: not-allowed; }
+
+.it { font-style: italic; }
+.ob { font-style: oblique; }

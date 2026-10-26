@@ -106,6 +106,12 @@ var (
 	sdlGetVersion      nativeCall
 	sdlGetWindowWMInfo nativeCall
 	hasGetWindowWMInfo bool
+	// 系统鼠标指针（CSS cursor）：SDL_CreateSystemCursor / SDL_SetCursor。
+	// 可选绑定，缺失时 Graphics.SetCursor 返回 false（形状纯装饰）。
+	sdlCreateSystemCursor nativeCall
+	sdlSetCursor          nativeCall
+	hasCreateSystemCursor bool
+	hasSetCursor          bool
 
 	ttfInit              nativeCall
 	ttfQuit              nativeCall
@@ -210,7 +216,23 @@ const (
 
 	mouseButtonLeft = 1
 
-	ttfStyleBold = 0x00000001
+	ttfStyleBold   = 0x00000001
+	ttfStyleItalic = 0x00000002
+
+	// SDL_SystemCursor（SDL_mouse.h 枚举顺序，0 起）：ARROW=0 IBEAM=1
+	// WAIT=2 CROSSHAIR=3 WAITARROW=4 SIZENWSE=5 SIZENESW=6 SIZEWE=7
+	// SIZENS=8 SIZEALL=9 NO=10 HAND=11。勿凭记忆改值。
+	sysCursorArrow     = 0
+	sysCursorIBeam     = 1
+	sysCursorWait      = 2
+	sysCursorCrosshair = 3
+	sysCursorSizeNWSE  = 5
+	sysCursorSizeNESW  = 6
+	sysCursorSizeWE    = 7
+	sysCursorSizeNS    = 8
+	sysCursorSizeAll   = 9
+	sysCursorNo        = 10
+	sysCursorHand      = 11
 
 	eventBufferSize = 56
 )
@@ -310,6 +332,9 @@ func doLoad() error {
 	// 所以先用 SDL_GetVersion 问出版本再填。
 	sdlGetVersion = bindProcOpt(dllSDL, "SDL_GetVersion")
 	sdlGetWindowWMInfo, hasGetWindowWMInfo = bindProbe(dllSDL, "SDL_GetWindowWMInfo")
+	// 系统鼠标指针：可选符号（SDL2 各版本都应有，但缺了也只是光标不变形）。
+	sdlCreateSystemCursor, hasCreateSystemCursor = bindProbe(dllSDL, "SDL_CreateSystemCursor")
+	sdlSetCursor, hasSetCursor = bindProbe(dllSDL, "SDL_SetCursor")
 	if bindErr != nil {
 		return fmt.Errorf("解析 SDL2.dll 符号失败: %w", bindErr)
 	}
