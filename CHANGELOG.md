@@ -5,6 +5,26 @@
 
 ## 未发布
 
+**内阴影 `box-shadow: inset`**：此前只解析不绘制，现在与 Chrome 同口径渲染——
+内阴影以 **padding 盒**为边界，阴影区是「偏移并按 spread 收缩后的形状之外」，
+模糊后按 padding 盒（含圆角）裁切，因此边缘最深、向内容方向淡出。
+
+- 几何：形状 = padding 盒收缩 `2×spread`、偏移 `(x, y)`，内圆角 = 外圆角 −
+  最宽边框（负数取 0）；spread 收缩到空时整块 padding 盒都是阴影，负 spread
+  把形状扩出 padding 盒时阴影不可见。
+- 绘制顺序：内阴影画在背景/边框之后、内容之前（外阴影仍在背景之前）；
+  多条声明按 CSS 规则「第一条在最上层」倒序绘制，内/外阴影可同时存在。
+- 实现：新增 `insetShadowSprite`（掩码「形状外为 1、形状内为 0」→ 三次盒式
+  模糊 → 按 padding 盒覆盖率裁切），精灵进同一张 LRU 缓存（键新增 `inset`）。
+  退化路径 `paintInsetShadowFallback`：后端无 `SpriteDrawer` 时裁到 padding
+  盒画形状外的实色带（忽略模糊与形状圆角）；连 `Clipper` 都没有则不画。
+- SVG 导出：`mask` 挖出形状 + `feGaussianBlur` + `clipPath` 裁 padding 盒，
+  与渲染路径同序（背景之后、边框之前）。
+- 回归测试：`engine/inset_shadow_test.go`（spread/偏移/模糊软边/padding 盒
+  裁切/多条顺序/内外共存/SVG）与 `engine/inset_shadow_internal_test.go`
+  （形状几何、精灵掩码、退化路径裁剪）。
+- 文档：README 支持范围与已知限制、stylebook 演示（新增内描边示例）同步更新。
+
 **伪元素 `::before` / `::after`**：支持用 `content` 生成装饰盒（圆点、箭头、
 徽标、引号等）。生成盒是宿主的真实子元素，插在 `children` 首/尾参与常规
 布局、绘制、命中与 SVG 导出；但它不是 DOM 节点——`Children()` / `InnerText` /

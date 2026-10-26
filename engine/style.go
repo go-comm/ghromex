@@ -30,8 +30,8 @@ type Shadow struct {
 	Blur   int // 模糊半径
 	Spread int // 扩散半径（可为负）
 	Color  Color
-	// Inset 只解析、暂不绘制：外阴影覆盖卡片/弹层等主场景，内阴影需要在
-	// 边框盒内单独做遮罩（并叠在背景之上），留待需要时再补。
+	// Inset 为真表示内阴影：阴影区是「padding 盒内、偏移并按 spread 收缩后
+	// 的形状之外」，按 padding 盒（含圆角）裁切，画在背景之上、内容之下。
 	Inset bool
 }
 

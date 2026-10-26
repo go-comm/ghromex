@@ -426,6 +426,21 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 			}
 		}
 
+		// 内阴影（inset）画在背景/边框之后、内容之前：CSS 把内阴影铺在
+		// padding 盒内（边框内侧），压在背景上、让内容落在它上面。
+		if inView && !base.noCellDeco && len(shadows) > 0 {
+			ipx := bx + bd[eLeft]
+			ipy := by + bd[eTop]
+			ipw := bw - bd[eLeft] - bd[eRight]
+			iph := bh - bd[eTop] - bd[eBottom]
+			// 内圆角 = 外圆角 − 最宽边框（CSS：边框内侧的圆角随边框收窄）。
+			ipr := r - maxEdge(bd)
+			if ipr < 0 {
+				ipr = 0
+			}
+			paintInsetBoxShadows(g, ipx, ipy, ipw, iph, ipr, shadows, comp.Color())
+		}
+
 		// 聚焦框画在边框盒上，必须早于下方 overflow 裁剪压栈：textarea 默认
 		// overflow:hidden，裁剪区是 padding 盒，画在边框盒上的聚焦框会被整圈
 		// 裁掉（此前聚焦框在裁剪栈内绘制 → textarea 永远看不到聚焦指示）。
@@ -893,6 +908,7 @@ type spriteKey struct {
 	mask               bool // 补盖精灵（圆角之外的部分），与普通角标图案不同
 	ring               bool // 边框环角标
 	shadow             bool // 阴影精灵（模糊后的圆角盒）
+	inset              bool // 内阴影精灵（形状外为 1、形状内为 0 的掩码）
 	sblur              int  // 阴影模糊半径（shadow 为真时有效）
 	// 外阴影必须把元素自己的边框盒挖掉（CSS：外阴影只画在边框盒外）。
 	// 洞的坐标是精灵内局部坐标，随偏移/扩散/盒尺寸变化，必须进缓存键。
@@ -1096,7 +1112,8 @@ func ringCornerSpriteSides(r int, ir cornerRadii, li, rt, tp, bt, iw, ih int,
 const maxShadowSpritePixels = 700000
 
 // shadowBounds 返回一组外阴影的包围盒（含模糊外扩），用于视口裁剪。
-// 全是 inset 阴影时 ok=false——本轮不绘制 inset。
+// 内阴影整体落在 padding 盒内，不扩大绘制范围，不参与这里的包围盒计算
+// （全是 inset 阴影时 ok=false，调用方按盒子本体做视口裁剪即可）。
 func shadowBounds(shadows []Shadow, bx, by, bw, bh int) (x, y, w, h int, ok bool) {
 	if bw <= 0 || bh <= 0 {
 		return 0, 0, 0, 0, false
@@ -1256,6 +1273,183 @@ func paintShadowLayersClipped(g Graphics, cl Clipper, sx, sy, sw, sh int,
 		paintShadowLayers(g, shadowX, shadowY, shadowW, shadowH, r, blur, c)
 		cl.PopClip()
 	}
+}
+
+// ---------------------------------------------------------------------------
+// box-shadow: inset（内阴影）
+// ---------------------------------------------------------------------------
+
+// maxEdge 返回四条边里的最大值。内阴影的内圆角按最宽边框扣减（外圆角
+// 减边框宽度 = 边框内侧圆角）。
+func maxEdge(e edges) int {
+	return maxInt(maxInt(e[eTop], e[eBottom]), maxInt(e[eLeft], e[eRight]))
+}
+
+// insetShadowShape 返回内阴影的「不投影形状」：padding 盒按 spread 向内
+// 收缩、再按偏移平移后的圆角矩形。
+//
+// ok=false 表示形状已被收缩成空——此时整个 padding 盒都落在阴影里，
+// 直接铺满即可（模糊也不改变结果：掩码处处为 1）。
+func insetShadowShape(px, py, pw, ph, pr int, sh Shadow) (x, y, w, h, r int, ok bool) {
+	w = pw - 2*sh.Spread
+	h = ph - 2*sh.Spread
+	if w <= 0 || h <= 0 {
+		return 0, 0, 0, 0, 0, false
+	}
+	x = px + sh.X + sh.Spread
+	y = py + sh.Y + sh.Spread
+	r = pr - sh.Spread
+	if r < 0 {
+		r = 0
+	}
+	if lim := minInt(w, h) / 2; r > lim {
+		r = lim
+	}
+	return x, y, w, h, r, true
+}
+
+// paintInsetBoxShadows 绘制全部内阴影（box-shadow 带 inset）。
+//
+// CSS 语义：以 **padding 盒**为边界——阴影区是「padding 盒内、偏移并按
+// spread 收缩后的形状之外」，最后按 padding 盒（含圆角）裁切。等价于
+// 「形状之外全部不透明」，模糊后裁到 padding 盒：这就是浏览器里边缘最深、
+// 向内容方向淡出的内发光。第一条阴影在最上层，故按声明顺序倒着画。
+//
+// 与元素自身 overflow 无关：内阴影整体在 padding 盒内，不参与命中。
+func paintInsetBoxShadows(g Graphics, px, py, pw, ph, pr int, shadows []Shadow, current Color) {
+	if pw <= 0 || ph <= 0 {
+		return
+	}
+	if current == nil {
+		current = NewColor(0, 0, 0, 255)
+	}
+	for i := len(shadows) - 1; i >= 0; i-- {
+		sh := shadows[i]
+		if !sh.Inset {
+			continue
+		}
+		c := sh.Color
+		if c == nil {
+			c = current
+		}
+		if _, _, _, a := c.RGBA(); a == 0 {
+			continue
+		}
+		sx, sy, sw, shh, sr, ok := insetShadowShape(px, py, pw, ph, pr, sh)
+		if !ok {
+			// 形状被 spread 收缩成空：整块 padding 盒都是阴影。
+			fillRoundedRect(g, px, py, pw, ph, pr, c)
+			continue
+		}
+		// 负 spread 把形状扩到 padding 盒之外时阴影完全不可见；掩码路径
+		// 也能得到同样结果，但这里直接跳过省一次精灵生成（有模糊时形状
+		// 边缘的模糊尾巴仍可能探进 padding 盒，不能跳）。
+		if sh.Blur == 0 && sw >= pw && shh >= ph &&
+			sx <= px && sy <= py && sx+sw >= px+pw && sy+shh >= py+ph {
+			continue
+		}
+		pad := maxZero(sh.Blur)
+		spw, sph := pw+2*pad, ph+2*pad
+		if sd, ok := g.(SpriteDrawer); ok && spw*sph <= maxShadowSpritePixels {
+			// 精灵内局部坐标：padding 盒从 (pad, pad) 起，形状按偏移落位。
+			sd.DrawSprite(px-pad, py-pad, insetShadowSprite(spw, sph, pr, pad, c,
+				sx-(px-pad), sy-(py-pad), sw, shh, sr))
+			continue
+		}
+		// 退化路径：裁到 padding 盒后画形状之外的四条实色带（忽略模糊与
+		// 形状圆角）。不支持裁剪的后端只能不画——没有「挖洞」能力时，
+		// 整块铺色会盖住内容，比缺一条内阴影更糟。
+		paintInsetShadowFallback(g, px, py, pw, ph, sx, sy, sw, shh, c)
+	}
+}
+
+// paintInsetShadowFallback 是不支持精灵 blit 的后端的退化路径：裁到
+// padding 盒，画形状之外的四条实色带。
+//
+// 上/下两条整宽，左右两条夹在中间——互不重叠，每个像素只画一次。模糊与
+// 形状圆角在这个路径里被忽略（观感近似，不影响布局与命中）。
+func paintInsetShadowFallback(g Graphics, px, py, pw, ph, sx, sy, sw, shh int, c Color) {
+	cl, ok := g.(Clipper)
+	if !ok {
+		return
+	}
+	cl.PushClip(px, py, pw, ph)
+	defer cl.PopClip()
+	if top := sy - py; top > 0 {
+		g.DrawColor(px, py, pw, minInt(top, ph), c)
+	}
+	if bot := py + ph - (sy + shh); bot > 0 {
+		g.DrawColor(px, sy+shh, pw, minInt(bot, ph), c)
+	}
+	midY := maxInt(sy, py)
+	midH := minInt(sy+shh, py+ph) - midY
+	if midH > 0 {
+		if left := sx - px; left > 0 {
+			g.DrawColor(px, midY, minInt(left, pw), midH, c)
+		}
+		if right := px + pw - (sx + sw); right > 0 {
+			g.DrawColor(sx+sw, midY, minInt(right, pw), midH, c)
+		}
+	}
+}
+
+// insetShadowSprite 返回内阴影的预模糊位图。
+//
+// 掩码口径：形状之外全是阴影（1），形状内是 0。形状之外**包括 padding 盒
+// 外**——那片区域最终会被裁掉，但保留 1 才能让模糊在 padding 边缘保持满色；
+// 若把盒外当 0，内发光会在边缘突然变淡（Chrome 不是这样）。
+//
+// 精灵内局部坐标：padding 盒从 (blur, blur) 开始；shapeX/Y/W/H/R 是「不
+// 投影形状」在精灵内的位置。模糊完成后按 padding 盒（含圆角）裁切。
+func insetShadowSprite(w, h, pr, blur int, c Color,
+	shapeX, shapeY, shapeW, shapeH, shapeR int) *Sprite {
+	cr, cg, cb, ca := c.RGBA()
+	key := spriteKey{r: pr, iw: w, ih: h, sblur: blur,
+		cr: cr, cg: cg, cb: cb, ca: ca, shadow: true, inset: true,
+		holeX: shapeX, holeY: shapeY, holeW: shapeW, holeH: shapeH, holeR: shapeR}
+	if s, ok := lookupSprite(key); ok {
+		return s
+	}
+	mask := make([]float32, w*h)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			cov := coverageAt(float64(x)+0.5, float64(y)+0.5,
+				shapeX, shapeY, shapeW, shapeH, shapeR)
+			mask[y*w+x] = float32(1 - cov)
+		}
+	}
+	if blur > 0 {
+		radius := blur / 2
+		if radius < 1 {
+			radius = 1
+		}
+		mask = blurMask(mask, w, h, radius, 3)
+	}
+	pw, ph := w-2*blur, h-2*blur
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			cov := coverageAt(float64(x)+0.5, float64(y)+0.5, blur, blur, pw, ph, pr)
+			mask[y*w+x] *= float32(cov)
+		}
+	}
+	pix := make([]byte, w*h*4)
+	for i, cov := range mask {
+		if cov <= 0 {
+			continue
+		}
+		na := uint32(float64(ca)*float64(cov) + 0.5)
+		if na == 0 {
+			continue
+		}
+		if na > 255 {
+			na = 255
+		}
+		j := i * 4
+		pix[j+0], pix[j+1], pix[j+2], pix[j+3] = cr, cg, cb, uint8(na)
+	}
+	s := &Sprite{W: w, H: h, Pix: pix}
+	storeSprite(key, s)
+	return s
 }
 
 // shadowSprite 返回预模糊的阴影位图：RGB 是阴影色，alpha 是圆角盒覆盖率

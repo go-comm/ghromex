@@ -394,9 +394,12 @@ a  b   c    d</pre>
 	<span class="sh sh1">0 2px 6px 淡影</span>
 	<span class="sh sh2">0 8px 24px 4px 大扩散</span>
 	<span class="sh sh3">两条逗号分隔</span>
-	<span class="sh sh-in">inset（引擎解析不绘制 → 应无内阴影）</span>
+	<span class="sh sh-in">inset 0 3px 8px 内阴影（顶部凹槽）</span>
+	<span class="sh sh-in2">inset 0 0 0 2px 内描边</span>
 
-	<p class="note">支持颜色背景与外阴影（x y blur spread 颜色，逗号多条，位置不限，只画外阴影）。
+	<p class="note">支持颜色背景、外阴影与内阴影（x y blur spread 颜色，逗号多条，
+		位置不限，第一条在最上层）。内阴影以 padding 盒为边界：偏移 + spread 收缩后的
+		形状之外为阴影，模糊后按 padding 盒（含圆角）裁切，因此边缘最深、向内容淡出。
 		<b>不支持</b> background-image / 渐变 / url() / position / size / repeat（末节清单）。</p>
 </div>
 
@@ -628,7 +631,7 @@ a  b   c    d</pre>
 			<tr><td><code class="inl">img</code> / <code class="inl">svg</code> / <code class="inl">canvas</code> / <code class="inl">iframe</code> / <code class="inl">video</code></td><td>图像/矢量/画布/嵌入</td><td class="x">无渲染链路，只有 CSS 盒</td></tr>
 			<tr><td><code class="inl">white-space: nowrap</code> / <code class="inl">pre-wrap</code></td><td>折行控制</td><td class="x">只区分 pre 与其余（nowrap 按 normal 折行）</td></tr>
 			<tr><td><code class="inl">border-image</code> / 非 solid 线型</td><td>图片边框/虚线点线</td><td class="x">不解析 / 按 solid 绘制</td></tr>
-			<tr><td><code class="inl">box-shadow: inset</code></td><td>内阴影</td><td class="x">解析但不绘制</td></tr>
+			<tr><td><code class="inl">box-shadow: inset</code></td><td>内阴影</td><td>支持（padding 盒裁切；无 SpriteDrawer 的后端退化为实色带）</td></tr>
 			<tr><td><code class="inl">z-index: auto</code></td><td>自动层叠</td><td class="x">按 0 处理</td></tr>
 			<tr><td><code class="inl">optgroup</code> / <code class="inl">fieldset</code> / <code class="inl">legend</code> / 非基础 type 的 <code class="inl">input</code></td><td>分组与原生控件</td><td class="x">见「表单」节边界说明</td></tr>
 		</tbody>

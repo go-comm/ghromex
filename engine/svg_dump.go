@@ -274,6 +274,30 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 					bx, by, bw, bh, hexColor(r, g, bl), float64(al)/255, rxAttr)
 			}
 		}
+		// 内阴影画在背景之上（与渲染路径同序）：mask 挖出「不投影形状」，
+		// 模糊后按 padding 盒（含圆角）裁切。
+		if !base.noCellDeco && bw > 0 && bh > 0 {
+			ipx := bx + bd[eLeft]
+			ipy := by + bd[eTop]
+			ipw := bw - bd[eLeft] - bd[eRight]
+			iph := bh - bd[eTop] - bd[eBottom]
+			ipr := maxZero(br - maxEdge(bd))
+			for i := len(shadows) - 1; i >= 0; i-- {
+				sh := shadows[i]
+				if !sh.Inset {
+					continue
+				}
+				c := sh.Color
+				if c == nil {
+					c = comp.Color()
+				}
+				if c == nil {
+					c = NewColor(0, 0, 0, 255)
+				}
+				r, g, bl, al := c.RGBA()
+				dumpSVGInsetShadow(b, ctr, ipx, ipy, ipw, iph, ipr, sh, r, g, bl, al)
+			}
+		}
 		if bw > 0 && bh > 0 && !base.noCellDeco {
 			paintBD, colors, has := borderPaintState(comp, bd)
 			if has {
@@ -377,6 +401,59 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 
 func hexColor(r, g, b uint8) string {
 	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+}
+
+// dumpSVGInsetShadow 导出一条内阴影（box-shadow 带 inset）。
+//
+// 与渲染路径同口径：mask 白色铺满 padding 盒（含模糊外扩），黑色挖掉
+// 「不投影形状」——形状之外的区域即阴影；滤镜模糊后按 padding 盒（含
+// 圆角）裁切。白色区域必须连 padding 盒外也覆盖，否则模糊尾巴在边缘
+// 会被 mask 截断，内发光看起来像一圈硬边。
+func dumpSVGInsetShadow(b *strings.Builder, ctr *int,
+	px, py, pw, ph, pr int, sh Shadow, r, g, bl, al uint8) {
+	if pw <= 0 || ph <= 0 || al == 0 {
+		return
+	}
+	pad := maxZero(sh.Blur)
+	sx, sy, sw, shh, sr, ok := insetShadowShape(px, py, pw, ph, pr, sh)
+	prx := ""
+	if pr > 0 {
+		prx = fmt.Sprintf(` rx="%d"`, pr)
+	}
+	fid := fmt.Sprintf("binsetf%d", *ctr)
+	*ctr++
+	mid := fmt.Sprintf("binsetm%d", *ctr)
+	*ctr++
+	cid := fmt.Sprintf("binsetc%d", *ctr)
+	*ctr++
+	filterAttr := ""
+	filterDef := ""
+	if sh.Blur > 0 {
+		filterAttr = fmt.Sprintf(` filter="url(#%s)"`, fid)
+		filterDef = fmt.Sprintf(`<filter id="%s" filterUnits="userSpaceOnUse" x="%d" y="%d" width="%d" height="%d">`+
+			`<feGaussianBlur stdDeviation="%.1f"/></filter>`,
+			fid, px-pad, py-pad, pw+2*pad, ph+2*pad, float64(sh.Blur)/2)
+	}
+	shapeRect := ""
+	if ok {
+		srx := ""
+		if sr > 0 {
+			srx = fmt.Sprintf(` rx="%d"`, sr)
+		}
+		shapeRect = fmt.Sprintf(`<rect x="%d" y="%d" width="%d" height="%d" fill="#000000"%s/>`,
+			sx, sy, sw, shh, srx)
+	}
+	maskDef := fmt.Sprintf(`<mask id="%s" maskUnits="userSpaceOnUse" x="%d" y="%d" width="%d" height="%d">`+
+		`<rect x="%d" y="%d" width="%d" height="%d" fill="#ffffff"/>%s</mask>`,
+		mid, px-pad, py-pad, pw+2*pad, ph+2*pad,
+		px-pad, py-pad, pw+2*pad, ph+2*pad, shapeRect)
+	clipDef := fmt.Sprintf(`<clipPath id="%s"><rect x="%d" y="%d" width="%d" height="%d"%s/></clipPath>`,
+		cid, px, py, pw, ph, prx)
+	fmt.Fprintf(b, `<defs>%s%s%s</defs>`+"\n", filterDef, maskDef, clipDef)
+	fmt.Fprintf(b, `<g clip-path="url(#%s)"><g mask="url(#%s)">`+
+		`<rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.2f"%s/></g></g>`+"\n",
+		cid, mid, px-pad, py-pad, pw+2*pad, ph+2*pad,
+		hexColor(r, g, bl), float64(al)/255, filterAttr)
 }
 
 // dumpControlText 导出表单控件的文本（与 render.go 同构的定位逻辑：

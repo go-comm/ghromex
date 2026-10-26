@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-25 23:35
+> 生成时间: 2026-10-26 11:38
 
 ---
 
@@ -2024,15 +2024,16 @@ func (s *Selector) Specificity() int
     数、b=class/attr/伪类数、c=类型选择器数，编码为 a*1e6 + b*1e3 + c。 编码保证整数比较与 CSS 优先级一致——旧实现用
     id*100 + class*10 + tag， 11 个类（110）会压过 1 个 id（100），与 CSS 相反。
 
-    伪类按 class 档计特异度（CSS 2.1 §6.4.3：伪类与类选择器同级）。
+    伪类按 class 档计特异度（CSS 2.1 §6.4.3：伪类与类选择器同级）； 伪元素按类型选择器档计（Selectors 3
+    §9：伪元素与标签同级）。
 
 type Shadow struct {
 	X, Y   int // 偏移
 	Blur   int // 模糊半径
 	Spread int // 扩散半径（可为负）
 	Color  Color
-	// Inset 只解析、暂不绘制：外阴影覆盖卡片/弹层等主场景，内阴影需要在
-	// 边框盒内单独做遮罩（并叠在背景之上），留待需要时再补。
+	// Inset 为真表示内阴影：阴影区是「padding 盒内、偏移并按 spread 收缩后
+	// 的形状之外」，按 padding 盒（含圆角）裁切，画在背景之上、内容之下。
 	Inset bool
 }
     Shadow 是一个 box-shadow 值。

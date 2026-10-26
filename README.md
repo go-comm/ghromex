@@ -458,7 +458,8 @@ table-footer-group/table-row/table-cell)`、`width/height`、
 与 12 个单边长写（四边可独立宽度/颜色/样式）、`border-radius`(四角统一，仅水平半径)、
 `border-collapse(collapse/separate)`、`border-spacing(1~2 值，px/pt/dp/%)`、
 `caption-side(top/bottom)`、`empty-cells(show/hide)`、
-`box-shadow`（外阴影；逗号分隔多条、px/pt/dp 偏移/模糊/扩散、颜色，`inset` 仅解析不绘制）、
+`box-shadow`（外阴影与内阴影 `inset`；逗号分隔多条、px/pt/dp 偏移/模糊/扩散、
+颜色，第一条在最上层；内阴影按 padding 盒裁切并支持 `border-radius`）、
 `background-color`/`background`、`color`、`font-size`、`font-weight(bold)`、`font-family`、
 `text-align(left/center/right)`、`text-decoration(underline/line-through/none，随父链继承)`、
 `white-space(pre)`（保留空白与制表符、按换行强制断行、不软换行；UA 的 `pre`/`code` 用它，
@@ -625,12 +626,15 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
   硬分界近似（Chrome 是渐变过渡），因此 Chrome 的 `input`（2px inset）、`button`
   （2px outset #000）、`hr`（1px inset，上暗 #808080 下浅）仍只做到外盒尺寸与
   单边颜色一致，线型明暗差异保留（对照页 examples/ua 的 hr 引擎画成两行同色）
-- `box-shadow` 只绘制**外阴影**：`inset` 会解析并保存，但本轮不绘制（内阴影需要
-  在边框盒内单独做遮罩）。偏移/模糊/扩散只接受 px/pt/dp（偏移百分比不支持），
-  模糊用三次盒式模糊近似高斯；大盒子（精灵超过约 70 万像素）或后端不实现
-  `engine.SpriteDrawer` 时退化为圆角矩形填充（有模糊时用多层近似；后端实现
-  `engine.Clipper` 时按四条裁剪带把边框盒挖掉；两者都不支持时盒内可能透出阴影）。
-  外阴影按 CSS 规则裁在元素边框盒之外，元素背景透明时盒内也不会透出阴影
+- `box-shadow` 支持外阴影与内阴影（`inset`）。偏移/模糊/扩散只接受 px/pt/dp
+  （偏移百分比不支持），模糊用三次盒式模糊近似高斯。外阴影按 CSS 规则裁在
+  元素边框盒之外（背景透明时盒内也不会透出阴影）；内阴影以 **padding 盒**为
+  边界：阴影区是「偏移并按 spread 收缩后的形状之外」，模糊后按 padding 盒
+  （含圆角）裁切——边缘最深、向内容淡出。大盒子（精灵超过约 70 万像素）或
+  后端不实现 `engine.SpriteDrawer` 时退化：外阴影用圆角矩形多层近似（后端
+  实现 `engine.Clipper` 时按四条裁剪带把边框盒挖掉；两者都不支持时盒内可能
+  透出阴影）；内阴影退化为 padding 盒内形状之外的实色带（忽略模糊与形状
+  圆角），后端连 `Clipper` 都没有时不画内阴影
 - 字体：generic/具名映射基于 Windows 自带字体文件，缺失时逐级回退 standard；
   无 webfont 加载、无斜体渲染（font-style 仅解析不渲染）；
   `monospace`/`cursive` 映射到 simsun.ttc 的 face 0（SimSun），Chrome 用的是
