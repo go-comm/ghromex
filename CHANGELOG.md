@@ -5,6 +5,31 @@
 
 ## 未发布
 
+**列表标记样式 `list-style-type` / `list-style-position` / `list-style`**：
+此前标记固定为 ul → `•`、ol → 序号，作者无法改。现在标记形态由
+`list-style-type` 决定，位置由 `list-style-position` 决定：
+
+- `list-style-type`：`disc` / `circle` / `square` / `decimal` /
+  `decimal-leading-zero` / `lower-alpha` / `upper-alpha`（`lower-latin` /
+  `upper-latin` 为别名）/ `lower-roman` / `upper-roman` / `none`；字母按
+  双射 26 进制（27 → `aa`）、罗马数字超出 1~3999 回退十进制。
+- `list-style-position`：`outside`（默认，标记右对齐到内容左缘 − 间隙）与
+  `inside`（标记画在内容盒内首行行首，首行文字整体右移标记宽 + 0.5em）。
+- `list-style` 简写：type / position / image 任意顺序，省略分量重置为初始值
+  （type=disc、position=outside）。`list-style-image` 接受 `url()` 但不绘制
+  （引擎无图片解码/加载）。
+- 两者都是继承属性：作者写在 `ul`/`ol` 上即可作用于其 `li`；UA 样式表把
+  `ul` 置为 disc、`ol` 置为 decimal（作者未声明时行为不变）。标记类型取
+  `li` 自身的计算值，因此 `li { list-style-type: … }` 也能覆盖。
+- 几何：符号类间隙 0.875em、编号类 0.6em（沿用 Chrome 实测值）；inside
+  只缩进 li 自身首行——首个内容子节点是块级时标记退回 outside 绘制，
+  避免压住块内容（Chrome 会把块首行整体右移，引擎不做这层传播）。
+- SVG 导出同步：标记文本、位置与屏幕渲染同口径。
+- 回归测试：`engine/list_style_internal_test.go`（解析/简写、标记文本、
+  布局与 inside 缩进、块级子节点回退）与 `engine/list_style_test.go`
+  （none 不落墨、square 画在盒外、inside 画在盒内）。
+- 文档：README 支持范围与已知限制、stylebook 列表节演示同步更新。
+
 **内阴影 `box-shadow: inset`**：此前只解析不绘制，现在与 Chrome 同口径渲染——
 内阴影以 **padding 盒**为边界，阴影区是「偏移并按 spread 收缩后的形状之外」，
 模糊后按 padding 盒（含圆角）裁切，因此边缘最深、向内容方向淡出。

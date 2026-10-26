@@ -458,6 +458,9 @@ table-footer-group/table-row/table-cell)`、`width/height`、
 与 12 个单边长写（四边可独立宽度/颜色/样式）、`border-radius`(四角统一，仅水平半径)、
 `border-collapse(collapse/separate)`、`border-spacing(1~2 值，px/pt/dp/%)`、
 `caption-side(top/bottom)`、`empty-cells(show/hide)`、
+`list-style-type(disc/circle/square/decimal/decimal-leading-zero/lower|upper-alpha/
+lower|upper-roman/none)`、`list-style-position(outside/inside)`、`list-style` 简写
+（`list-style-image` 接受但忽略，标记仍按 type 画）、
 `box-shadow`（外阴影与内阴影 `inset`；逗号分隔多条、px/pt/dp 偏移/模糊/扩散、
 颜色，第一条在最上层；内阴影按 padding 盒裁切并支持 `border-radius`）、
 `background-color`/`background`、`color`、`font-size`、`font-weight(bold)`、`font-family`、
@@ -505,7 +508,7 @@ CSS 2.1 §10.8.1 取底外边距边——Chrome 的 textarea 计算 overflow 非
 框架，按钮悬停毫无反馈会显得「死了」。作者 CSS 仍可覆盖（作者来源优先于 UA
 来源，与 CSS 级联一致）；
 表格完整模型（display 家族 + colspan/rowspan + border-spacing + 题注），
-列表标记等仍是近似模型，见「已知限制」；
+列表标记为引擎自绘（支持 list-style-type / list-style-position），几何仍是近似模型，见「已知限制」；
 字体默认语义对齐 Chrome（Windows）并做 UI 取向调整：初始字号 16px；
 standard（未指定 family）默认 sans-serif → Arial（区别于 Chrome 的 Times，更贴桌面 UI）；
 serif → Times New Roman、sans-serif → Arial、system-ui → Segoe UI、fantasy → Impact、
@@ -662,7 +665,7 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
   已知边界：collapse 下不做相邻边框的「宽者胜」仲裁（取先声明格）；rowspan 跨行组
   （thead→tbody）不合并；`table-layout` 无布局语义（始终自动表格布局）；列宽取
   **内容最大值**（不做浏览器的自动表格布局分配，Chrome 带小数像素）
-- 列表：缩进/外边距/标记已实现并与 Chrome 对齐（ul 的 •、ol 的序号；标记位置按内容左缘 −0.75em 近似）；仍无 `display:list-item` 与 `list-style-type`（作者自定义标记类型不生效）
+- 列表：缩进/外边距/标记已实现并与 Chrome 对齐（ul 的 •、ol 的序号；标记位置按内容左缘 − 间隙近似，符号类 0.875em / 编号类 0.6em）。`list-style-type`（disc/circle/square/decimal/decimal-leading-zero/lower|upper-alpha/lower|upper-roman/none）与 `list-style-position`（outside/inside）及 `list-style` 简写已支持；仍无 `display:list-item`（标记只对 ul/ol 的 li 子元素生成）与 `list-style-image`（`url()` 只解析、不绘制）；`inside` 只缩进 li 自身的首行，li 首个内容子节点是块级时标记退回 outside 绘制（Chrome 会把块首行整体右移）
 - `white-space` 仅 `pre` 一个关键字；`line-height` 不支持 `em`/`rem`/`vh` 等单位
   （只认无单位数字、百分比与 px；其余整条声明忽略，保留继承来的值）；
   `vertical-align` 的 `top`/`bottom` 与行盒最终高度互相依赖，引擎迭代两轮收敛，

@@ -190,9 +190,15 @@ type htmlElement struct {
 	contentW int
 	contentH int
 	// listMarker 是列表项的标记文本（"•" / "1." / "2."…）。引擎没有
-	// list-item 概念，标记由布局期按父级 ul/ol 算出、绘制期画在内容左缘
-	// 左侧（Chrome 口径：右对齐到内容左缘 −0.5em）。
+	// list-item 概念，标记由布局期按父级 ul/ol 与 list-style-type 算出、
+	// 绘制期画在内容左缘左侧（Chrome 口径：右对齐到内容左缘 − 间隙）。
 	listMarker string
+	// listMarkerKind 是标记类型（list-style-type 的计算值），决定绘制
+	// 间隙（符号类 0.875em / 编号类 0.6em）。
+	listMarkerKind ListStyleType
+	// listMarkerInside 表示 list-style-position: inside 且首行确有行内
+	// 内容——标记画在内容盒内首行之前，首行文字已按标记宽 + 间隙右移。
+	listMarkerInside bool
 	// generated 标记该元素是 ::before/::after 生成盒。生成盒放在宿主的
 	// children 里参与布局/绘制/命中，但不是 DOM 的一部分：Children() 会
 	// 过滤掉它，选择器（:first-child 等）与 InnerText 也看不到它。

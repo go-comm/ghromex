@@ -345,9 +345,9 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 		}
 	}
 
-	// 列表标记：与渲染路径同口径（内容左缘左侧、右对齐，间隙按标记类型
-	// 分别取 Chrome 实测值；垂直对齐首行），否则 SVG 导出与屏幕渲染不同构
-	//（看不到圆点/序号）。
+	// 列表标记：与渲染路径同口径（outside 画在内容左缘左侧、右对齐，间隙
+	// 按标记类型分别取 Chrome 实测值；inside 画在内容盒内首行行首），否则
+	// SVG 导出与屏幕渲染不同构（看不到圆点/序号）。
 	if base.listMarker != "" {
 		fpx, _, ffam := fontOf(comp)
 		mw, _ := fakeMeasureText(base.listMarker, fpx)
@@ -355,11 +355,10 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 		if lh <= 0 {
 			lh = base.height
 		}
-		gap := fpx * 3 / 5
-		if base.listMarker == "•" {
-			gap = fpx * 7 / 8
+		mx := base.x
+		if !base.listMarkerInside {
+			mx = base.x - listMarkerGap(fpx, base.listMarkerKind) - mw
 		}
-		mx := base.x - gap - mw
 		my := base.y
 		fill := "#000000"
 		if c := comp.Color(); c != nil {

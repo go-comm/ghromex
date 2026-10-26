@@ -155,6 +155,10 @@ func applyInheritedStyle(comp CSSStyleDeclaration, pc CSSStyleDeclaration) {
 	// 表格布局只读表格元素自身的声明。
 	comp.SetEmptyCells(pc.EmptyCells())
 	comp.SetCaptionSide(pc.CaptionSide())
+	// list-style-type / list-style-position 是继承属性：作者通常写在 ul/ol
+	// 上，标记由 li 读取；li 自己声明则覆盖。
+	comp.SetListStyleType(pc.ListStyleType())
+	comp.SetListStylePosition(pc.ListStylePosition())
 	if pcs, ok := pc.(*cssStyleDeclaration); ok {
 		if cs, ok := comp.(*cssStyleDeclaration); ok {
 			cs.fontSizeExplicit = pcs.fontSizeExplicit

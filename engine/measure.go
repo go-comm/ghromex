@@ -705,6 +705,21 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		family = el.computed.FontFamily()
 	}
 
+	// list-style-position: inside：标记占内容盒内首行行首，首行内容整体
+	// 右移「标记宽 + 0.5em 间隙」。flushLine 结束时把 cursorX 复位到 cx，
+	// 因此只有首行带缩进（与 CSS 的 inside 标记语义一致）。
+	//
+	// 只对「首个内容子节点是行内内容」的 li 生效：首个子节点是块级时，
+	// Chrome 会把该块的首行整体右移，引擎不做这层传播，标记退回 outside
+	// 绘制（避免压在块内容上，见 listMarkerBox）。
+	el.listMarkerInside = el.listMarker != "" && el.computed != nil &&
+		el.computed.ListStylePosition() == ListStyleInside &&
+		listItemStartsWithInline(el)
+	if el.listMarkerInside && g != nil {
+		mw, _ := g.MeasureText(el.listMarker, fontPx, bold, family)
+		cursorX += mw + listMarkerInsideGap(fontPx)
+	}
+
 	// strut：行盒的"撑杆"——块级自身的字体。浏览器每个行盒都含 strut，
 	// 即使行内全是别的字体（或整行为空），行盒也按 strut 计高。
 	//
@@ -1108,10 +1123,11 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				c.mbAbsorbed = true
 			}
 			che.effTop, che.effBot, che.hasEff = effTop, effBot, true
-			// 列表标记：引擎无 list-item 概念，按父级 ul/ol 自行计算（Chrome:
-			// ul → disc，ol → decimal 序号），绘制时画在内容左缘左侧。
+			// 列表标记：引擎无 list-item 概念，按父级 ul/ol 与 li 的
+			// list-style-type 计算（UA：ul → disc，ol → decimal），绘制时
+			// 画在内容左缘左侧（outside）或内容盒内首行之前（inside）。
 			if strings.EqualFold(che.tagName, "li") {
-				che.listMarker = listMarkerFor(el, che)
+				che.listMarker, che.listMarkerKind = listMarkerFor(el, che)
 			}
 
 			if prevBlockMB >= 0 {

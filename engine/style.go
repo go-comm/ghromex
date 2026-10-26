@@ -101,6 +101,40 @@ const (
 	EmptyCellsHide
 )
 
+// ListStyleType 是 list-style-type 的计算值：列表标记的形状或编号方案
+// （继承属性，只有 li 的标记绘制读取）。引擎没有 display:list-item，标记
+// 仍按「ul/ol 的 li 子元素」生成，但标记形态改由该属性决定（含 none）。
+type ListStyleType uint8
+
+const (
+	ListStyleDisc               ListStyleType = iota // 默认：实心圆点
+	ListStyleCircle                                  // 空心圆圈
+	ListStyleSquare                                  // 实心方块
+	ListStyleDecimal                                 // 1. 2. 3.
+	ListStyleDecimalLeadingZero                      // 01. 02. 03.
+	ListStyleLowerAlpha                              // a. b. c.
+	ListStyleUpperAlpha                              // A. B. C.
+	ListStyleLowerRoman                              // i. ii. iii.
+	ListStyleUpperRoman                              // I. II. III.
+	ListStyleNone                                    // 不显示标记
+)
+
+// isBulletListStyle 判断是否为符号类标记（圆点/圆圈/方块）。符号类的绘制
+// 间隙比编号类大（Chrome 实测 0.875em vs 0.6em）。
+func isBulletListStyle(t ListStyleType) bool {
+	return t == ListStyleDisc || t == ListStyleCircle || t == ListStyleSquare
+}
+
+// ListStylePosition 是 list-style-position 的计算值（继承属性）。
+// outside 把标记右对齐到内容盒左侧；inside 把标记放在内容盒内首行之前
+// （首行内容整体右移标记宽度 + 间隙）。
+type ListStylePosition uint8
+
+const (
+	ListStyleOutside ListStylePosition = iota // 默认：标记在内容盒外
+	ListStyleInside                            // 标记在内容盒内、首行之前
+)
+
 type Position uint8
 
 const (
@@ -369,6 +403,14 @@ type CSSStyleDeclaration interface {
 	// 继承、仅表格布局读取。默认 top。
 	CaptionSide() CaptionSide
 	SetCaptionSide(c CaptionSide) CSSStyleDeclaration
+	// ListStyleType 是列表标记的形状/编号方案（list-style-type），沿父链
+	// 继承，只有 li 的标记绘制读取。默认 disc（ol 的 UA 样式表置 decimal）。
+	ListStyleType() ListStyleType
+	SetListStyleType(t ListStyleType) CSSStyleDeclaration
+	// ListStylePosition 决定标记画在内容盒外（默认）还是盒内首行之前
+	// （list-style-position），沿父链继承。
+	ListStylePosition() ListStylePosition
+	SetListStylePosition(p ListStylePosition) CSSStyleDeclaration
 	// LineHeight 是 line-height 的值（normal/倍数/绝对长度），沿父链继承
 	// 的是**原始形态**（倍数相对子元素自己的字号解析）。
 	LineHeight() LineHeight
@@ -446,6 +488,8 @@ type cssStyleDeclaration struct {
 	borderSpacingV   Size
 	emptyCells       EmptyCells
 	captionSide      CaptionSide
+	listStyleType    ListStyleType
+	listStylePos     ListStylePosition
 	lineHeight       LineHeight
 	verticalAlign    VerticalAlign
 	verticalAlignOff Size
@@ -487,6 +531,8 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	c.SetBorderSpacing(sph, spv)
 	c.SetEmptyCells(s.EmptyCells())
 	c.SetCaptionSide(s.CaptionSide())
+	c.SetListStyleType(s.ListStyleType())
+	c.SetListStylePosition(s.ListStylePosition())
 	c.SetLineHeight(s.LineHeight())
 	c.SetVerticalAlign(s.VerticalAlign())
 	c.SetVerticalAlignOffset(s.VerticalAlignOffset())
@@ -830,6 +876,24 @@ func (style *cssStyleDeclaration) CaptionSide() CaptionSide {
 
 func (style *cssStyleDeclaration) SetCaptionSide(c CaptionSide) CSSStyleDeclaration {
 	style.captionSide = c
+	return style
+}
+
+func (style *cssStyleDeclaration) ListStyleType() ListStyleType {
+	return style.listStyleType
+}
+
+func (style *cssStyleDeclaration) SetListStyleType(t ListStyleType) CSSStyleDeclaration {
+	style.listStyleType = t
+	return style
+}
+
+func (style *cssStyleDeclaration) ListStylePosition() ListStylePosition {
+	return style.listStylePos
+}
+
+func (style *cssStyleDeclaration) SetListStylePosition(p ListStylePosition) CSSStyleDeclaration {
+	style.listStylePos = p
 	return style
 }
 

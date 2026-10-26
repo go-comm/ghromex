@@ -479,6 +479,118 @@ func parseOverflow(v string) Overflow {
 	}
 }
 
+// parseListStyleType 解析 list-style-type 关键字。只认引擎能画的方案：
+// 三种符号（disc/circle/square）、数字（decimal/decimal-leading-zero）、
+// 字母（lower/upper-alpha，lower/upper-latin 为别名）与罗马数字
+// （lower/upper-roman），以及 none。其余方案（lower-greek、cjk-* 等）
+// 返回 ok=false，整条声明被忽略（保留继承值）。
+func parseListStyleType(v string) (ListStyleType, bool) {
+	switch v {
+	case "disc":
+		return ListStyleDisc, true
+	case "circle":
+		return ListStyleCircle, true
+	case "square":
+		return ListStyleSquare, true
+	case "decimal":
+		return ListStyleDecimal, true
+	case "decimal-leading-zero":
+		return ListStyleDecimalLeadingZero, true
+	case "lower-alpha", "lower-latin":
+		return ListStyleLowerAlpha, true
+	case "upper-alpha", "upper-latin":
+		return ListStyleUpperAlpha, true
+	case "lower-roman":
+		return ListStyleLowerRoman, true
+	case "upper-roman":
+		return ListStyleUpperRoman, true
+	case "none":
+		return ListStyleNone, true
+	}
+	return ListStyleDisc, false
+}
+
+// parseListStylePosition 解析 list-style-position 关键字。
+func parseListStylePosition(v string) (ListStylePosition, bool) {
+	switch v {
+	case "inside":
+		return ListStyleInside, true
+	case "outside":
+		return ListStyleOutside, true
+	}
+	return ListStyleOutside, false
+}
+
+// applyListStyleShorthand 处理 list-style 简写：type / position / image
+// 三个分量按任意顺序出现。省略的分量重置为初始值（type=disc、
+// position=outside、image=none）——与 CSS 简写语义一致；出现未知分量时
+// 整条声明非法，直接忽略（保留继承值）。
+//
+// 图片标记（url()）引擎不支持（无图片解码/加载），解析时接受并忽略，
+// 标记仍按 list-style-type 画。
+func applyListStyleShorthand(comp CSSStyleDeclaration, value string) {
+	typ := ListStyleDisc
+	pos := ListStyleOutside
+	typSet := false
+	for _, part := range strings.Fields(strings.ToLower(stripURLFunctions(value))) {
+		if p, ok := parseListStylePosition(part); ok {
+			pos = p
+			continue
+		}
+		if part == "none" {
+			// none 同时是 type 与 image 的合法值：已有显式类型时归图片
+			//（忽略），否则按 type:none（Chrome 同口径）。
+			if !typSet {
+				typ, typSet = ListStyleNone, true
+			}
+			continue
+		}
+		if t, ok := parseListStyleType(part); ok {
+			typ, typSet = t, true
+			continue
+		}
+		return // 未知关键字：整条声明非法
+	}
+	comp.SetListStyleType(typ)
+	comp.SetListStylePosition(pos)
+}
+
+// stripURLFunctions 删除值里的 url(...) 函数（内容可含空格与引号），
+// 供 list-style 简写解析其余分量。list-style-image 不支持，但简写里的
+// url() 不应让整条声明失效。
+func stripURLFunctions(s string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(strings.ToLower(s), "url(")
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		b.WriteString(s[:i])
+		b.WriteByte(' ')
+		j := i + 4
+		depth := 1
+		var quote byte
+		for j < len(s) && depth > 0 {
+			c := s[j]
+			switch {
+			case quote != 0:
+				if c == quote {
+					quote = 0
+				}
+			case c == '"' || c == '\'':
+				quote = c
+			case c == '(':
+				depth++
+			case c == ')':
+				depth--
+			}
+			j++
+		}
+		s = s[j:]
+	}
+}
+
 // parseLineHeight 解析 line-height：normal / 无单位数字（倍数）/ 百分比
 // （倍数）/ px（绝对长度）。
 //
@@ -706,6 +818,19 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		} else {
 			comp.SetCaptionSide(CaptionSideTop)
 		}
+	case "list-style-type":
+		if t, ok := parseListStyleType(v); ok {
+			comp.SetListStyleType(t)
+		}
+	case "list-style-position":
+		if p, ok := parseListStylePosition(v); ok {
+			comp.SetListStylePosition(p)
+		}
+	case "list-style-image":
+		// 图片标记需要图片解码与加载，引擎不支持：接受 url(...)/none 但
+		// 不保存，标记仍按 list-style-type 绘制（详见 README 已知限制）。
+	case "list-style":
+		applyListStyleShorthand(comp, v)
 	case "top":
 		comp.SetInset(edgeRect(comp.Inset(), edgeTop, parseLength(v)))
 	case "right":

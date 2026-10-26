@@ -20,9 +20,32 @@ import (
 // 的多层折叠不参与（浏览器按层传递），空块自折叠同样未实现。
 // ---------------------------------------------------------------------------
 
-// listMarkerBox 计算列表标记的绘制盒：右对齐到内容左缘 −0.75em，垂直与内容
-// **首行**对齐（不是整个 li 盒居中——li 内含嵌套列表时，居中会把标记画到
-// 盒子中部，视觉上多出一行"孤立圆点"）。返回 ok=false 表示该元素无标记。
+// listMarkerGap 返回 outside 标记右缘与内容左缘之间的间隙。
+//
+// Chrome 实测两类标记的间隙不同：符号类（圆点/圆圈/方块）约 0.875em
+// （14px@16px），编号类（序号/字母/罗马数字）约 0.6em（9.6px@16px）——
+// 用同一个间隙会让其中一类明显偏左。
+func listMarkerGap(fpx int, t ListStyleType) int {
+	if isBulletListStyle(t) {
+		return fpx * 7 / 8
+	}
+	return fpx * 3 / 5
+}
+
+// listMarkerInsideGap 返回 inside 标记与首行文字之间的间隙（0.5em）。
+func listMarkerInsideGap(fpx int) int {
+	return fpx / 2
+}
+
+// listMarkerBox 计算列表标记的绘制盒。
+//
+// outside（默认）：右对齐到内容左缘 − 间隙，垂直与内容**首行**对齐（不是
+// 整个 li 盒居中——li 内含嵌套列表时，居中会把标记画到盒子中部，视觉上
+// 多出一行"孤立圆点"）。
+//
+// inside：标记落在内容盒内首行之前（左缘 = 内容左缘），首行文字由布局期
+// 整体右移标记宽 + 间隙（见 layoutChildren）。返回 ok=false 表示该元素
+// 无标记。
 func listMarkerBox(g Graphics, base *htmlElement, comp CSSStyleDeclaration) (x, y, w, h int, ok bool) {
 	if base == nil || base.listMarker == "" {
 		return 0, 0, 0, 0, false
@@ -33,42 +56,147 @@ func listMarkerBox(g Graphics, base *htmlElement, comp CSSStyleDeclaration) (x, 
 	if lh <= 0 {
 		lh = base.height
 	}
-	// 标记盒右缘 = 内容左缘 − 间隙。Chrome 实测两类标记的间隙不同：disc 圆点
-	// 约 0.875em（14px@16px），decimal 序号约 0.6em（9.6px@16px）——用同一个
-	// 间隙会让其中一类明显偏左。
-	gap := fpx * 3 / 5
-	if base.listMarker == "•" {
-		gap = fpx * 7 / 8
+	if base.listMarkerInside {
+		return base.x, base.y, mw, lh, true
 	}
+	gap := listMarkerGap(fpx, base.listMarkerKind)
 	return base.x - gap - mw, base.y, mw, lh, true
 }
 
-// listMarkerFor 返回列表项的标记文本：ul 用 disc（"•"），ol 用 decimal
-// （"1." "2."…，序号按同级 li 的次序）；父级不是列表则返回 ""。
-// 引擎没有 list-item 概念，标记在布局期算出、绘制期由 render.go 画出。
-func listMarkerFor(parent *htmlElement, child *htmlElement) string {
-	if parent == nil || child == nil {
-		return ""
+// listItemStartsWithInline 判断 li 的首个内容子节点是否属于行内内容
+// （文本或行内级盒）。inside 标记只在这种情形下缩进首行：首个内容子节点
+// 是块级时，Chrome 会把该块的首行整体右移，引擎不做这层传播——标记退回
+// outside 绘制，避免压住块内容。空 li 返回 true（标记仍画在内容盒内）。
+func listItemStartsWithInline(el *htmlElement) bool {
+	for _, c := range el.children {
+		if _, ok := c.(*textNode); ok {
+			return true
+		}
+		cb := inner(c)
+		if cb == nil {
+			continue
+		}
+		if cb.computed == nil {
+			return true
+		}
+		d := cb.computed.Display()
+		if d == DisplayNone {
+			continue
+		}
+		return d != DisplayBlock && d != DisplayTable
 	}
-	switch strings.ToLower(parent.tagName) {
-	case "ul":
-		return "•"
-	case "ol":
-		n := 0
-		for _, c := range parent.children {
-			cb := inner(c)
-			if cb == nil {
-				continue
-			}
-			if strings.EqualFold(cb.tagName, "li") {
-				n++
-				if cb == child {
-					return strconv.Itoa(n) + "."
-				}
+	return true
+}
+
+// listMarkerFor 返回列表项的标记文本与标记类型。
+//
+// 类型取 li 自身的计算值：list-style-type 从 ul/ol 继承，UA 样式表把
+// ul 置为 disc、ol 置为 decimal；作者写在 ul/ol/li 上的声明都会生效。
+// 编号类标记的序号按同级 li 的次序（CSS 的 list-item 计数器语义）。
+// 父级不是 ul/ol 或类型为 none 时返回空标记。
+func listMarkerFor(parent *htmlElement, child *htmlElement) (string, ListStyleType) {
+	if parent == nil || child == nil || child.computed == nil {
+		return "", ListStyleDisc
+	}
+	tag := strings.ToLower(parent.tagName)
+	if tag != "ul" && tag != "ol" {
+		return "", ListStyleDisc
+	}
+	t := child.computed.ListStyleType()
+	if t == ListStyleNone {
+		return "", t
+	}
+	if isBulletListStyle(t) {
+		return listMarkerText(t, 0), t
+	}
+	n := 0
+	for _, c := range parent.children {
+		cb := inner(c)
+		if cb == nil {
+			continue
+		}
+		if strings.EqualFold(cb.tagName, "li") {
+			n++
+			if cb == child {
+				return listMarkerText(t, n), t
 			}
 		}
 	}
-	return ""
+	return "", t
+}
+
+// listMarkerText 按标记类型生成第 n 项（1 起）的标记文本。符号类忽略 n。
+func listMarkerText(t ListStyleType, n int) string {
+	switch t {
+	case ListStyleDisc:
+		return "•"
+	case ListStyleCircle:
+		return "◦"
+	case ListStyleSquare:
+		return "▪"
+	case ListStyleNone:
+		return ""
+	case ListStyleDecimal:
+		return strconv.Itoa(n) + "."
+	case ListStyleDecimalLeadingZero:
+		if n >= 0 && n < 10 {
+			return "0" + strconv.Itoa(n) + "."
+		}
+		return strconv.Itoa(n) + "."
+	case ListStyleLowerAlpha:
+		return alphaListMarker(n, false) + "."
+	case ListStyleUpperAlpha:
+		return alphaListMarker(n, true) + "."
+	case ListStyleLowerRoman:
+		return romanListMarker(n, false) + "."
+	case ListStyleUpperRoman:
+		return romanListMarker(n, true) + "."
+	}
+	return strconv.Itoa(n) + "."
+}
+
+// alphaListMarker 把序号转成字母标记（双射 26 进制）：1→a、26→z、
+// 27→aa、52→az、53→ba（与 Chrome 的 lower-alpha 一致）。
+func alphaListMarker(n int, upper bool) string {
+	if n <= 0 {
+		return ""
+	}
+	base := byte('a')
+	if upper {
+		base = 'A'
+	}
+	var buf []byte
+	for n > 0 {
+		n--
+		buf = append(buf, base+byte(n%26))
+		n /= 26
+	}
+	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
+		buf[i], buf[j] = buf[j], buf[i]
+	}
+	return string(buf)
+}
+
+// romanListMarker 把序号转成罗马数字：1→i、4→iv、9→ix、14→xiv。
+// 超出 1~3999 时回退十进制（CSS 未规定超范围的表示，Chrome 用十进制）。
+func romanListMarker(n int, upper bool) string {
+	if n <= 0 || n >= 4000 {
+		return strconv.Itoa(n)
+	}
+	values := [...]int{1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1}
+	symbols := [...]string{"M", "CM", "D", "CD", "C", "XC", "L", "XL", "X", "IX", "V", "IV", "I"}
+	var b strings.Builder
+	for i, v := range values {
+		for n >= v {
+			b.WriteString(symbols[i])
+			n -= v
+		}
+	}
+	s := b.String()
+	if !upper {
+		s = strings.ToLower(s)
+	}
+	return s
 }
 
 // flowBlockChildren 返回元素内可参与折叠的流内块级子块（按文档顺序）。

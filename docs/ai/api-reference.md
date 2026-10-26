@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-26 11:38
+> 生成时间: 2026-10-26 12:12
 
 ---
 
@@ -1518,6 +1518,14 @@ type CSSStyleDeclaration interface {
 	// 继承、仅表格布局读取。默认 top。
 	CaptionSide() CaptionSide
 	SetCaptionSide(c CaptionSide) CSSStyleDeclaration
+	// ListStyleType 是列表标记的形状/编号方案（list-style-type），沿父链
+	// 继承，只有 li 的标记绘制读取。默认 disc（ol 的 UA 样式表置 decimal）。
+	ListStyleType() ListStyleType
+	SetListStyleType(t ListStyleType) CSSStyleDeclaration
+	// ListStylePosition 决定标记画在内容盒外（默认）还是盒内首行之前
+	// （list-style-position），沿父链继承。
+	ListStylePosition() ListStylePosition
+	SetListStylePosition(p ListStylePosition) CSSStyleDeclaration
 	// LineHeight 是 line-height 的值（normal/倍数/绝对长度），沿父链继承
 	// 的是**原始形态**（倍数相对子元素自己的字号解析）。
 	LineHeight() LineHeight
@@ -1945,6 +1953,30 @@ const (
 	LineHeightFactor
 	// LineHeightLength 是绝对行高（px）。
 	LineHeightLength
+)
+type ListStylePosition uint8
+    ListStylePosition 是 list-style-position 的计算值（继承属性）。 outside
+    把标记右对齐到内容盒左侧；inside 把标记放在内容盒内首行之前 （首行内容整体右移标记宽度 + 间隙）。
+
+const (
+	ListStyleOutside ListStylePosition = iota // 默认：标记在内容盒外
+	ListStyleInside                           // 标记在内容盒内、首行之前
+)
+type ListStyleType uint8
+    ListStyleType 是 list-style-type 的计算值：列表标记的形状或编号方案 （继承属性，只有 li 的标记绘制读取）。引擎没有
+    display:list-item，标记 仍按「ul/ol 的 li 子元素」生成，但标记形态改由该属性决定（含 none）。
+
+const (
+	ListStyleDisc               ListStyleType = iota // 默认：实心圆点
+	ListStyleCircle                                  // 空心圆圈
+	ListStyleSquare                                  // 实心方块
+	ListStyleDecimal                                 // 1. 2. 3.
+	ListStyleDecimalLeadingZero                      // 01. 02. 03.
+	ListStyleLowerAlpha                              // a. b. c.
+	ListStyleUpperAlpha                              // A. B. C.
+	ListStyleLowerRoman                              // i. ii. iii.
+	ListStyleUpperRoman                              // I. II. III.
+	ListStyleNone                                    // 不显示标记
 )
 type MouseEvent struct {
 	Type    string

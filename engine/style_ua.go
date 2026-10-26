@@ -34,6 +34,12 @@ h3 { display: block; font-size: 19px; font-weight: bold; margin: 19px 0; } /* 1.
      会让多个 li 挤在同一行。列表标记（disc/decimal）引擎无 list-item 概念，
      改由布局/绘制层按 ul/ol 自行绘制（measure.go / render.go）。 */
   ul, ol { display: block; margin: 16px 0; padding-left: 40px; }
+  /* 标记类型：Chrome UA 的 ul → disc、ol → decimal（CSS 初始值本身是
+     disc；ol 必须显式置 decimal，否则作者写的 list-style-type 不生效时
+     ol 也会退化成圆点）。list-style-type 继承给 li，作者写在 ul/ol 上
+     即可覆盖。 */
+  ul { list-style-type: disc; }
+  ol { list-style-type: decimal; }
   /* 嵌套列表的外边距为 0（Chrome UA 实测：内层 ul 的 margin 计算值为 0，
      不是外层的 1em）——否则内层列表会额外多出 16px 上间距，嵌套列表的
      整块高度比浏览器高 34px。 */

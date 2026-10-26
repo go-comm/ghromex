@@ -126,16 +126,37 @@ a  b   c    d</pre>
 			<dd>dd 第二条</dd>
 		</dl>
 		<ul>
-			<li>ul 无序列表（标记引擎自绘）</li>
+			<li>ul 无序列表（UA disc）</li>
 			<li>第二项</li>
 		</ul>
 		<ol>
-			<li>ol 有序列表（序号引擎自绘）</li>
+			<li>ol 有序列表（UA decimal）</li>
 			<li>第二项</li>
 		</ol>
+		<ul class="ls-square">
+			<li>list-style-type: square</li>
+			<li>第二项</li>
+		</ul>
+		<ol class="ls-roman">
+			<li>list-style-type: upper-roman</li>
+			<li>第二项</li>
+			<li>第三项</li>
+		</ol>
+		<ul class="ls-inside">
+			<li>list-style-position: inside：标记在内容盒内，长文本换行后第二行回到内容左缘</li>
+		</ul>
+		<ul class="ls-none">
+			<li>list-style: none（导航/菜单常用）</li>
+			<li>第二项</li>
+		</ul>
 	</div>
 	<p class="note">列表标记（圆点/序号）由引擎在布局期自绘，Chrome 是 <code class="inl">::marker</code>
-		伪元素——结果一致，机制不同；<code class="inl">list-style*</code> 属性两边都不生效于引擎。</p>
+		伪元素——结果一致，机制不同。支持 <code class="inl">list-style-type</code>
+		（disc / circle / square / decimal / decimal-leading-zero / lower-alpha /
+		upper-alpha / lower-roman / upper-roman / none）、
+		<code class="inl">list-style-position</code>（outside / inside）与
+		<code class="inl">list-style</code> 简写；<code class="inl">list-style-image</code>
+		只解析不绘制。</p>
 </div>
 
 <!-- ===== 语义块标签 ===== -->
@@ -614,7 +635,7 @@ a  b   c    d</pre>
 			<tr><td><code class="inl">cursor</code></td><td>光标样式</td><td class="x">忽略，光标恒默认</td></tr>
 			<tr><td><code class="inl">transform</code> / <code class="inl">transition</code> / <code class="inl">animation</code> / <code class="inl">filter</code></td><td>变换/过渡/动画/滤镜</td><td class="x">忽略</td></tr>
 			<tr><td><code class="inl">background-image</code> / 渐变 / <code class="inl">url()</code> / background-position/size/repeat</td><td>图片与渐变背景</td><td class="x">background 简写只取颜色 token</td></tr>
-			<tr><td><code class="inl">list-style*</code></td><td>标记形状/图片</td><td class="x">忽略（标记由引擎按 ol/ul 自绘）</td></tr>
+			<tr><td><code class="inl">list-style-image</code></td><td>图片标记</td><td class="x">解析但忽略（标记按 type 画）</td></tr>
 			<tr><td><code class="inl">font-style: italic</code></td><td>斜体</td><td class="x">不解析、无斜体字形</td></tr>
 			<tr><td><code class="inl">letter-spacing</code> / <code class="inl">word-spacing</code> / <code class="inl">text-transform</code> / <code class="inl">text-shadow</code></td><td>字距/大小写/文字阴影</td><td class="x">忽略</td></tr>
 			<tr><td><code class="inl">min/max-width</code> / <code class="inl">min/max-height</code></td><td>尺寸钳制</td><td class="x">忽略</td></tr>

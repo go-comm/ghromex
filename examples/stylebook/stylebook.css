@@ -1243,3 +1243,9 @@ table.unsup th {
 table.unsup td.x {
 	color: #b3392f;
 }
+
+/* ===== 列表标记（list-style-*）===== */
+.ls-square { list-style-type: square; }
+.ls-roman { list-style-type: upper-roman; }
+.ls-inside { list-style-position: inside; }
+.ls-none { list-style: none; }
