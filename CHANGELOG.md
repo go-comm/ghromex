@@ -5,6 +5,15 @@
 
 ## 未发布
 
+**font-weight 数字权重归档修复**：
+`font-weight` 解析原先只把 `bold`/700/800/900 判为粗体，`600` 等其余值一律
+落成 normal——GitHub markdown 的 h1~h6 与表格 th 全部是 `font-weight: 600`，
+作者的 600 覆盖 UA 的 bold 后整页标题画成细体（会议纪要页「标题那么细」的
+根因）。现按 Chrome 就近选面归档：550~900 取粗体面、100~500 取正体面
+（引擎只有正/粗两档字面）；`bolder`/`lighter` 按二档模型等价归粗/正；
+非法值（var() 未展开等）按 CSS 语义丢弃，不再误覆盖成 normal。
+回归：`TestFontWeightMapping`。
+
 **@media 多规则块泄漏修复**：
 带块 at-rule 的跳过原先只收到块内**第一个** `}`，`@media (prefers-color-scheme: dark)`
 等多规则块从第二条起被提升成顶层规则应用（会议纪要页亮色背景漏出暗色表格）。

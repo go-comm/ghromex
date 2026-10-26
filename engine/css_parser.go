@@ -1179,10 +1179,27 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 			}
 		}
 	case "font-weight":
-		if v == "bold" || v == "700" || v == "800" || v == "900" {
+		// 引擎只有正/粗两档字面，按 Chrome「就近选面」口径归档：可用字面
+		// 只有 400/700 时，600~900 都落粗体面（600 是 GitHub markdown 全部
+		// 标题/th 的写法，漏掉它会让作者的 600 覆盖 UA bold 后标题变细）；
+		// 400/500 及以下落正体。bolder/lighter 在二档模型下按相对继承值
+		// 升降的结论恒等于无条件取粗/正体（Normal→bolder=Bold，
+		// Bold→bolder=Bold；Bold→lighter=Normal，Normal→lighter=Normal）。
+		switch v {
+		case "bold", "bolder":
 			comp.SetFontWeight(FontWeightBold)
-		} else {
+		case "normal", "lighter":
 			comp.SetFontWeight(FontWeightNormal)
+		default:
+			if n, err := strconv.Atoi(v); err == nil {
+				if n >= 550 { // >500 的就近搜索向上取 700；400/500 向下取 400
+					comp.SetFontWeight(FontWeightBold)
+				} else {
+					comp.SetFontWeight(FontWeightNormal)
+				}
+			}
+			// 其余（var() 未展开、拼写错误）按 CSS 语义丢弃本条声明，
+			// 保留继承/UA 给的值，不覆盖成 normal。
 		}
 	case "font-style":
 		if s, ok := parseFontStyle(v); ok {

@@ -79,3 +79,45 @@ func TestParseCSSRulesSkipsMultiRuleMediaBlock(t *testing.T) {
 		t.Errorf("块后规则不是 h1：%+v", s.compounds)
 	}
 }
+
+// TestFontWeightMapping 回归（会议纪要页调试）：GitHub markdown 的标题与
+// 表格 th 用 font-weight:600，旧解析只把 700/800/900 判为粗体，600 落成
+// normal——作者 600 覆盖 UA 的 bold 后整页标题全画成细体。引擎只有
+// 正/粗两档字面，按 Chrome 就近选面归档：550 及以上取粗，500 及以下取正；
+// bolder/lighter 相对继承值升降（Normal→bolder=Bold，Bold→bolder=Bold，
+// Bold→lighter=Normal，Normal→lighter=Normal；近似到无条件归档结果一致）。
+func TestFontWeightMapping(t *testing.T) {
+	cases := []struct {
+		value string
+		want  FontWeight
+	}{
+		{"normal", FontWeightNormal}, {"400", FontWeightNormal},
+		{"500", FontWeightNormal}, {"lighter", FontWeightNormal},
+		{"bold", FontWeightBold}, {"bolder", FontWeightBold},
+		{"550", FontWeightBold}, {"600", FontWeightBold},
+		{"700", FontWeightBold}, {"800", FontWeightBold}, {"900", FontWeightBold},
+	}
+	for _, c := range cases {
+		st := newStyle()
+		applyDecl(st, "font-weight", c.value)
+		if got := st.FontWeight(); got != c.want {
+			t.Errorf("font-weight:%s → %v, want %v", c.value, got, c.want)
+		}
+	}
+
+	// bolder/lighter 是相对值：继承值不同，结果不同。
+	st := newStyle()
+	st.SetFontWeight(FontWeightBold)
+	applyDecl(st, "font-weight", "lighter")
+	if st.FontWeight() != FontWeightNormal {
+		t.Errorf("Bold + lighter = %v, want Normal", st.FontWeight())
+	}
+
+	// 非法值（var() 未展开、拼写错误）按 CSS 语义丢弃，不覆盖继承值。
+	st = newStyle()
+	st.SetFontWeight(FontWeightBold)
+	applyDecl(st, "font-weight", "var(--x)")
+	if st.FontWeight() != FontWeightBold {
+		t.Errorf("非法值应保留继承的 Bold，实际被覆盖为 %v", st.FontWeight())
+	}
+}
