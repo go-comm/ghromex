@@ -532,44 +532,56 @@ func newAutoRect() Rect {
 	return NewRect(a, a, a, a)
 }
 
+// 与 htmlElement 同样的三段式排布：含指针的字段（Size/Rect/Color/Image 都是
+// 接口，加上切片、map、string）集中在前，纯数值居中，22 个单字节枚举与标记
+// 收尾。原顺序里每个枚举后面都被插进 1~7B 的对齐空洞，合计 42B；紧凑排列后
+// sizeof 由 440B 降到 400B——每个节点都持有一个样式对象，六万节点约省 2.5MB。
 type cssStyleDeclaration struct {
+	// —— 第一段：含指针
 	CSSStyleDeclaration
-
-	display         Display
-	width           Size
-	height          Size
-	margin          Rect
-	padding         Rect
-	borderW         Rect
-	borderStyles    [4]BorderStyle
-	borderColors    [4]Color
-	boxShadow       []Shadow
-	backgroundColor Color
-	backgroundImage Image
-	color           Color
-	fontSize        Size
-	// fontSizeExplicit 记录字号是否来自显式 font-size 声明（含祖先继承）。
-	// Chrome 的 monospace 通用族只在字号仍是「默认值」时才用 13px 固定字号
-	// （作者显式给过 16px 时保持 16），需要这个来源标记来判断。
-	fontSizeExplicit bool
+	width            Size
+	height           Size
+	margin           Rect
+	padding          Rect
+	borderW          Rect
+	inset            Rect
+	borderColors     [4]Color
+	boxShadow        []Shadow
+	backgroundColor  Color
+	backgroundImage  Image
+	color            Color
+	fontSize         Size
+	borderRadius     Size
+	borderSpacingH   Size
+	borderSpacingV   Size
+	verticalAlignOff Size
 	fontFamily       string
-	fontWeight       FontWeight
+
+	// —— 第二段：纯数值
 	// fontWeightNum 保留 font-weight 的**数值**原值（100~1000），0 表示
 	// 声明未携带数字（UA 直接写 bold/normal、或外部实现 SetFontWeight）。
 	// 公开接口仍是两档 FontWeight（外部实现不受影响）；后端选择中间字重
 	// 字面（600 → Segoe UI Semibold）时用它，见 core.WeightedPaint。
 	fontWeightNum int
-	fontStyle     FontStyle
+	zindex        int
+	lineHeight    LineHeight
+	opacity       float32
+
+	// —— 第三段：单字节枚举与标记
+	display      Display
+	borderStyles [4]BorderStyle
+	// fontSizeExplicit 记录字号是否来自显式 font-size 声明（含祖先继承）。
+	// Chrome 的 monospace 通用族只在字号仍是「默认值」时才用 13px 固定字号
+	// （作者显式给过 16px 时保持 16），需要这个来源标记来判断。
+	fontSizeExplicit bool
+	fontWeight       FontWeight
+	fontStyle        FontStyle
 	visibility       Visibility
 	floatSide        FloatSide
 	clearSide        ClearSide
-	opacity          float32
 	cursor           Cursor
 	textAlign        TextAlign
-	borderRadius     Size
 	position         Position
-	inset            Rect
-	zindex           int
 	boxSizing        BoxSizing
 	textDecoration   TextDecoration
 	overflowX        Overflow
@@ -577,15 +589,11 @@ type cssStyleDeclaration struct {
 	whiteSpace       WhiteSpace
 	pointerEvents    PointerEvents
 	borderCollapse   BorderCollapse
-	borderSpacingH   Size
-	borderSpacingV   Size
 	emptyCells       EmptyCells
 	captionSide      CaptionSide
 	listStyleType    ListStyleType
 	listStylePos     ListStylePosition
-	lineHeight       LineHeight
 	verticalAlign    VerticalAlign
-	verticalAlignOff Size
 }
 
 // copyStyle 复制样式值（不含继承字段之外的引用语义差异）。
