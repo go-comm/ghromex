@@ -90,6 +90,22 @@ func OnDocumentMouseDown(doc HTMLDocument, x, y int) bool {
 	}
 	// 按下即视为要操作：收起提示气泡（浏览器同行为，收起后不换目标不追回）。
 	d.dismissTooltip()
+	// 文档级覆盖滚动条优先于内容命中：滚动条只管滚动——不聚焦、不落光标、
+	// 不进入拖选，按下即跳到点击位置，随后拖动跟随指针（见
+	// viewportBarScrollTo）。返回 true 让后端进入拖动通道、抬起时跳过
+	// click（结构同 textarea 滚动条）。
+	vw, vh := d.viewportSize()
+	if root := inner(doc); root != nil {
+		if axisX, hit := viewportBarHit(root, vw, vh, x, y); hit {
+			if axisX {
+				d.dragViewAxis = -1
+			} else {
+				d.dragViewAxis = 1
+			}
+			viewportBarScrollTo(d, axisX, x, y)
+			return true
+		}
+	}
 	target := ElementAt(doc, x, y)
 	// 按下态（:active）：命中什么就按在什么上（命中空白则无按下态）。
 	// 状态变化要改样式，故走 SetActiveElement 的变更通知。
@@ -140,6 +156,10 @@ func OnDocumentMouseDrag(doc HTMLDocument, x, y int) bool {
 	if !ok {
 		return false
 	}
+	if d.dragViewAxis != 0 {
+		viewportBarScrollTo(d, d.dragViewAxis < 0, x, y)
+		return true
+	}
 	if d.dragScroll != nil {
 		textareaScrollTo(doc, d.dragScroll, y)
 		return true
@@ -161,6 +181,7 @@ func OnDocumentMouseUp(doc HTMLDocument) {
 	if d, ok := doc.(*htmlDocument); ok {
 		d.dragInput = nil
 		d.dragScroll = nil
+		d.dragViewAxis = 0
 	}
 	SetActiveElement(doc, nil)
 }

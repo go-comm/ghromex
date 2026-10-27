@@ -20,8 +20,10 @@ import (
 //     弹簧（位置+速度）逐帧推进，见 advanceScrollAnim/startScrollAnim。
 //
 // textarea 提供覆盖式滚动条 UI（绘制+拖拽见 textarea.go 的
-// textareaScrollbar）；通用容器（overflow 滚动）仍无滚动条，滚轮是唯一
-// 驱动源，也仍无 PageUp/PageDown 翻页与触控板惯性。
+// textareaScrollbar）；文档级滚动也有覆盖式滚动条（视口右缘/下缘，绘制+
+// 命中+拖拽见 viewport_scrollbar.go，拖拽立即到位不缓动）；通用容器
+// （overflow 滚动）仍无滚动条，滚轮是唯一驱动源，也仍无 PageUp/PageDown
+// 翻页与触控板惯性。
 
 // clampInt 夹紧到 [lo, hi]（hi < lo 时取 lo）。
 func clampInt(v, lo, hi int) int {

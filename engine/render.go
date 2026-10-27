@@ -147,6 +147,12 @@ func RenderNode(g Graphics, node HTMLElement) {
 	for _, pb := range collectPositioned(node) {
 		paintPositioned(g, pb.e, focus, vpW, vpH)
 	}
+	// 文档级覆盖滚动条：在所有页面内容（含定位/fixed 层）之上，select 浮层
+	// 与提示气泡之下——与 Chrome 覆盖式滚动条的层序一致。仅整文档渲染
+	// （node 是 HTMLDocument）时绘制；子树渲染（如控件局部重绘）无此条。
+	if doc != nil && vpW > 0 && vpH > 0 {
+		renderViewportScrollbars(g, inner(doc), vpW, vpH)
+	}
 	// select 选项浮层最后绘制：它覆盖其后的流内容与定位层，
 	// 与命中测试（ElementAt 优先查展开 option）保持同一层序语义。
 	// 浮层豁免裁剪（对齐浏览器原生下拉：可画到滚动容器/视口之外）。

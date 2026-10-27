@@ -126,8 +126,12 @@ func TestRenderCullKeepsVisiblePixels(t *testing.T) {
 	engine.RenderNode(full, doc2)
 
 	diff, firstX, firstY := 0, -1, -1
-	for y := 0; y < 820; y++ {
-		for x := 0; x < w; x++ {
+	// 右缘 8px 与下缘 8px 不参与对照：文档级覆盖滚动条（viewportScrollbarWidth）
+	// 只在对应轴溢出时出现——820 视口有纵条、6000 视口没有，这是特性差异
+	// 不是裁剪错误。
+	const scrollbarBand = 8
+	for y := 0; y < 820-scrollbarBand; y++ {
+		for x := 0; x < w-scrollbarBand; x++ {
 			r1, g1, b1, _, _ := culled.ColorAt(x, y)
 			r2, g2, b2, _, _ := full.ColorAt(x, y)
 			if r1 != r2 || g1 != g2 || b1 != b2 {

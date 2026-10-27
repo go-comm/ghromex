@@ -34,6 +34,24 @@ snip 正是在选区 MouseUp 的处理里原地 `MoveTo + Resize`，用户不动
 新窗口系的 (0,0)、窗口落到 (66,86)；临时关掉 `fixStale` 时该用例确实失败，
 报 `抓取点 = (30,40)`）。
 
+**文档级覆盖式滚动条**：
+长页面此前只有滚轮驱动、没有任何视觉指示（examples/browser 里不知道能不能
+滚、滚到哪了）。新增引擎级覆盖式滚动条（`engine/viewport_scrollbar.go`）：
+视口右缘/下缘溢出即显示 8px 半透明滑块（与 textarea 同配色，不占布局宽度、
+折行口径不变），绘制与命中/拖拽共用 `viewportBars` 同一几何源；滑块位置取
+**视觉**滚动偏移，滚轮缓动动画途中滑块与画面同步移动。交互：轨道按下即跳转
+（滑块中心对准指针）、拖动跟手——拖拽把该轴缓动动画直接贴到目标
+（`snapScrollAnim`，另一轴动画不受扰；Chrome 同款：拖滚动条无缓动、滚轮
+有）；`OnDocumentMouseDown` 优先于内容命中判掉（不聚焦、不落光标、不拖选，
+返回 true 让后端进拖动通道并在抬起时跳过 click），`OnDocumentClick` 也加守卫
+（按下-抬起未移动时 click 照常派发，挡住滚动条底下误点链接/控件）。层序：
+定位层/fixed 之上、select 浮层与提示气泡之下（RenderNode 挂点）。回归：
+`TestViewportScrollbarGeometry`/`TestViewportScrollbarDrag`/
+`TestViewportScrollbarKeepsFocusPath`/`TestViewportScrollbarHorizontal`/
+`TestViewportScrollbarThumbFollowsVisual`；`TestRenderCullKeepsVisiblePixels`
+对照区排除右/下缘 8px（覆盖条只在溢出视口出现，属特性差异）。通用 overflow
+容器仍无滚动条（本次只做文档级）。
+
 **CJK 静态字重面（会议纪要页 CJK 比 Chrome 细三档）**：
 CDP `CSS.getPlatformFontsForNode` 定位根因——Chrome 正文 CJK 用 Noto Sans SC
 Regular(400) 命名实例、标题/th 用 Bold(700)；而 `NotoSansSC-VF.ttf` 的 fvar

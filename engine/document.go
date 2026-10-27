@@ -133,7 +133,11 @@ type htmlDocument struct {
 	// dragScroll 是按在 textarea 覆盖滚动条上时的控件（与 dragInput 互斥）：
 	// 拖动期间指针 y 映射为滚动偏移（见 textareaScrollTo），抬起即清空。
 	dragScroll *htmlElement
-	changed    int64
+	// dragViewAxis 是按在文档级覆盖滚动条上时的拖拽轴（0=未在拖、1=纵、
+	// -1=横）：拖动期间指针映射为文档级滚动（见 viewportBarScrollTo），
+	// 抬起即清零。与 dragInput/dragScroll 互斥，按下时先于命中测试判掉。
+	dragViewAxis int
+	changed      int64
 	// scrollMark 是最近一次**滚动**变更的计数（scrollBy/wheel/光标跟随等
 	// 只动 scrollTop/scrollLeft 的路径），用于布局快速路径：滚动不改变盒
 	// 模型与级联，只需重平移，不必每帧全量重排。lastLayoutChange 是上次

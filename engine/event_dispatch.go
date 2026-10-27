@@ -107,6 +107,16 @@ func OnDocumentClick(doc HTMLDocument, x, y int) bool {
 	// 点击也收起提示气泡：点击后气泡不该挡在动作结果上（抬起时可能没发生
 	// 过按下——注入事件/程序派发都直接进这里，故与按下各自收起）。
 	dismissTooltip(doc)
+	// 落在文档级覆盖滚动条上的 click 不激活任何页面内容（滚动条只管滚动；
+	// 按下-抬起未移动过 3px 时后端不走 dragSelect、click 照常派发，需在此
+	// 挡住，否则滚动条底下的链接/控件会被误点——Chrome 同行为）。
+	if d, ok := doc.(*htmlDocument); ok {
+		if vw, vh := d.viewportSize(); vw > 0 && vh > 0 {
+			if _, hit := viewportBarHit(inner(doc), vw, vh, x, y); hit {
+				return false
+			}
+		}
+	}
 	ev := &MouseEvent{Type: EventClick, X: x, Y: y}
 	// 展开的 select 浮层绘制在最上层，命中优先于常规树遍历（见 ElementAt）。
 	target := ElementAt(doc, x, y)
