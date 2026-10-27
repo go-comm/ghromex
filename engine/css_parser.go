@@ -182,7 +182,9 @@ func parseCSSRules(src string) (rules []cssRule, imports []string) {
 		if len(decls) == 0 {
 			continue
 		}
-		for _, selStr := range strings.Split(selText, ",") {
+		// 规则层逗号切分必须识别括号（如 li:not(.a,.b) 不能把内部逗号当分隔符）。
+		// splitTopLevel 已支持引号与圆括号嵌套层级计数。
+		for _, selStr := range splitTopLevel(selText, ',') {
 			selStr = strings.TrimSpace(selStr)
 			if selStr == "" {
 				continue

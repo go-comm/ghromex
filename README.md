@@ -8,7 +8,7 @@
 
 - 纯 Go 渲染引擎：HTML 解析、CSS 级联、选择器（标签 / `.class` / `#id` / 简单组合，含特异度）、块级与行内（inline / inline-block）布局、文本按词/按字换行
 - 行内排版：`line-height`（normal / 倍数 / 百分比 / px；行距一半在文字之上、一半在之下，行盒高度严格等于声明值，倍数与百分比相对元素自身字号解析）、`vertical-align`（baseline / top / middle / bottom / text-top / text-bottom / sub / super / 长度 / 百分比；行内盒相对基线摆位，`<sup>`/`<sub>` 走同一条 UA 规则）
-- 伪类：`:hover` / `:focus` / `:active` / `:checked` / `:disabled` / `:enabled` / `:first-child` / `:last-child` / `:only-child` / `:root` / `:empty`；动态伪类的状态存在文档上（悬停/按下/焦点），状态变化触发重排重绘 → 级联重算，样式随之更新；`:hover`/`:active` 沿父链继承（鼠标停在子元素上时祖先同样匹配）
+- 伪类：`:hover` / `:focus` / `:active` / `:checked` / `:disabled` / `:enabled` / `:first-child` / `:last-child` / `:only-child` / `:root` / `:empty` / `:not()` / `:nth-child()`；动态伪类的状态存在文档上（悬停/按下/焦点），状态变化触发重排重绘 → 级联重算，样式随之更新；`:hover`/`:active` 沿父链继承（鼠标停在子元素上时祖先同样匹配）
 - 定位与层叠：`position: relative / absolute / fixed`、`top/right/bottom/left`（含负值）、`z-index`；脱流盒第二遍布局，包含块 = 最近非 static 祖先 padding box / 视口；绘制分常规层 + 定位层（z 升序，同 z 按文档序），`z-index` 非 0 的定位元素与 `fixed` 元素建立层叠上下文，内部定位子树先局部排序再整体落层
 - 原生文件对话框：Windows Shell 的 `IFileDialog`（Vista 起的现代对话框），支持打开文件、打开多个文件、选择文件夹、另存为，带文件类型过滤与初始目录；纯 Win32 COM 调用，无 CGO、非 Windows 返回 `ErrUnsupported`
 - 原生消息框：user32 的 `MessageBoxW`（信息/警告/错误/询问四种图标，OK、确定-取消、是-否、是-否-取消四种按钮组合），不走 COM、不需要 STA
@@ -484,7 +484,10 @@ lower|upper-roman/none)`、`list-style-position(outside/inside)`、`list-style` 
 特异度。`:hover`/`:active` 沿父链继承——鼠标停在子元素上时祖先同样匹配；
 `:focus` 只落在焦点元素上。动态伪类的状态存在文档上，状态变化走
 「变更通知 → 重排重绘 → 级联重算」，与浏览器的链路一致；
-`:not()`/`:nth-child()` 未实现）、
+函数型伪类 `:not(选择器列表)`（参数列表任一命中即排除，特异度取参数
+最高者）与 `:nth-child(An+B)`（odd/even/整数/2n+1 全语法，只数元素兄弟）
+已实现，参数在解析期预解析；`:is()` 等其余函数型伪类与非法参数按
+CSS 语义整条选择器无效，永不匹配）、
 **伪元素** `::before`/`::after`（单冒号旧写法 `:before`/`:after` 等价；
 `content` 支持带引号字符串、`attr(属性名)` 与多分量拼接，`none`/`normal`
 不生成盒子；生成盒默认 `display:inline`，可写 `width/height/padding/
@@ -635,7 +638,7 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
 - `opacity` 是**近似**：引擎没有离屏图层/分组合成，实现为「子树里每次绘制动作的颜色 alpha 乘 opacity」——纯色背景、边框、文字、阴影的观感与浏览器基本一致，但**重叠内容会各自透出下层**（真实 CSS 是整个子树先合成成一张图再按 opacity 混合，重叠处不该叠出更深的颜色），半透明子元素叠加时偏差更明显。SVG 导出走 `<g opacity>`，语义与浏览器一致（导出比屏幕更准）
 - `float`/`clear` 的作用域是**每个父元素自己的块格式化上下文**：子元素内部产生的浮动只影响该子元素自己的行盒，不向父级的兄弟传播（真实 CSS 里子块未建立新 BFC 时浮动会外溢、影响后续兄弟与祖先高度）。另外浮动前的待排内容会先结束当前行（浮动总从新行开始），`float` 与 `display:inline-block` 同款 shrink-to-fit 宽度；浮动不参与外边距折叠
 - 行内盒的基线：inline-block 的基线取「盒底 − 字体 descent」（内容高度 = 行高时与 Chrome 的「最后一行基线」同值）；**定高盒装不下内容**（文字折行溢出盒外）时，Chrome 的基线是**最后一行**的基线（CSS 2.1 §10.8.1），引擎仍取盒底 → 同行的后续盒不会被推下去（差一整个行高）
-- 伪类只实现了常用的一组（`:hover`/`:focus`/`:active`/`:checked`/`:disabled`/`:enabled`/`:first-child`/`:last-child`/`:only-child`/`:root`/`:empty`），伪元素实现了 `::before`/`::after`（`content` 支持字符串与 `attr()`；`counter()`/`url()` 等未实现，未知伪元素一律不匹配）：`:not()`/`:nth-child()`/`:is()` 未实现；`:hover`/`:active` 沿父链继承但**不跨 shadow DOM/iframe 边界**（引擎无这些概念）；焦点扩展到 button/链接后，**Tab 仍只在可编辑输入之间循环**（浏览器会把按钮也纳入 Tab 序——引擎保留原行为以免打断记事本的「Tab 在文本框间移动」习惯）；悬停态变化会触发**整页重排**（级联是全量重算，见下条），大页面 + 高频鼠标移动时开销明显；`:focus` 只改样式，**按钮/链接不画焦点框**（引擎只给可编辑控件画蓝框）
+- 伪类实现了常用的一组加函数型（`:hover`/`:focus`/`:active`/`:checked`/`:disabled`/`:enabled`/`:first-child`/`:last-child`/`:only-child`/`:root`/`:empty`，以及 `:not(选择器列表)`/`:nth-child(An+B)`——参数在选择器解析期预解析，`:is()`/`:nth-of-type()` 等其余函数型伪类未实现，参数非法（`:not()` 空参、`:nth-child(2x)`）按 CSS 语义使整条选择器无效、永不匹配），伪元素实现了 `::before`/`::after`（`content` 支持字符串与 `attr()`；`counter()`/`url()` 等未实现，未知伪元素一律不匹配）；`:hover`/`:active` 沿父链继承但**不跨 shadow DOM/iframe 边界**（引擎无这些概念）；焦点扩展到 button/链接后，**Tab 仍只在可编辑输入之间循环**（浏览器会把按钮也纳入 Tab 序——引擎保留原行为以免打断记事本的「Tab 在文本框间移动」习惯）；悬停态变化会触发**整页重排**（级联是全量重算，见下条），大页面 + 高频鼠标移动时开销明显；`:focus` 只改样式，**按钮/链接不画焦点框**（引擎只给可编辑控件画蓝框）
 - `<input>` 可编辑仅支持 text/password 类型；radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate / 表单重置；无剪切（Ctrl+X）、无按词扩展选区（Ctrl+Shift+方向键）
 - `<select>` 仅鼠标交互（展开/收起/选中），无键盘上下键选择、无 multiple、无 optgroup；选项浮层不随视口裁剪（超出视口的选项画到窗口外）；收起态按内容收缩（文字 + 箭头位 16px，与 Chrome 同口径）
 - `<textarea>` 无剪切（Ctrl+X）、无按词扩展选区（Ctrl+Shift+方向键）；滚轮可滚动（超盒高的行随滚动偏移平移、半截行按裁剪截断；后端未实现 `Clipper` 时退化为整行丢弃）

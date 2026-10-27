@@ -325,6 +325,150 @@ func TestQuerySelectorWithPseudo(t *testing.T) {
 	}
 }
 
+// :not —— 排除参数选择器命中的元素。
+func TestPseudoNotExcludes(t *testing.T) {
+	doc := pseudoDoc(t, `<!doctype html><html><head><style>
+		div { width: 50px; height: 10px; }
+		div:not(.skip) { width: 120px; }
+	</style></head><body style="margin:0">
+		<div id="s" class="skip"></div><div id="n"></div>
+	</body></html>`)
+	if got := widthOf(t, doc.QuerySelector("#s")); got != 50 {
+		t.Errorf("被排除元素宽 = %d, want 50（:not(.skip) 不该命中）", got)
+	}
+	if got := widthOf(t, doc.QuerySelector("#n")); got != 120 {
+		t.Errorf("普通元素宽 = %d, want 120（:not 未生效）", got)
+	}
+}
+
+// :not 参数是逗号分隔的选择器列表（Selectors 4）——规则层的逗号切分
+// 必须认括号：li:not(.a, .b) 不能从参数中间劈开。
+func TestPseudoNotSelectorList(t *testing.T) {
+	doc := pseudoDoc(t, `<!doctype html><html><head><style>
+		li { width: 30px; height: 10px; }
+		li:not(.a, .b) { width: 90px; }
+	</style></head><body style="margin:0"><ul>
+		<li id="a" class="a">1</li><li id="b" class="b">2</li>
+		<li id="c">3</li><li id="d">4</li>
+	</ul></body></html>`)
+	for id, want := range map[string]int{"a": 30, "b": 30, "c": 90, "d": 90} {
+		if got := widthOf(t, doc.QuerySelector("#"+id)); got != want {
+			t.Errorf("#%s 宽 = %d, want %d", id, got, want)
+		}
+	}
+}
+
+// :not 参数里可以嵌套函数型伪类（括号配对吞参，:nth-child(2) 整体作参）。
+func TestPseudoNotNestedFunctional(t *testing.T) {
+	doc := pseudoDoc(t, `<!doctype html><html><head><style>
+		p { width: 40px; height: 10px; }
+		p:not(:nth-child(2)) { width: 77px; }
+	</style></head><body style="margin:0">
+		<p id="x">1</p><p id="y">2</p><p id="z">3</p>
+	</body></html>`)
+	if got := widthOf(t, doc.QuerySelector("#y")); got != 40 {
+		t.Errorf("第 2 个 p 宽 = %d, want 40（:not(:nth-child(2)) 不该命中它）", got)
+	}
+	if got := widthOf(t, doc.QuerySelector("#x")); got != 77 {
+		t.Errorf("第 1 个 p 宽 = %d, want 77", got)
+	}
+}
+
+// :not 的特异度取参数最高者（Selectors 4 §10）：:not(#x) 带 id 档，
+// 压过普通 class 规则，即便先声明。
+func TestPseudoNotSpecificity(t *testing.T) {
+	doc := pseudoDoc(t, `<!doctype html><html><head><style>
+		p { height: 10px; }
+		p:not(#zzz) { width: 22px; }
+		p.a { width: 11px; }
+	</style></head><body style="margin:0">
+		<p id="d" class="a">x</p>
+	</body></html>`)
+	if got := widthOf(t, doc.QuerySelector("#d")); got != 22 {
+		t.Errorf("宽 = %d, want 22（:not(#zzz) 应按 id 档特异度压过 p.a）", got)
+	}
+}
+
+// :nth-child —— odd/even/整数，等特异度按文档序决胜（后声明胜出）。
+func TestPseudoNthChildBasics(t *testing.T) {
+	doc := pseudoDoc(t, `<!doctype html><html><head><style>
+		li { width: 20px; height: 10px; }
+		li:nth-child(odd) { width: 31px; }
+		li:nth-child(even) { width: 42px; }
+		li:nth-child(3) { width: 53px; }
+	</style></head><body style="margin:0"><ul>
+		<li id="l1">1</li><li id="l2">2</li><li id="l3">3</li>
+		<li id="l4">4</li><li id="l5">5</li>
+	</ul></body></html>`)
+	want := map[string]int{"l1": 31, "l2": 42, "l3": 53, "l4": 42, "l5": 31}
+	for id, w := range want {
+		if got := widthOf(t, doc.QuerySelector("#"+id)); got != w {
+			t.Errorf("#%s 宽 = %d, want %d", id, got, w)
+		}
+	}
+}
+
+// :nth-child An+B 全形态：2n + 1（带空格）、-n+2（前两个）、纯整数；
+// 只数**元素**兄弟（文本节点不算，同 :first-child 口径）。
+func TestPseudoNthChildAnB(t *testing.T) {
+	doc := pseudoDoc(t, `<!doctype html><html><head><style>
+		div { width: 10px; height: 5px; }
+		div:nth-child(2n + 1) { width: 11px; }
+		div:nth-child(-n+2) { height: 22px; }
+		div:nth-child( 4 ) { width: 44px; }
+	</style></head><body style="margin:0"><section>
+		t1<div id="d1">1</div>t2<div id="d2">2</div>t3<div id="d3">3</div><div id="d4">4</div>t4<div id="d5">5</div><div id="d6">6</div>
+	</section></body></html>`)
+	widths := map[string]int{"d1": 11, "d2": 10, "d3": 11, "d4": 44, "d5": 11, "d6": 10}
+	for id, w := range widths {
+		if got := widthOf(t, doc.QuerySelector("#"+id)); got != w {
+			t.Errorf("#%s 宽 = %d, want %d", id, got, w)
+		}
+	}
+	for id, want := range map[string]int{"d1": 22, "d2": 22, "d3": 5} {
+		r := doc.QuerySelector("#" + id).GetBoundingClientRect()
+		if h := r.Bottom().Pixel() - r.Top().Pixel(); h != want {
+			t.Errorf("#%s 高 = %d, want %d（-n+2 应命中前两个）", id, h, want)
+		}
+	}
+}
+
+// 参数非法（2x / 空参）或未知函数型伪类（:is）：整条规则永不匹配，
+// 且括号内容不得漏进选择器其它部分。
+func TestPseudoFunctionalInvalidNeverMatches(t *testing.T) {
+	doc := pseudoDoc(t, `<!doctype html><html><head><style>
+		div { width: 40px; height: 10px; }
+		div:nth-child(2x) { width: 99px; }
+		div:nth-child() { width: 98px; }
+		div:is(.wide) { width: 97px; }
+	</style></head><body style="margin:0">
+		<div id="a" class="wide">1</div><div id="b">2</div>
+	</body></html>`)
+	for _, id := range []string{"a", "b"} {
+		if got := widthOf(t, doc.QuerySelector("#"+id)); got != 40 {
+			t.Errorf("#%s 宽 = %d, want 40（非法/未知函数型伪类不该命中）", id, got)
+		}
+	}
+}
+
+// QuerySelector 走同一套匹配：:nth-child / :not 都能用于 DOM 查询。
+func TestQuerySelectorNthAndNot(t *testing.T) {
+	doc := pseudoDoc(t, `<!doctype html><html><body style="margin:0"><ul>
+		<li id="l1" class="done">1</li><li id="l2">2</li><li id="l3">3</li>
+	</ul></body></html>`)
+	if got := doc.QuerySelector("li:nth-child(2)"); got == nil || got.GetAttribute("id") != "l2" {
+		t.Errorf("QuerySelector(li:nth-child(2)) 未命中 #l2: %v", got)
+	}
+	got := doc.QuerySelector("li:not(.done)")
+	if got == nil || got.GetAttribute("id") != "l2" {
+		t.Errorf("QuerySelector(li:not(.done)) 应命中首个未完成的 #l2")
+	}
+	all := doc.QuerySelectorAll("li:not(.done)")
+	if len(all) != 2 {
+		t.Errorf("QuerySelectorAll(li:not(.done)) = %d 个, want 2", len(all))
+	}
+}
+
 // contains 判断字符串是否包含子串（SVG 断言用）。
 func contains(s, sub string) bool {
 	return len(sub) == 0 || (len(s) >= len(sub) && indexOf(s, sub) >= 0)

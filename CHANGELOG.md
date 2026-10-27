@@ -5,6 +5,18 @@
 
 ## 未发布
 
+**`:not()` 与 `:nth-child()` 函数型伪类支持**：选择器层新增两个函数型
+伪类——`:not(选择器列表)`（Selectors 4：逗号分隔、任一参数命中即排除、
+特异度取参数最高者、支持嵌套如 `:not(:nth-child(2))`）与
+`:nth-child(An+B)`（odd/even/纯整数/2n+1/-n+3 全语法，忽略大小写与空白，
+只数**元素**兄弟）。参数在 `ParseSelector` 期预解析成结构化形态
+（`pseudoClass.sels` / `nthA,nthB`），级联逐元素匹配零解析开销；参数非法
+（`:not()` 空参、`:nth-child(2x)`）与未识别的函数型伪类（`:is()` 等）按
+CSS「整条选择器无效」语义永不匹配，括号内容整体吞掉、不漏进片段的其余
+部分。CSS 规则层的逗号切分改用括号感知的 `splitTopLevel`，
+`li:not(.a,.b)` 不再从参数中间劈开。回归见 `engine/pseudo_test.go`
+（排除/选择器列表/嵌套/特异度/An+B/非法参数/QuerySelector 共 8 例）。
+
 **snip 首击即可拖动预览窗（SDL 鼠标缓存坐标校正）**：修「截图后必须
 先点一下图片才拖得动」。根因在 SDL2：`WM_LBUTTONDOWN/UP` 不读消息的
 `lParam`，按钮事件坐标直接取内部缓存 `mouse->x/y`，而该缓存只在

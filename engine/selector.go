@@ -1,6 +1,9 @@
 package engine
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 type combinator uint8
 
@@ -15,9 +18,9 @@ type compoundSelector struct {
 	id      string
 	classes []string
 	attrs   [][2]string
-	// pseudos 是伪类名列表（:hover/:focus/:first-child…，小写、不含冒号）。
+	// pseudos 是伪类列表（:hover/:first-child，及带参数的 :not()/:nth-child()）。
 	// 伪类与标签/类/属性写在同一个片段里（a:hover、li:first-child）。
-	pseudos []string
+	pseudos []pseudoClass
 	// pseudoElement 是该片段尾部的伪元素名（小写、不含冒号）：
 	// "before"/"after" 表示引擎支持的生成盒，其他值（如 "first-line"）
 	// 是未支持的伪元素。空串表示没有伪元素。
@@ -26,6 +29,21 @@ type compoundSelector struct {
 	// "p"（那会让所有 p 都吃到伪元素的声明）；它只由伪元素级联按宿主
 	// 元素匹配（见 matchPseudoElementChain）。
 	pseudoElement string
+}
+
+// pseudoClass 是片段里的一个伪类。无参伪类（:hover/:first-child…）只有
+// 名字；**函数型伪类**（:not()/:nth-child()）在 ParseSelector 期就把参数
+// 预解析成结构化形态（级联要对每个元素×每条规则跑匹配，不能每元素重解
+// 一次串）。bad=true 表示参数非法（如 :not() 空参、:nth-child(2x)）——
+// CSS 语义是整个选择器无效，等价于永不匹配。
+type pseudoClass struct {
+	name string
+	// sels 是 :not() 参数解析出的选择器列表（Selectors 4 允许逗号表，
+	// 全部不匹配才算匹配 :not）。
+	sels []*Selector
+	// nthA/nthB 是 :nth-child() 参数解析出的 An+B。
+	nthA, nthB int
+	bad        bool
 }
 
 // Selector 是从左到右排列的复合选择器序列，combs[i] 位于 compounds[i] 与 compounds[i+1] 之间。
@@ -45,13 +63,26 @@ func (s *Selector) isEmpty() bool {
 //
 // 伪类按 class 档计特异度（CSS 2.1 §6.4.3：伪类与类选择器同级）；
 // 伪元素按类型选择器档计（Selectors 3 §9：伪元素与标签同级）。
+// 函数型伪类里只有 :not() 把**参数**的特异度计入（Selectors 4 §10：取
+// 参数列表最高者），:nth-child() 等仍按一个伪类计档（参数不计）。
 func (s *Selector) Specificity() int {
-	var a, b, c int
+	var a, b, c, extra int
 	for _, cp := range s.compounds {
 		if cp.id != "" {
 			a++
 		}
-		b += len(cp.classes) + len(cp.attrs) + len(cp.pseudos)
+		b += len(cp.classes) + len(cp.attrs)
+		for _, ps := range cp.pseudos {
+			if ps.name == pseudoNot {
+				for _, sel := range ps.sels {
+					if spec := sel.Specificity(); spec > extra {
+						extra = spec
+					}
+				}
+				continue
+			}
+			b++
+		}
 		if cp.tag != "" {
 			c++
 		}
@@ -59,7 +90,7 @@ func (s *Selector) Specificity() int {
 			c++
 		}
 	}
-	return a*1000000 + b*1000 + c
+	return a*1000000 + b*1000 + c + extra
 }
 
 // ParseSelector 解析 "div.card > .title" 形式的选择器串。
@@ -156,10 +187,29 @@ func ParseSelector(q string) *Selector {
 						name = "?"
 					}
 					cur.pseudoElement = name
+					i = j
 				} else if name != "" {
-					cur.pseudos = append(cur.pseudos, name)
+					// 函数型伪类（:not() / :nth-child() …）：若后跟 "("，把配对的括号
+					// 内容作为参数整体吞掉（支持嵌套，如 :not(:nth-child(2))）。
+					// 未识别的函数型伪类也要吞括号，避免里面的 ".class" 被误当成
+					// 当前片段的类名、":" 再被解析成新伪类。
+					arg := ""
+					next := j
+					if j < len(q) && q[j] == '(' {
+						if end := matchParen(q, j); end > 0 {
+							arg = q[j+1 : end]
+							next = end + 1
+						} else {
+							arg = q[j+1:]
+							next = len(q)
+						}
+					}
+					pc := newPseudoClass(name, arg)
+					cur.pseudos = append(cur.pseudos, pc)
+					i = next
+				} else {
+					i = j
 				}
-				i = j
 			case '[':
 				j := strings.IndexByte(q[i:], ']')
 				if j < 0 {
@@ -313,4 +363,108 @@ func matchChain(doc HTMLDocument, s *Selector, e HTMLElement, pseudo string) boo
 		}
 	}
 	return true
+}
+
+// matchParen 从 q[open]=='(' 开始向后扫描，返回配对的 ')' 的索引；未闭合返回 -1。
+// 用于函数型伪类（:not() / :nth-child()）参数的边界识别（支持嵌套括号）。
+func matchParen(q string, open int) int {
+	depth := 0
+	for i := open; i < len(q); i++ {
+		switch q[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// newPseudoClass 根据名字与原始参数串构造 pseudoClass。
+// 已知函数型伪类（:not / :nth-child）在解析期预解析参数——级联要对每个
+// 元素×每条规则跑匹配，参数解析不能每次都重来；未识别的函数型伪类
+// （:is() / :lang() 等）标记 bad=true（整条选择器无效，同 CSS 语义），
+// 但括号内容照吞——否则里面的 ".class" 会被当成当前片段的类名。
+func newPseudoClass(name, arg string) pseudoClass {
+	pc := pseudoClass{name: name}
+	switch name {
+	case pseudoNot:
+		// Selectors 4：:not() 接受逗号分隔的选择器列表；任一匹配即令 :not 失效。
+		// 空参或解析不出选择器 → bad（CSS：非法参数使整条选择器无效）。
+		for _, p := range splitTopLevel(arg, ',') {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				pc.bad = true
+				return pc
+			}
+			sel := ParseSelector(p)
+			if sel.isEmpty() {
+				pc.bad = true
+				return pc
+			}
+			pc.sels = append(pc.sels, sel)
+		}
+	case pseudoNthChild:
+		a, b, ok := parseNth(arg)
+		if !ok {
+			pc.bad = true
+			return pc
+		}
+		pc.nthA, pc.nthB = a, b
+	default:
+		// 无参伪类带上了括号（:hover(2)）或未知函数型伪类：一律 bad。
+		if arg != "" {
+			pc.bad = true
+		}
+	}
+	return pc
+}
+
+// parseNth 解析 :nth-child() 的 An+B 参数（不区分大小写、忽略所有空白）。
+// 支持：odd / even / 整数（3） / 2n+1 / -n+3 / n / +3n-2 / 3n 等标准写法。
+// ok=false 表示非法参数（如 2x、n++、空串）。
+func parseNth(raw string) (a, b int, ok bool) {
+	s := strings.ToLower(strings.Join(strings.Fields(raw), ""))
+	switch s {
+	case "":
+		return 0, 0, false
+	case "odd":
+		return 2, 1, true
+	case "even":
+		return 2, 0, true
+	}
+	n := strings.IndexByte(s, 'n')
+	if n < 0 {
+		// 纯整数：等价 0n+b（只对第 b 个元素匹配）。
+		v, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, 0, false
+		}
+		return 0, v, true
+	}
+	// aPart：n 之前的系数（空/"+"/"-" 按 ±1）；bPart：n 之后的常数项（可缺省）。
+	aPart, bPart := s[:n], s[n+1:]
+	switch aPart {
+	case "", "+":
+		a = 1
+	case "-":
+		a = -1
+	default:
+		v, err := strconv.Atoi(aPart)
+		if err != nil {
+			return 0, 0, false
+		}
+		a = v
+	}
+	if bPart == "" {
+		return a, 0, true
+	}
+	v, err := strconv.Atoi(bPart)
+	if err != nil {
+		return 0, 0, false
+	}
+	return a, v, true
 }

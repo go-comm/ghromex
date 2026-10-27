@@ -3,14 +3,18 @@ package engine
 import "strings"
 
 // 伪类（pseudo-class）支持：选择器里的 :hover / :focus 等动态状态，
-// 以及 :first-child 等结构伪类。
+// 以及 :first-child / :nth-child() 等结构伪类、:not() 否定伪类。
 //
 // 动态伪类的状态存在文档上（hover/active/focus），状态变化触发变更
 // 通知 → 重排重绘 → 级联重算，样式随之更新——与浏览器「改状态 → 重算
 // 样式」的链路一致。结构伪类只看 DOM 形状，随级联一起算。
 //
-// 未识别的伪类一律不匹配（CSS 语义：无法识别的伪类使整条选择器失效，
-// 效果与「永不匹配」相同）。
+// 函数型伪类（:not() / :nth-child()）在 ParseSelector 期即把参数预解析
+// 为结构化形态（:not 的选择器列表、:nth-child 的 An+B），匹配期零解析
+// 开销——级联要对每个元素×每条规则跑匹配，参数解析不能每次都重来。
+// 参数非法（:not() 空参、:nth-child(2x)）与未识别的伪类/函数型伪类
+// （:is() 等）一律不匹配——CSS 语义是无法识别的选择器使整条规则失效，
+// 效果等同「永不匹配」。
 
 // 伪类名（选择器里 ':' 之后的部分，小写）。
 const (
@@ -25,6 +29,10 @@ const (
 	pseudoOnlyChild  = "only-child"
 	pseudoRoot       = "root"
 	pseudoEmpty      = "empty"
+	// 函数型伪类（带括号参数）：参数在 ParseSelector 期预解析（selector.go
+	// newPseudoClass），匹配期只用结构化结果。
+	pseudoNot      = "not"
+	pseudoNthChild = "nth-child"
 )
 
 // HoveredElement 返回当前被鼠标悬停的元素（无则 nil）。
@@ -87,9 +95,14 @@ func OnDocumentMouseMove(doc HTMLDocument, x, y int) bool {
 	return target != nil
 }
 
-// matchPseudo 判断元素是否匹配某个伪类。
-func matchPseudo(doc HTMLDocument, name string, e HTMLElement) bool {
-	switch name {
+// matchPseudo 判断元素是否匹配某个伪类。函数型伪类（:not/:nth-child）用
+// 解析期预好的结构化参数；bad=true（参数非法）按 CSS「整条选择器无效」
+// 的语义永不匹配。
+func matchPseudo(doc HTMLDocument, pc pseudoClass, e HTMLElement) bool {
+	if pc.bad {
+		return false
+	}
+	switch pc.name {
 	case pseudoHover:
 		return matchHoverState(doc, e)
 	case pseudoFocus:
@@ -113,6 +126,17 @@ func matchPseudo(doc HTMLDocument, name string, e HTMLElement) bool {
 		return isRootElement(e)
 	case pseudoEmpty:
 		return isEmptyElement(e)
+	case pseudoNot:
+		// 参数列表里任何一个选择器命中即不匹配 :not（全不命中才算命中）。
+		for _, sel := range pc.sels {
+			if matchSelectorChain(doc, sel, e) {
+				return false
+			}
+		}
+		return true
+	case pseudoNthChild:
+		idx := elementChildIndex(e)
+		return idx > 0 && nthMatch(pc.nthA, pc.nthB, idx)
 	}
 	return false
 }
@@ -261,4 +285,38 @@ func isFormControlTag(e HTMLElement) bool {
 		return true
 	}
 	return false
+}
+
+// elementChildIndex 返回元素在父元素的元素子节点中的 1-based 序号
+//（:nth-child 只数元素，文本节点不算兄弟——同 :first-child 口径）。
+// 返回 0 表示该元素未挂在父节点上（永不匹配）。
+func elementChildIndex(e HTMLElement) int {
+	p := e.ParentElement()
+	if p == nil {
+		return 0
+	}
+	idx := 0
+	for _, c := range p.Children() {
+		if _, ok := c.(*textNode); ok {
+			continue
+		}
+		idx++
+		if sameElement(c, e) {
+			return idx
+		}
+	}
+	return 0
+}
+
+// nthMatch 测试序号 idx 是否满足 An+B（∃ 非负整数 n 使 a·n+b == idx）。
+// a=0 时仅 b 生效（b<=0 永不匹配）。
+func nthMatch(a, b, idx int) bool {
+	k := idx - b
+	if a == 0 {
+		return k == 0
+	}
+	if k%a != 0 {
+		return false
+	}
+	return k/a >= 0
 }

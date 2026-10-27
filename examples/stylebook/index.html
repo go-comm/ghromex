@@ -27,11 +27,11 @@
     float/clear、opacity、visibility、cursor
   · 选择器：类型/#id/.class/后代/子代/分组/复合/[attr]/[attr=v]、
     特异度、!important；伪类 :hover :focus :active :checked :disabled
-    :enabled :first-child :last-child :only-child :root :empty
+    :enabled :first-child :last-child :only-child :root :empty :not() :nth-child()
   · 值：#3/#4/#6/#8、rgb()/rgba()、具名色、transparent；
     px/pt/dp/%/0/无单位
   · 末节「不支持清单」：flex/grid、transform/transition、
-    background-image、em/rem/vh、calc()/var()、伪元素、:not()/:nth-child()、
+    background-image、em/rem/vh、calc()/var()、伪元素、:is()、
     + ~ 组合器、通配 *、@media/@font-face 等——Chrome 对照到这些差异属预期。
 
   已知分叉（与 ua 页同源，详见 examples/ua/index.html 头注释）：
@@ -639,8 +639,9 @@ a  b   c    d</pre>
 
 	<p class="note">支持类型/#id/.class/后代/子代/分组/复合、<code class="inl">[attr]</code> 与
 		<code class="inl">[attr=value]</code>、特异度字典序比较、<code class="inl">!important</code>
-		（作者 important &gt; 作者普通 &gt; UA）。<b>不命中</b>：伪元素、
-		<code class="inl">:not()/:nth-child()/:is()</code>、<code class="inl">+</code>/<code class="inl">~</code>
+		（作者 important &gt; 作者普通 &gt; UA）、函数型伪类 <code class="inl">:not()</code>/<code class="inl">:nth-child()</code>
+		（参数内逗号不误切分）。<b>不命中</b>：伪元素、
+		<code class="inl">:is()</code>、<code class="inl">+</code>/<code class="inl">~</code>
 		组合器、通配 <code class="inl">*</code>、属性选择器 <code class="inl">~= |= ^= $= *=</code>
 		（末节清单）。</p>
 </div>
@@ -673,13 +674,26 @@ a  b   c    d</pre>
 	<span class="em"></span><span class="em">:empty 不中</span>
 	<span class="code">:empty（左盒无内容命中变绿，右盒有文字不中）</span>
 
+	<p class="cap">函数型伪类 <code class="inl">:nth-child()</code> 与 <code class="inl">:not()</code>：</p>
+	<ul class="fn-list">
+		<li>:nth-child(odd) 命中（底色 + 左边条）</li>
+		<li>偶数项（不中）</li>
+		<li class="skip">:nth-child(odd) 有底色，但 :not(.skip) 排除（无左边条）</li>
+		<li>偶数项（不中）</li>
+		<li>:nth-child(odd) 命中（底色 + 左边条）</li>
+	</ul>
+	<p class="note">:nth-child 支持完整 An+B 语法（odd/even/整数/2n+1/-n+3…），只数元素兄弟（文本节点不算）；
+	:not() 接受逗号分隔选择器列表（:not(.a, .b)），特异度取参数最高者（Selectors 4 §10）；
+	参数非法（:not() 空参、:nth-child(2x)）或未识别函数型伪类（:is() 等）按 CSS 语义整条选择器无效、永不匹配。</p>
+
 	<p class="cap">伪元素 ::before / ::after（content 生成盒）：</p>
 	<span class="gen">文本前后缀</span>
 	<span class="gen attr" data-owner="林晓">attr() 取属性</span>
 	<span class="gen dot">空 content 圆点</span>
 
-	<p class="note">共 11 个伪类：:hover/:focus/:active、:checked/:disabled/:enabled、
-		:first-child/:last-child/:only-child/:root/:empty。悬停与按下<b>沿父链继承</b>
+	<p class="note">共 13 个伪类：:hover/:focus/:active、:checked/:disabled/:enabled、
+		:first-child/:last-child/:only-child/:root/:empty，以及函数型伪类
+		:not(选择器列表)/:nth-child(An+B)。悬停与按下<b>沿父链继承</b>
 		（父级 :hover 时子级也匹配）、聚焦不继承；状态变化走「变更通知 → 重排重绘 → 级联重算」。
 		<code class="inl">:root</code> 命中 &lt;html&gt;——本页整圈浅绿底色即其效果（body 白底让位处可见）。
 		伪元素 <code class="inl">::before</code>/<code class="inl">::after</code>
@@ -709,7 +723,7 @@ a  b   c    d</pre>
 			<tr><td><code class="inl">em</code> / <code class="inl">rem</code> / <code class="inl">ex</code> / <code class="inl">ch</code> / <code class="inl">vh</code> / <code class="inl">vw</code></td><td>相对/视口单位</td><td class="x">不解析（只认 px/pt/dp/%/0/无单位）</td></tr>
 			<tr><td><code class="inl">calc()</code> / <code class="inl">var()</code> / <code class="inl">hsl()</code></td><td>函数值</td><td class="x">不解析</td></tr>
 			<tr><td><code class="inl">::marker</code> / <code class="inl">::first-line</code> 等其余伪元素</td><td>生成内容</td><td class="x">只支持 ::before/::after，其余永不命中</td></tr>
-			<tr><td><code class="inl">:not()</code> / <code class="inl">:nth-child()</code> / <code class="inl">:is()</code> / <code class="inl">:focus-within</code></td><td>结构伪类</td><td class="x">未识别伪类，永不匹配</td></tr>
+			<tr><td><code class="inl">:is()</code> / <code class="inl">:focus-within</code></td><td>结构伪类</td><td class="x">未识别函数型伪类，永不匹配</td></tr>
 			<tr><td><code class="inl">+</code> / <code class="inl">~</code> 组合器、通配 <code class="inl">*</code></td><td>兄弟/通配选择</td><td class="x">不命中（* 被当成标签名）</td></tr>
 			<tr><td>属性选择器 <code class="inl">~= |= ^= $= *=</code></td><td>匹配运算</td><td class="x">只支持存在性与 <code class="inl">=</code></td></tr>
 			<tr><td><code class="inl">@media</code> / <code class="inl">@font-face</code> / <code class="inl">@keyframes</code></td><td>条件/字体/动画规则</td><td class="x">整块跳过（@media 不分屏，内容不生效）</td></tr>

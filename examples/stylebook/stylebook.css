@@ -18,8 +18,8 @@
   · border-style 关键字都能解析，但绘制统一按 solid（「边框」节有对照）
   · box-shadow 的 inset 解析但不绘制（「背景与阴影」节有对照）
   · white-space 只区分 pre 与其余（nowrap 会按 normal 折行）
-  · 不用伪元素、:not()/:nth-child()、+/~ 组合器、通配 *、属性选择器
-    的 ~= |= ^= $= *= 运算符——它们在引擎里永不命中
+  · 不用 +/~ 组合器、通配 *、:is() 等未实现的函数型伪类、
+    属性选择器的 ~= |= ^= $= *= 运算符——它们在引擎里永不命中
 */
 
 /* ===== 页面骨架 ===== */
@@ -1173,6 +1173,22 @@ input:disabled {
 
 .only-list li:only-child {
 	background-color: #eef7f0;
+}
+
+/* 函数型伪类演示：:nth-child(odd) 斑马纹；:nth-child(odd):not(.skip) 给
+   奇数项加左边条——第 3 项被 .skip 排除，只剩底色没有条（:not 生效证据） */
+.fn-list li {
+	margin: 2px 0;
+	padding: 2px 8px;
+	border-left: 3px solid transparent;
+}
+
+.fn-list li:nth-child(odd) {
+	background-color: #e8f0fe;
+}
+
+.fn-list li:nth-child(odd):not(.skip) {
+	border-left: 3px solid #0b57d0;
 }
 
 /* :empty：只命中无内容元素（有文字的兄弟不中） */
