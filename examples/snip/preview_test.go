@@ -154,3 +154,72 @@ func TestPreviewDragAppliesOncePerFrame(t *testing.T) {
 		t.Fatalf("抬起时最后一帧位移丢失: (%d,%d) pending=%v", p.x, p.y, p.movePending)
 	}
 }
+
+// 回归：截图后**第一击**就要能抓住图片（用户报的「必须先点一下才拖得动」）。
+//
+// 时序：选区 MouseUp 在处理里原地 MoveTo+Resize 成预览窗，而 SDL2 的按钮
+// 事件不读 WM_LBUTTONDOWN 的 lParam，直接取内部缓存坐标（mouse->x/y），
+// 该缓存只在 motion 时刷新（.temp/mousecache 用 SendMessage 实证）。于是
+// 用户不动鼠标直接按下时，事件携带的是**相对旧窗口 (0,0)** 的坐标——
+// 后端解码层按「缓存原点 vs 当前位置」平移修正（backend/sdl2 的 fixStale），
+// 这里断言修正后的抓取点是新窗口系的 (0,0)、窗口跟随光标走。
+func TestPreviewFirstClickAfterTransitionDrags(t *testing.T) {
+	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
+	t.Cleanup(func() { os.Unsetenv("SDL_VIDEO_DRIVER") })
+
+	desktop := image.NewRGBA(image.Rect(0, 0, 320, 200))
+	draw.Draw(desktop, desktop.Bounds(),
+		&image.Uniform{C: color.RGBA{40, 80, 120, 255}}, image.Point{}, draw.Src)
+
+	win, err := browser.NewWithOptions(browser.Options{
+		Width: 320, Height: 200, Title: "snip-preview-firstclick",
+		X: 0, Y: 0,
+		Borderless: true, AlwaysOnTop: true, SkipTaskbar: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer win.Close()
+
+	a := newApp(win, desktop)
+	if err := a.startOverlay(); err != nil {
+		t.Fatal(err)
+	}
+	win.SetKeyHandler(a.onKey)
+	win.SetMouseHandler(a.onMouse)
+	win.SetFrameHandler(a.onFrame)
+
+	// 选区：从右下 (250,170) 拖到左上 (30,40)（从右下往左上拽是常用手势）。
+	// 抬起处理里 startPreview 把窗口变成 (30,40) 220×158：barTop=130。
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonDown, Button: sdl2.MouseButtonLeft, X: 250, Y: 170})
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseMotion, X: 30, Y: 40})
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonUp, Button: sdl2.MouseButtonLeft, X: 30, Y: 40})
+
+	// 首击：光标停在 (30,40)（旧窗口系）没动过 → 按钮事件带缓存坐标 (30,40)。
+	// 修正后应为新窗口系 (0,0)；若没修正会以 (30,40) 为抓取点，首拖窗口
+	// 瞬移，用户感知为「这一下没抓住」。
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonDown, Button: sdl2.MouseButtonLeft, X: 30, Y: 40})
+	// 拖动与抬起（motion 是 Windows 按 lParam 现算的，天然是新窗口系）。
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseMotion, X: 36, Y: 46})
+	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonUp, Button: sdl2.MouseButtonLeft, X: 36, Y: 46})
+
+	win.SetAutoExit(400 * time.Millisecond)
+	if err := win.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	p := a.prev
+	if p == nil {
+		t.Fatal("选区抬起后未进入预览")
+	}
+	if p.grabX != 0 || p.grabY != 0 {
+		t.Fatalf("首击抓取点 = (%d,%d), want (0,0)（按钮坐标没按窗口位移平移：首击落到旧窗口坐标系）",
+			p.grabX, p.grabY)
+	}
+	if p.x != 66 || p.y != 86 {
+		t.Fatalf("窗口位置 = (%d,%d), want (66,86)（抓取点错会导致首拖瞬移/不动）", p.x, p.y)
+	}
+	if p.dragging || p.movePending {
+		t.Fatalf("手势已结束但状态未复位: dragging=%v movePending=%v", p.dragging, p.movePending)
+	}
+}

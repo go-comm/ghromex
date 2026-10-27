@@ -5,6 +5,35 @@
 
 ## 未发布
 
+**snip 首击即可拖动预览窗（SDL 鼠标缓存坐标校正）**：修「截图后必须
+先点一下图片才拖得动」。根因在 SDL2：`WM_LBUTTONDOWN/UP` 不读消息的
+`lParam`，按钮事件坐标直接取内部缓存 `mouse->x/y`，而该缓存只在
+`WM_MOUSEMOVE` 里刷新（用 `.temp/mousecache` 直投窗口消息实测：
+`motion(400,300)` → `MoveTo(350,250)` → 按下事件仍报 (400,300)，即使
+lParam 给的是新窗口系的 (50,50)；且移窗/缩窗本身不会产生 motion）。
+snip 正是在选区 MouseUp 的处理里原地 `MoveTo + Resize`，用户不动鼠标
+直接按下时拿到的是**旧全屏窗口 (0,0) 相对**的坐标：`ev.Y` 恒 ≥ `barTop`
+被判定成工具条放行给引擎，引擎又命中不到任何元素，于是首击「没反应」；
+第一下拖拽里产生的 motion 把缓存刷新后，第二击才正常。
+
+修复落在后端解码层（`backend/sdl2/window.go`），因为受影响的不止应用钩子，
+引擎的命中测试同样吃这份坐标：
+
+1. `Window` 记两个基准——`posX/posY`（当前位置，`MoveTo` 与
+   `SDL_WINDOWEVENT_MOVED` 共同维护，后者是权威值，系统可能夹取请求位置；
+   Centered 建窗在 MOVED 到达前置 `posKnown=false`）与 `originX/originY`
+   （上一条 motion 刷新缓存时的窗口位置，见 `noteMotion`）。
+2. `fixStale` 把按钮/滚轮事件按 `origin - pos` 平移回当前窗口系；两个基准
+   任一未知时**不平移**（无法推断方向，保持原样不会比现状更糟）。
+3. motion 事件本身由 `lParam` 现算，天然正确，只用于更新 `origin`。
+
+回归：`backend/sdl2/mousecache_test.go`（移窗后首击平移、origin/pos 未知
+时不动、decode→toPublicEvent 端到端字节链路）；
+`examples/snip/preview_test.go:TestPreviewFirstClickAfterTransitionDrags`
+（注入「拖选 → 原地缩窗 → 不动鼠标直接按下并拖动」全流程，断言抓取点为
+新窗口系的 (0,0)、窗口落到 (66,86)；临时关掉 `fixStale` 时该用例确实失败，
+报 `抓取点 = (30,40)`）。
+
 **CJK 静态字重面（会议纪要页 CJK 比 Chrome 细三档）**：
 CDP `CSS.getPlatformFontsForNode` 定位根因——Chrome 正文 CJK 用 Noto Sans SC
 Regular(400) 命名实例、标题/th 用 Bold(700)；而 `NotoSansSC-VF.ttf` 的 fvar

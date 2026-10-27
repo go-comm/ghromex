@@ -129,6 +129,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 - **行高与 Chrome 可能差 1~4px**；LCD 子像素渲染默认关（灰度 AA），`GHROMEX_LCD=1` 开启；`GHROMEX_DEBUG=1` 打印渲染路径与驱动名。
 - **文本度量口径**：`FakeGraphics` 是计数桩，`BufferGraphics` 有软件光栅化度量；像素断言要用与布局同口径的后端。
 - **DLL**：`SDL2.dll`、`SDL2_ttf.dll`（及 `zlib1.dll`）放工程根 `libs/`（本仓库已备），或系统可搜索到。
+- **SDL 鼠标按钮事件坐标缓存**：SDL2 的 `WM_LBUTTONDOWN/UP` 不读 `lParam`，直接取内部 `mouse->x/y`（仅 `WM_MOUSEMOVE` 刷新）。窗口移动/缩放但光标静止时，下一击携带的仍是**旧窗口位置相对**的坐标——snip「先点一下才拖得动」即此根因（见 `backend/sdl2/window.go:fixStale` 与 `.temp/mousecache` 实证）。
 
 ## 扩展点
 

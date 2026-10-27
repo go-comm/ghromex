@@ -209,6 +209,10 @@ const (
 	windowEventClose       = 0x0E
 	windowEventResized     = 0x05
 	windowEventSizeChanged = 0x06
+	// windowEventMoved：窗口位置变化，data1/data2 = 新位置（SDL 逻辑坐标）。
+	// 后端要靠它校准「当前窗口位置」——鼠标缓存坐标的平移基准必须是
+	// 权威值（系统可能夹取请求位置），见 Window.staleOffset。
+	windowEventMoved = 0x04
 	// windowEventLeave：鼠标离开窗口（LEAVE=0x0B，见上方的 SDL 取值注释）。
 	// 上层据此清掉悬停态——否则鼠标移出窗口后，最后悬停的按钮会一直
 	// 保持高亮（Chrome 离开即取消 :hover）。

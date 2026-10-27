@@ -43,6 +43,20 @@ type Window struct {
 	// "software (driver=software; 强制软件：GHROMEX_SOFTWARE/dummy)" 等。
 	// 建窗时算一次存下来，别处要显示时直接取（driver 名要现查，开销不小）。
 	rendererDesc string
+
+	// posX/posY 是窗口左上角的当前位置（SDL 逻辑坐标，虚拟桌面系）。
+	// posKnown=false 表示还没拿到可信位置：Centered 建窗时真实坐标由 SDL
+	// 内部算出，要等第一条 MOVED 事件才知道。
+	posX, posY int
+	posKnown   bool
+
+	// originX/originY 是「SDL 内部鼠标缓存坐标」所相对的窗口位置。SDL 的
+	// 按钮事件不读消息的 lParam，直接用缓存值（mouse->x/y），而缓存只在
+	// motion 里刷新——于是「窗口移动后、下一条 motion 之前」的按钮/滚轮
+	// 事件，坐标仍是相对旧窗口位置的。originKnown=false 表示本窗口还没
+	// 观测到任何 motion（缓存未被刷新过），此时不做平移（见 staleOffset）。
+	originX, originY int
+	originKnown      bool
 }
 
 // NewWindow 创建带渲染器的窗口。坐标体系 1:1（1 CSS px = 1 物理像素）。
@@ -165,12 +179,19 @@ func NewWindowWithOptions(o WindowOptions) (*Window, error) {
 	//（中文 IME 组合串同样依赖此开关），真机表现为“有光标无法输入”。
 	sdlStartTextInput()
 
-	return &Window{
+	win := &Window{
 		w: w, h: h, title: title,
 		win: hwnd, renderer: renderer,
 		g:            NewGraphics(renderer, ""),
 		rendererDesc: rendererDesc,
-	}, nil
+	}
+	// 显式给位的窗口位置已知；Centered 的真实位置等 MOVED 事件（在此之前
+	// 不做鼠标坐标平移，宁可保持原样也不能猜）。
+	if !o.Centered {
+		win.posX, win.posY = o.X, o.Y
+		win.posKnown = true
+	}
+	return win, nil
 }
 
 // ViewportWidth 实现 core.Viewport。
@@ -242,11 +263,11 @@ func (win *Window) PollEvent() (Event, bool) {
 
 // toPublicEvent 把内部解码结果转成公开的 Event。
 //
-// 窗口尺寸变化顺带更新后端自己的尺寸：视口尺寸是平台事实，上层只管
-// 读（ViewportWidth/Height）。
+// 窗口尺寸/位置变化顺带更新后端自己的尺寸与位置：视口尺寸与「鼠标缓存
+// 坐标的平移基准」都是平台事实，上层只管读。
 //
-// 认不出的事件（窗口移动、鼠标进入/离开等）返回 EventUnknown——上层按
-// 未知事件忽略即可（不能落到 EventQuit 上，否则窗口会莫名其妙地退出）。
+// 认不出的事件（鼠标进入/离开等）返回 EventUnknown——上层按未知事件忽略
+// 即可（不能落到 EventQuit 上，否则窗口会莫名其妙地退出）。
 func (win *Window) toPublicEvent(ev event) Event {
 	switch ev.typ {
 	case eventQuit:
@@ -260,6 +281,11 @@ func (win *Window) toPublicEvent(ev event) Event {
 				win.w, win.h = int(ev.data1), int(ev.data2)
 			}
 			return Event{Kind: EventWindowResized, Width: win.w, Height: win.h}
+		case windowEventMoved:
+			// 位置变化：系统可能夹取请求值（如贴边吸附），所以必须以事件
+			// 里的权威值为准更新平移基准。
+			win.applyMoved(int(ev.data1), int(ev.data2))
+			return Event{}
 		case windowEventExposed:
 			return Event{Kind: EventWindowExposed}
 		case windowEventLeave:
@@ -267,19 +293,52 @@ func (win *Window) toPublicEvent(ev event) Event {
 			return Event{Kind: EventMouseLeave}
 		}
 	case eventMouseMotion:
+		// motion 刷新 SDL 内部缓存：从这条起，缓存坐标相对的就是当前窗口
+		// 位置（SDL 用 lParam 现算后写缓存，坐标系随窗口走）。
+		win.noteMotion()
 		return Event{Kind: EventMouseMotion, X: int(ev.x), Y: int(ev.y)}
 	case eventMouseButtonDown:
-		return Event{Kind: EventMouseButtonDown, Button: ev.button, X: int(ev.x), Y: int(ev.y)}
+		x, y := win.fixStale(int(ev.x), int(ev.y))
+		return Event{Kind: EventMouseButtonDown, Button: ev.button, X: x, Y: y}
 	case eventMouseButtonUp:
-		return Event{Kind: EventMouseButtonUp, Button: ev.button, X: int(ev.x), Y: int(ev.y)}
+		x, y := win.fixStale(int(ev.x), int(ev.y))
+		return Event{Kind: EventMouseButtonUp, Button: ev.button, X: x, Y: y}
 	case eventMouseWheel:
-		return Event{Kind: EventMouseWheel, WheelX: int(ev.wheelX), WheelY: int(ev.wheelY), X: int(ev.x), Y: int(ev.y)}
+		x, y := win.fixStale(int(ev.x), int(ev.y))
+		return Event{Kind: EventMouseWheel, WheelX: int(ev.wheelX), WheelY: int(ev.wheelY), X: x, Y: y}
 	case eventKeyDown:
 		return Event{Kind: EventKeyDown, Key: int(ev.sym), Mod: ev.mod}
 	case eventTextInput:
 		return Event{Kind: EventTextInput, Text: ev.text}
 	}
 	return Event{}
+}
+
+// noteMotion 记录「鼠标缓存刚被这条 motion 刷新」：缓存坐标从此相对
+// 当前窗口位置。SDL 只在 motion 里更新 mouse->x/y（WM_LBUTTONDOWN 用的是
+// 缓存值），按钮/滚轮事件的坐标平移基准全靠这条约定跟踪。
+func (win *Window) noteMotion() {
+	win.originX, win.originY = win.posX, win.posY
+	win.originKnown = win.posKnown
+}
+
+// fixStale 把按钮/滚轮事件里可能过期的缓存坐标校正回当前窗口坐标系。
+//
+// 背景：SDL2 的 button/wheel 事件不读消息的 lParam，直接取内部缓存
+// mouse->x/y（实测：给 WM_LBUTTONDOWN 塞新 lParam，解出的仍是上一条
+// motion 的值），而该缓存只在 motion 时刷新。于是「窗口移动之后、下一条
+// motion 之前」的按下事件，坐标仍是相对旧窗口位置的——snip 截图后原地
+// 缩窗，第一次点击带的是旧全屏窗口的坐标，被工具条判定放行给引擎，
+// 表现为「必须先点一下才拖得动」。
+//
+// 只要观测到过 motion（originKnown）且位置已知（posKnown），就能按
+// 「缓存原点相对当前位置」的位移平移回来；二者任一未知时无法推断，
+// 保持原样（宁可不动，也不能猜错方向）。
+func (win *Window) fixStale(x, y int) (int, int) {
+	if win.originKnown && win.posKnown {
+		return x + (win.originX - win.posX), y + (win.originY - win.posY)
+	}
+	return x, y
 }
 
 // Ticks 返回自 SDL 初始化以来的毫秒数（主循环用来算自动退出时刻）。
@@ -488,6 +547,17 @@ func (win *Window) MoveTo(x, y int) {
 		return
 	}
 	sdlSetWindowPosition(win.win, uintptr(x), uintptr(y))
+	win.applyMoved(x, y)
+}
+
+// applyMoved 更新「窗口当前位置」——鼠标缓存坐标的平移基准。
+//
+// 两个来源：MoveTo（请求值，立即可用，不必等事件绕一圈）与 SDL 的
+// MOVED 事件（权威值：系统可能夹取请求位置）。语义相同，收敛到一个
+// 方法里，免得两处各自维护 posKnown。
+func (win *Window) applyMoved(x, y int) {
+	win.posX, win.posY = x, y
+	win.posKnown = true
 }
 
 // SetTitle 设置窗口标题（应用层可随时更新，如编辑器显示当前文件名）。
