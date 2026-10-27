@@ -5,23 +5,6 @@
 
 ## 未发布
 
-**级联：文本节点不再独立计算样式，直接共享父元素的 computed 对象**：
-`#text` 不是元素——CSS 选择器匹配不到它、真实 DOM 也不允许给它写
-style，但引擎此前给每个文本节点照例建一份 440B 的胖样式对象并跑一轮
-全量规则匹配。现在级联遇到文本子节点直接把父元素的 computed 指针写
-过去（与 `::before` 文本盒同法，见 `style_cascade.go`），绘制/测量从
-它读的属性（color/font/line-height/decoration/visibility）全是继承属性、
-值完全相同。实测 731KB 的 API 参考页（65,080 节点、其中 37,579 个文本）：
-级联增量 30.0MB → **13.6MB**、整页常驻 84MB → **65MB**、首轮级联
-74.7ms → **49.1ms**。共享代价是父元素的非继承属性（display/position/
-padding/opacity）也会从文本的 computed 读出来，「文本不是盒」的守卫补在
-`isPositioned`、`layoutPositioned`、`shiftBox` 的 fixed 跳过、
-`renderNodeTextColor` 的 opacity 包裹与 `GetBoundingClientRect` 五处；
-副作用只有一条：对文本节点写内联 style 不再生效（真实浏览器同样没有
-`Text.style`，属口径收敛）。回归见 `engine/cascade_text_share_internal_test.go`
-（relative 单次偏移、fixed 锚定回推带文本、opacity 只乘一次、定位层不收
-文本、文本零盒）。
-
 **滚动条只服务页面内容区（工作台固定栏不压条、浏览器不出横条）**：
 ui 工作台的工具栏/状态栏是 fixed 压在视口上下缘的，文档级覆盖滚动条
 却整根视口高绘制——滑块从 y=0 划过工具栏、贴进状态栏，横向溢出还会在

@@ -49,13 +49,9 @@ type positionedBox struct {
 }
 
 // isPositioned 判断已级联元素是否进入定位层（position != static）。
-// #text 排除在外：文本节点共享父元素的 computed（见 style_cascade.go），
-// 读出的 position 是父元素的值，但文本没有独立盒——它随父的静态子树绘制
-// 与平移，绝不能被当成定位盒收进第二 pass（主 pass 也会因此漏画它）。
 func isPositioned(e HTMLElement) bool {
 	b := inner(e)
-	return b != nil && b.tagName != "#text" &&
-		b.computed != nil && b.computed.Position() != PositionStatic
+	return b != nil && b.computed != nil && b.computed.Position() != PositionStatic
 }
 
 // collectPositioned 收集 root 当前层叠上下文里的定位元素，再按
@@ -346,9 +342,8 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 
 	// opacity：引擎没有图层合成，按「本子树所有绘制颜色的 alpha 乘算」
 	// 近似（见 opacity.go 的说明）。必须在任何绘制之前包装：元素自身的
-	// 背景/边框也属于这一组。#text 跳过——它共享父元素的 computed
-	// （见 style_cascade.go），父层已经包过一次，再乘一遍会双倍压暗。
-	if comp != nil && base.tagName != "#text" {
+	// 背景/边框也属于这一组。
+	if comp != nil {
 		if op := comp.Opacity(); op < 1 {
 			g = withOpacity(g, float64(op))
 		}
