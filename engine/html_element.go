@@ -590,6 +590,11 @@ func (element *htmlElement) onScrollChanged() {
 // GetBoundingClientRect 返回边框盒。
 func (element *htmlElement) GetBoundingClientRect() Rect {
 	comp := element.computed
+	if element.tagName == "#text" {
+		// 文本没有自己的盒：共享父 computed（见 style_cascade.go）后
+		// pd/bd 会读出父元素的 padding/border，文本盒保持零盒口径不变。
+		comp = nil
+	}
 	l := element.x
 	t := element.y
 	w := element.width
