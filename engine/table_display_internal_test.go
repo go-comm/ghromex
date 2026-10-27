@@ -426,6 +426,100 @@ func TestTableColumnShrinkRespectsMinContent(t *testing.T) {
 	}
 }
 
+// TestTableCellPercentWidthIsColumnOuter 格的百分比声明宽按**列外宽**解析
+// （含格自身 padding，Chrome 表格语义）：两列 25%/75% 各带左右 14px padding，
+// 合计恰 100%——若按 content-box 的「内容=百分比再加 padding」量宽，列宽和
+// 会虚胖 56px 撑破 width:100% 的表格（vm02 故障报告表格溢出 112px 的根因）。
+func TestTableCellPercentWidthIsColumnOuter(t *testing.T) {
+	src := `<!doctype html><html><body style="margin:0">
+		<table id="t" style="width:100%;border-spacing:0">
+			<tr>
+				<td id="a" style="width:25%;padding:0 14px">AAAAAAAA</td>
+				<td id="b" style="width:75%;padding:0 14px">BBBBBBBB</td>
+			</tr>
+		</table>
+	</body></html>`
+	doc, _ := tableLayout(t, src, 400, 200)
+	if w := tableBox2W(tableEl(t, doc, "t")); w != 400 {
+		t.Errorf("表格宽 = %d, want 400（百分比合计 100%% 不应被 padding 撑宽）", w)
+	}
+	if w := tableBox2W(tableEl(t, doc, "a")); w != 100 {
+		t.Errorf("25%% 列外宽 = %d, want 100（padding 由内容区吸收）", w)
+	}
+	if w := tableBox2W(tableEl(t, doc, "b")); w != 300 {
+		t.Errorf("75%% 列外宽 = %d, want 300", w)
+	}
+}
+
+// TestTableCellPercentNotShrunkByWideSibling 百分比列有硬下限（声明宽=列外宽）：
+// 同列 auto 格的长内容不参与压缩他列——富余空间按 CSS 2.1 §17.5.2.2 分给
+// 需要宽度的列，其余百分比列保持声明比例（vm02 表第 4 列内容超 48% 时
+// 前 3 列不再被压窄）。
+func TestTableCellPercentNotShrunkByWideSibling(t *testing.T) {
+	src := `<!doctype html><html><body style="margin:0">
+		<table id="t" style="width:100%;border-spacing:0">
+			<tr>
+				<th id="h1" style="width:25%;padding:0 14px">设备</th>
+				<th id="h2" style="width:75%;padding:0 14px">评估</th>
+			</tr>
+			<tr>
+				<td id="d1">sda</td>
+				<td id="d2">坏扇区所在盘，SMART 状态 Pending 与 Unstable 计数持续变化，需尽快迁移数据并更换磁盘。</td>
+			</tr>
+		</table>
+	</body></html>`
+	doc, _ := tableLayout(t, src, 400, 200)
+	if w := tableBox2W(tableEl(t, doc, "t")); w != 400 {
+		t.Errorf("表格宽 = %d, want 400", w)
+	}
+	if w := tableBox2W(tableEl(t, doc, "d1")); w != 100 {
+		t.Errorf("25%% 列宽 = %d, want 100（长内容列不压缩百分比列下限）", w)
+	}
+	if w := tableBox2W(tableEl(t, doc, "d2")); w != 300 {
+		t.Errorf("75%% 列宽 = %d, want 300（长内容在列内换行吸收）", w)
+	}
+}
+
+// TestTableCellPercentSumOver100GrowsTable 百分比合计超 100% 时表格按列宽之和
+// 撑宽（CSS 2.1 §17.5.2.2：表格取 width 与列宽和的较大者），不把列压回比例。
+func TestTableCellPercentSumOver100GrowsTable(t *testing.T) {
+	src := `<!doctype html><html><body style="margin:0">
+		<table id="t" style="width:100%;border-spacing:0">
+			<tr>
+				<td id="a" style="width:60%;padding:0">A</td>
+				<td id="b" style="width:60%;padding:0">B</td>
+			</tr>
+		</table>
+	</body></html>`
+	doc, _ := tableLayout(t, src, 400, 200)
+	if w := tableBox2W(tableEl(t, doc, "t")); w != 480 {
+		t.Errorf("表格宽 = %d, want 480（60%%+60%%=120%% 按列宽和撑破声明宽）", w)
+	}
+	if w := tableBox2W(tableEl(t, doc, "a")); w != 240 {
+		t.Errorf("60%% 列宽 = %d, want 240", w)
+	}
+}
+
+// TestTableCellPixelWidthStillHardFloor 像素声明宽仍是硬下限（既有口径不回归）：
+// 列不许压到声明宽之下，表格随之撑宽。
+func TestTableCellPixelWidthStillHardFloor(t *testing.T) {
+	src := `<!doctype html><html><body style="margin:0">
+		<table id="t" style="width:100%;border-spacing:0">
+			<tr>
+				<td id="a" style="width:300px;padding:0">A</td>
+				<td id="b" style="width:300px;padding:0">B</td>
+			</tr>
+		</table>
+	</body></html>`
+	doc, _ := tableLayout(t, src, 400, 200)
+	if w := tableBox2W(tableEl(t, doc, "a")); w != 300 {
+		t.Errorf("300px 声明列宽 = %d, want 300（像素声明不被压缩）", w)
+	}
+	if w := tableBox2W(tableEl(t, doc, "t")); w != 600 {
+		t.Errorf("表格宽 = %d, want 600（列下限之和撑破容器声明宽）", w)
+	}
+}
+
 // sprintfSpan 替换 rowspan 占位。
 func sprintfSpan(tpl, v string) string {
 	out := make([]byte, 0, len(tpl)+len(v))

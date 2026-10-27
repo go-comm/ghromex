@@ -5,6 +5,17 @@
 
 ## 未发布
 
+**表格：百分比声明宽按列外宽解析，修复 100% 合计时 padding 撑破容器**
+（vm02 故障报告表格溢出 112px）：CSS 表格语义里 `th/td` 的百分比宽度
+是**列的外宽**（含格自身 padding/border，同 Chrome 与 CSS 2.1 §17.5.2.2）；
+旧实现按 content-box 把内容算成百分比再加 padding，列宽虚胖 Σpadding。
+新实现把 `natW/minW` 归位到百分比外宽本身：百分比列不低于声明宽（含
+padding），总和 ≤ 表格声明宽时仅把剩余空间分给 auto 列；总和 > 100%
+时按 CSS 取 `max(width, 列宽和)` 撑宽表格（不压缩他列）。像素声明宽仍
+为硬下限（不被压缩，表格随之变宽）。新增 4 个回归测试：
+`TestTableCellPercentWidthIsColumnOuter` / `TestTableCellPercentNotShrunkByWideSibling`
+/ `TestTableCellPercentSumOver100GrowsTable` / `TestTableCellPixelWidthStillHardFloor`。
+
 **`:not()` 与 `:nth-child()` 函数型伪类支持**：选择器层新增两个函数型
 伪类——`:not(选择器列表)`（Selectors 4：逗号分隔、任一参数命中即排除、
 特异度取参数最高者、支持嵌套如 `:not(:nth-child(2))`）与

@@ -19,8 +19,9 @@ import (
 //     整行的匿名行；行（tr）里的非单元格子内容 → 按连续段聚成匿名格。
 //     匿名载体不进 DOM（绘制/命中没有它的盒），只作为格的载体排布内容；
 //   - 列宽：单列格的天然外宽定列；跨列格的宽度差按比例补进所辖列；
-//     col/colgroup 宽度作列下限；表格显式宽按比例拉伸/压缩列宽（不低于
-//     col 约束）；auto 宽收缩并以可用宽为上限；
+//     col/colgroup 宽度作列下限；格的百分比宽按**列外宽**解析（含格的
+//     padding/border，同 Chrome 表格语义）；表格显式宽按比例拉伸/压缩列宽
+//     （不低于列下限）；auto 宽收缩并以可用宽为上限；
 //   - 行高：行等高（取行内格的外盒最大）；tr 显式高度/遗留 height 属性作
 //     行下限；跨行格的宽度差按比例分给所辖行；格盒拉伸填满行高，内容按
 //     vertical-align 落位——格上的 baseline 按 middle 处理（§17.5.2.1），
@@ -1038,10 +1039,26 @@ func layoutTableBox(g Graphics, tbl *htmlElement, outerW, outerH, ox, oy, pctW, 
 			mw += c.el.rsvPD[eLeft] + c.el.rsvPD[eRight] +
 				c.el.rsvBD[eLeft] + c.el.rsvBD[eRight]
 		}
-		// 显式声明宽：格按声明宽即最小宽（Chrome 不把作者声明的格宽压下去）。
-		if comp := c.el.computed; comp != nil && comp.Width() != nil &&
-			resolveLen(comp.Width(), pctBase) >= 0 {
-			mw = c.natW
+		// 显式声明宽分两档口径（Chrome 表格语义与 CSS 2.1 §17.5.2.2）：
+		// - 百分比宽 = **列外宽**（含格自身 padding/border；第二遍槽宽同为
+		//   border-box，同口径）。layoutBox 按 content-box 量出的是「内容=
+		//   百分比再加 padding」，列宽虚胖 Σpadding——声明宽合计 100% 的表
+		//   必然撑破容器（vm02 故障报告表格溢出 112px 的根因）。这里把
+		//   natW/minW 都归位到百分比外宽本身：padding 由内容区吸收，合计
+		//   超 100% 时按列宽之和撑宽表格（表格取 width 与列宽和的较大者），
+		//   而不是把别的列压到声明宽之下。
+		// - 像素宽是列最小宽：Chrome 不把作者声明的格宽压下去（表格随之变宽）。
+		if comp := c.el.computed; comp != nil && comp.Width() != nil {
+			if dw := resolveLen(comp.Width(), pctBase); dw >= 0 {
+				if comp.Width().Type() == SIZE_PERCENT {
+					if dw < mw {
+						dw = mw // 不可断片段更宽时片段优先（列宽不低于最小内容）
+					}
+					c.natW, mw = dw, dw
+				} else {
+					mw = c.natW
+				}
+			}
 		}
 		if mw < 4 {
 			mw = 4
