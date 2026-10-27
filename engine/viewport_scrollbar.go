@@ -14,6 +14,11 @@ package engine
 //     而拖滑块要的是跟手——viewportBarScrollTo 把该轴动画直接贴到目标
 //     （Chrome 同款：拖滚动条无缓动，滚轮有）。
 //
+// 宿主有固定栏时（ui 工作台的工具栏/状态栏是 fixed 压在页面上的），滚动条
+// 不该画到栏上：SetViewportScrollbarInsets 把纵条限制在两栏之间的带里，
+// SetViewportHorizontalScrollbar 关掉横条。几何仍以 viewportBars 为唯一
+// 口径（绘制/命中/拖拽映射同步生效）。
+//
 // 只处理根元素（文档级滚动）；通用 overflow 容器暂未覆盖（scroll.go 头注
 // 的「容器无滚动条」现状对容器仍成立）。
 // ---------------------------------------------------------------------------
@@ -33,28 +38,42 @@ type sbBar struct {
 
 // viewportBars 返回文档级滚动的纵/横滚动条几何。该轴内容溢出视口才出现；
 // 滑块位置取**视觉**滚动偏移（scrollVisualOffset），滚轮缓动动画途中滑块
-// 与画面同步移动。
+// 与画面同步移动。固定栏插入带（sbInset*）把纵条限制在 [top, 高−bottom]、
+// 横条贴到下插入带之上；sbNoHBar 时横条不出现。
 func viewportBars(root *htmlElement, vw, vh int) (v, h sbBar) {
 	if root == nil || vw <= 0 || vh <= 0 {
 		return
 	}
+	top, bottom := root.sbInsetTop, root.sbInsetBottom
+	if top < 0 {
+		top = 0
+	}
+	if bottom < 0 {
+		bottom = 0
+	}
 	maxX, maxY := scrollMax(root, vw, vh, true)
 	ox, oy := scrollVisualOffset(root)
 	if maxY > 0 {
-		oy = clampInt(oy, 0, maxY)
-		v = sbBar{x: vw - viewportScrollbarWidth, y: 0, w: viewportScrollbarWidth, h: vh, visible: true}
-		v.tSize = sbThumbSize(v.h, maxY)
-		if v.h > v.tSize {
-			v.tPos = oy * (v.h - v.tSize) / maxY
+		if trackH := vh - top - bottom; trackH > 0 {
+			oy = clampInt(oy, 0, maxY)
+			v = sbBar{x: vw - viewportScrollbarWidth, y: top, w: viewportScrollbarWidth, h: trackH, visible: true}
+			v.tSize = sbThumbSize(v.h, maxY)
+			if v.h > v.tSize {
+				v.tPos = top + oy*(v.h-v.tSize)/maxY
+			}
 		}
 	}
-	if maxX > 0 {
+	if maxX > 0 && !root.sbNoHBar {
 		ox = clampInt(ox, 0, maxX)
 		tw := vw
 		if v.visible {
 			tw = vw - viewportScrollbarWidth // 右下角让给纵条（浏览器同款）
 		}
-		h = sbBar{x: 0, y: vh - viewportScrollbarWidth, w: tw, h: viewportScrollbarWidth, visible: true}
+		y := vh - bottom - viewportScrollbarWidth
+		if y < 0 {
+			y = 0
+		}
+		h = sbBar{x: 0, y: y, w: tw, h: viewportScrollbarWidth, visible: true}
 		h.tSize = sbThumbSize(h.w, maxX)
 		if h.w > h.tSize {
 			h.tPos = ox * (h.w - h.tSize) / maxX
@@ -100,17 +119,18 @@ func viewportBarScrollTo(d *htmlDocument, axisX bool, x, y int) {
 	vw, vh := d.viewportSize()
 	v, h := viewportBars(root, vw, vh)
 	maxX, maxY := scrollMax(root, vw, vh, true)
-	var track, tSize, maxScroll, pos int
+	var track, tSize, maxScroll, pos, origin int
 	if axisX {
-		track, tSize, maxScroll, pos = h.w, h.tSize, maxX, x
+		track, tSize, maxScroll, pos, origin = h.w, h.tSize, maxX, x, h.x
 	} else {
-		track, tSize, maxScroll, pos = v.h, v.tSize, maxY, y
+		track, tSize, maxScroll, pos, origin = v.h, v.tSize, maxY, y, v.y
 	}
 	if maxScroll <= 0 || track <= tSize {
 		return
 	}
-	// 两轴轨道都从视口 0 点起（纵条 y=0、横条 x=0），指针坐标即轨道内距。
-	p := clampInt(pos-tSize/2, 0, track-tSize)
+	// 指针坐标减去轨道起点即轨道内距（纵条起点随固定栏插入带下移；
+	// 横条起点在 x=0）。
+	p := clampInt(pos-origin-tSize/2, 0, track-tSize)
 	next := p * maxScroll / (track - tSize)
 	if axisX {
 		root.scrollLeft = next
@@ -150,6 +170,39 @@ func renderViewportScrollbars(g Graphics, root *htmlElement, vw, vh int) {
 	}
 	if h.visible {
 		g.DrawColor(h.tPos, h.y, h.tSize, h.h, scrollbarThumb)
+	}
+}
+
+// SetViewportScrollbarInsets 约束文档级纵向覆盖滚动条的带：只在
+// [top, 视口高−bottom] 之间绘制与命中（横条贴下插入带之上）。宿主的
+// 固定栏（ui 工作台的工具栏/状态栏）占满视口右缘时，滚动条要让出栏带、
+// 只服务页面内容区——「滚动的是网页，不是整个浏览器」。
+//
+// 负值按 0 处理；带宽 ≤ 0 时不画纵条（不影响滚动本身）。纯几何状态、
+// 不触发重绘——调用方自己保证有一次重绘（工作台在装文档时调用，随后
+// 必然重排重绘）。
+func SetViewportScrollbarInsets(doc HTMLDocument, top, bottom int) {
+	if d, ok := doc.(*htmlDocument); ok {
+		if root := inner(d); root != nil {
+			if top < 0 {
+				top = 0
+			}
+			if bottom < 0 {
+				bottom = 0
+			}
+			root.sbInsetTop, root.sbInsetBottom = top, bottom
+		}
+	}
+}
+
+// SetViewportHorizontalScrollbar 开关文档级横向覆盖滚动条（默认显示）。
+// 关掉后横向溢出不再出横条，滚轮的横向滚动不受影响；工作台系应用
+// （浏览器/记事本等）关掉它——横条会压在固定状态栏上。
+func SetViewportHorizontalScrollbar(doc HTMLDocument, show bool) {
+	if d, ok := doc.(*htmlDocument); ok {
+		if root := inner(d); root != nil {
+			root.sbNoHBar = !show
+		}
 	}
 }
 

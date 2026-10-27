@@ -162,6 +162,12 @@ type htmlElement struct {
 	scrollTop int
 	// scrollLeft 为横向滚动偏移（像素），语义同 scrollTop。
 	scrollLeft int
+	// sbInsetTop/sbInsetBottom 是宿主固定栏（工具栏/状态栏）占位高度（px）：
+	// 文档级覆盖滚动条只在 [top, 视口高−bottom] 这条带里绘制与命中（横条贴
+	// 下插入带之上），不压住栏（见 SetViewportScrollbarInsets）。
+	// sbNoHBar 关掉文档级横向覆盖滚动条（工作台系不需要；滚轮横滚不受影响）。
+	sbInsetTop, sbInsetBottom int
+	sbNoHBar                  bool
 	// textScrollX 是单行 input 文本窗口的横向偏移（像素，rune 边界向下取整）。
 	// 值超宽时窗口跟随光标（ensureCaretVisible 驱动，Chrome 的 scroll-follows-
 	// caret 语义）；渲染与光标映射都经 inputVisibleWindow 按它舍头，同一口径。

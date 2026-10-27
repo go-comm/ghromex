@@ -5,6 +5,18 @@
 
 ## 未发布
 
+**滚动条只服务页面内容区（工作台固定栏不压条、浏览器不出横条）**：
+ui 工作台的工具栏/状态栏是 fixed 压在视口上下缘的，文档级覆盖滚动条
+却整根视口高绘制——滑块从 y=0 划过工具栏、贴进状态栏，横向溢出还会在
+状态栏上叠一条横滑块。引擎新增两个文档级开关（`viewport_scrollbar.go`）：
+`SetViewportScrollbarInsets(doc, top, bottom)` 把纵条限制在
+[top, 视口高−bottom] 带内（绘制/命中/拖拽映射同一几何源，负值钳 0），
+`SetViewportHorizontalScrollbar(doc, show)` 开关横条（关掉后滚轮横滚
+不受影响）。`ui.Install` 装配时自动设置：纵条走在工具栏与状态栏之间、
+横条关闭；`SetStatusVisible`/`SetTheme` 随栏的显隐与高度联动重设插入带。
+回归见 `engine/viewport_scrollbar_test.go`（带内几何/命中/拖到底、
+横条关闭）与 `ui/workbench_test.go`（固定栏右缘像素带与无条页逐像素一致）。
+
 **表格：百分比声明宽按列外宽解析，修复 100% 合计时 padding 撑破容器**
 （vm02 故障报告表格溢出 112px）：CSS 表格语义里 `th/td` 的百分比宽度
 是**列的外宽**（含格自身 padding/border，同 Chrome 与 CSS 2.1 §17.5.2.2）；

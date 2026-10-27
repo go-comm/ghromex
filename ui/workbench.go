@@ -164,6 +164,13 @@ type Workbench struct {
 	statusSegs      []statusSegView
 	spacerBottom    engine.HTMLElement
 
+	// chromeTop 是顶栏（菜单栏+工具栏）总高：文档级纵滚动条带的起点，
+	// SetStatusVisible/SetTheme 复位插入带时要用（见 Install）。
+	chromeTop int
+	// statusVisible 记录状态栏显隐（SetStatusVisible 维护）：主题切换时
+	// 按它重设滚动条带的下缘插入。
+	statusVisible bool
+
 	keys []keyBind
 	open *menuView
 
@@ -201,13 +208,19 @@ func Install(doc engine.HTMLDocument, spec Spec) *Workbench {
 	}
 	chromeH := menuH + toolH
 
+	// 文档级覆盖滚动条只服务页面内容区：纵条走在工具栏与状态栏之间
+	// （固定栏占着视口右缘，条不该压上去）；横条不提供——它会压在固定
+	// 状态栏上，滚轮横滚不受影响。
+	engine.SetViewportScrollbarInsets(doc, chromeH, theme.StatusHeight)
+	engine.SetViewportHorizontalScrollbar(doc, false)
+
 	// 样式表最后注入：页面自己的 <style>/<link> 在解析阶段就合并完了，
 	// 这里追加的规则在同特异度时后写胜出。
 	doc.AddStylesheetText(theme.css(menuH, chromeH, theme.StatusHeight, !spec.NoBodyReset))
 	// 提示气泡是绘制层、拿不到级联样式，配色单独随主题下发。
 	engine.SetTooltipColors(doc, theme.tooltipColors())
 
-	s := &Workbench{doc: doc, theme: theme, spec: spec}
+	s := &Workbench{doc: doc, theme: theme, spec: spec, chromeTop: chromeH, statusVisible: true}
 	body := doc.Body()
 
 	// 顶部占位：必须插在页面内容之前。放在 body 首而不是给 body 加
@@ -279,11 +292,13 @@ func (s *Workbench) Doc() engine.HTMLDocument {
 // SetStatusVisible 显示或隐藏状态栏，同时收起/恢复底部占位。
 //
 // 应用可以把它接到「视图 → 显示状态栏」这类命令上；隐藏时底部占位一起
-// 收起，页面内容可以使用腾出的高度，不会被固定栏挡住。
+// 收起，页面内容可以使用腾出的高度，不会被固定栏挡住；文档级纵滚动条
+// 的带也随状态栏收放（下缘插回收回 0）。
 func (s *Workbench) SetStatusVisible(visible bool) {
 	if s == nil {
 		return
 	}
+	s.statusVisible = visible
 	display := "none"
 	if visible {
 		display = "block"
@@ -294,6 +309,12 @@ func (s *Workbench) SetStatusVisible(visible bool) {
 	if s.spacerBottom != nil {
 		s.spacerBottom.SetAttribute("style", "display:"+display)
 	}
+	// 纵滚动条带的下缘跟着状态栏收放：隐藏后那段带还给页面。
+	bottom := 0
+	if visible {
+		bottom = s.theme.StatusHeight
+	}
+	engine.SetViewportScrollbarInsets(s.doc, s.chromeTop, bottom)
 }
 
 // SetTheme 在不重建菜单/工具栏/页面的前提下换一套主题。
@@ -318,6 +339,13 @@ func (s *Workbench) SetTheme(theme Theme) {
 	}
 	s.doc.AddStylesheetText(theme.css(menuH, menuH+toolH, theme.StatusHeight, !s.spec.NoBodyReset))
 	engine.SetTooltipColors(s.doc, theme.tooltipColors())
+	// 栏高可能随新主题变化：滚动条插入带按可见态重设。
+	s.chromeTop = menuH + toolH
+	bottom := 0
+	if s.statusVisible {
+		bottom = theme.StatusHeight
+	}
+	engine.SetViewportScrollbarInsets(s.doc, s.chromeTop, bottom)
 	s.theme = theme
 	s.spec.Theme = &theme
 }

@@ -184,6 +184,77 @@ func TestViewportScrollbarThumbFollowsVisual(t *testing.T) {
 	}
 }
 
+// 固定栏插入带：纵条只在 [top, 高−bottom] 里绘制/命中/映射（ui 工作台：
+// 滚动条不压工具栏与状态栏），横条可关（滚轮横滚不受影响）。
+func TestViewportScrollbarInsets(t *testing.T) {
+	doc := openLongDoc(t, 2000)
+	SetViewportScrollbarInsets(doc, 40, 24)
+	root := inner(doc)
+	vw, vh := doc.(*htmlDocument).viewportSize()
+	v, _ := viewportBars(root, vw, vh)
+	if !v.visible || v.y != 40 || v.h != vh-64 {
+		t.Fatalf("纵条轨道 = (y %d, h %d), want (y 40, h %d)", v.y, v.h, vh-64)
+	}
+	if v.tPos != 40 {
+		t.Errorf("未滚动滑块顶 = %d, want 40（轨道起点，不是视口 0）", v.tPos)
+	}
+	// 插入带区（工具栏位置）按下不算滚动条；带内照常命中。
+	if _, ok := viewportBarHit(root, vw, vh, vw-2, 10); ok {
+		t.Error("顶部插入带区不应命中纵条")
+	}
+	if _, ok := viewportBarHit(root, vw, vh, vw-2, 41); !ok {
+		t.Error("带内按下应命中纵条")
+	}
+	// 拖拽映射按轨道起点：拖到带顶 → 0，拖到带底 → 滚到底。
+	_, maxY := scrollMax(root, vw, vh, true)
+	if !OnDocumentMouseDown(doc, vw-4, v.y+v.h-10) {
+		t.Fatal("带底按下应进入拖动通道")
+	}
+	OnDocumentMouseDrag(doc, vw-4, v.y)
+	if root.scrollTop != 0 {
+		t.Errorf("拖到带顶 scrollTop = %d, want 0", root.scrollTop)
+	}
+	OnDocumentMouseDrag(doc, vw-4, v.y+v.h-1)
+	if root.scrollTop != maxY {
+		t.Errorf("拖到带底 scrollTop = %d, want %d（最大滚动）", root.scrollTop, maxY)
+	}
+	OnDocumentMouseUp(doc)
+	// 滚到底：滑块底贴带底（视口高 − 下插入），不伸进状态栏。
+	root.scrollTop = maxY
+	v2, _ := viewportBars(root, vw, vh)
+	if v2.tPos+v2.tSize != v2.y+v2.h {
+		t.Errorf("滚到底滑块底 = %d, want %d", v2.tPos+v2.tSize, v2.y+v2.h)
+	}
+}
+
+// 横向覆盖滚动条关掉后：横向溢出不出条、不命中（纵条不受扰）；负插入值按 0 钳。
+func TestViewportHorizontalScrollbarHidden(t *testing.T) {
+	vp := NewHeadlessViewport(400, 300)
+	doc, err := OpenDocument(vp, `<!doctype html><html><body style="margin:0">
+		<div style="width:2000px;height:1000px">wide</div>
+	</body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := inner(doc)
+	if _, h := viewportBars(root, 400, 300); !h.visible {
+		t.Fatal("前置：默认应出横条")
+	}
+	SetViewportHorizontalScrollbar(doc, false)
+	SetViewportScrollbarInsets(doc, -8, -8) // 非法负值：按 0 处理，不改变几何
+	_, h := viewportBars(root, 400, 300)
+	if h.visible {
+		t.Error("关闭后不应出横条")
+	}
+	if _, ok := viewportBarHit(root, 400, 300, 200, 300-4); ok {
+		t.Error("关闭后横条命中带应失效")
+	}
+	v, _ := viewportBars(root, 400, 300)
+	if !v.visible || v.y != 0 || v.h != 300 {
+		t.Errorf("负插入应钳 0 且纵条不受横条开关影响：(y %d, h %d, visible %v)", v.y, v.h, v.visible)
+	}
+}
+
 func abs(v int) int {
 	if v < 0 {
 		return -v

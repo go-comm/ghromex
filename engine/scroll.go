@@ -21,7 +21,8 @@ import (
 //
 // textarea 提供覆盖式滚动条 UI（绘制+拖拽见 textarea.go 的
 // textareaScrollbar）；文档级滚动也有覆盖式滚动条（视口右缘/下缘，绘制+
-// 命中+拖拽见 viewport_scrollbar.go，拖拽立即到位不缓动）；通用容器
+// 命中+拖拽见 viewport_scrollbar.go，拖拽立即到位不缓动；带域可按宿主
+// 固定栏收窄、横条可关）；通用容器
 // （overflow 滚动）仍无滚动条，滚轮是唯一驱动源，也仍无 PageUp/PageDown
 // 翻页与触控板惯性。
 

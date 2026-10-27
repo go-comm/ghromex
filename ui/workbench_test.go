@@ -914,3 +914,47 @@ func TestChromeIgnoresHostilePageCSS(t *testing.T) {
 		})
 	}
 }
+
+// 文档级滚动条只服务页面内容区：长页出纵条时，滑块走在工具栏与状态栏
+// 之间；固定栏右缘 8px 带与无滚动条的短页逐像素一致（回归：滚动条整根
+// 视口高画过去、压住外壳栏）。
+func TestScrollbarAvoidsChromeBars(t *testing.T) {
+	render := func(blocks int) *engine.BufferGraphics {
+		t.Helper()
+		vp, buf := engine.NewBufferedViewport(640, 480)
+		doc, err := engine.OpenDocument(vp, `<!doctype html><html><body style="margin:0">`+
+			strings.Repeat(`<div style="height:100px">行</div>`, blocks)+`</body></html>`)
+		if err != nil {
+			t.Fatalf("打开文档失败: %v", err)
+		}
+		Install(doc, Spec{Tools: []Action{Tool("保存", nil)}, Status: "就绪"})
+		doc.Refresh()
+		engine.RenderNode(buf, doc)
+		return buf
+	}
+	long := render(20) // 2000px 内容 → 溢出出纵条
+	short := render(2) // 不溢出 → 无滚动条
+
+	// 右缘 8px 命中带（视口宽 640 − viewportScrollbarWidth 8）。
+	bandSame := func(y int) bool {
+		for x := 632; x < 640; x++ {
+			r1, g1, b1, a1, ok1 := long.ColorAt(x, y)
+			r2, g2, b2, a2, ok2 := short.ColorAt(x, y)
+			if !ok1 || !ok2 || r1 != r2 || g1 != g2 || b1 != b2 || a1 != a2 {
+				return false
+			}
+		}
+		return true
+	}
+	if !bandSame(10) {
+		t.Error("滚动条画进了工具栏右缘")
+	}
+	if !bandSame(470) {
+		t.Error("滚动条画进了状态栏右缘")
+	}
+	// 对照：带内（纵条起点 y=ToolHeight=36 的滑块上）长页应比短页多滑块——
+	// 否则上面两条断言可能因「纵条根本没画」而空过。
+	if bandSame(40) {
+		t.Error("纵条滑块应在工具栏之下出现（对照失效：纵条没画？）")
+	}
+}

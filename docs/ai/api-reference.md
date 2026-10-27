@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-27 18:45
+> 生成时间: 2026-10-27 21:53
 
 ---
 
@@ -1412,6 +1412,18 @@ func SetValue(el HTMLElement, value string)
     SetValue 设置控件当前值并触发重排重绘：
       - select：按值选中对应 option（未匹配则忽略）；
       - input/textarea：写 value 属性，光标移到值末尾。
+
+func SetViewportHorizontalScrollbar(doc HTMLDocument, show bool)
+    SetViewportHorizontalScrollbar 开关文档级横向覆盖滚动条（默认显示）。
+    关掉后横向溢出不再出横条，滚轮的横向滚动不受影响；工作台系应用 （浏览器/记事本等）关掉它——横条会压在固定状态栏上。
+
+func SetViewportScrollbarInsets(doc HTMLDocument, top, bottom int)
+    SetViewportScrollbarInsets 约束文档级纵向覆盖滚动条的带：只在 [top, 视口高−bottom]
+    之间绘制与命中（横条贴下插入带之上）。宿主的 固定栏（ui 工作台的工具栏/状态栏）占满视口右缘时，滚动条要让出栏带、
+    只服务页面内容区——「滚动的是网页，不是整个浏览器」。
+
+    负值按 0 处理；带宽 ≤ 0 时不画纵条（不影响滚动本身）。纯几何状态、 不触发重绘——调用方自己保证有一次重绘（工作台在装文档时调用，随后
+    必然重排重绘）。
 
 func TickScroll(doc HTMLDocument) bool
     TickScroll 推进文档级滚动动画一帧，并把视觉位置的增量平移到已布局的 盒子上。返回是否有内容移动（调用方需要重绘，但**不必重排**）。
@@ -3375,7 +3387,8 @@ func (s *Workbench) SetStatusSegments(segs []StatusSegment)
 func (s *Workbench) SetStatusVisible(visible bool)
     SetStatusVisible 显示或隐藏状态栏，同时收起/恢复底部占位。
 
-    应用可以把它接到「视图 → 显示状态栏」这类命令上；隐藏时底部占位一起 收起，页面内容可以使用腾出的高度，不会被固定栏挡住。
+    应用可以把它接到「视图 → 显示状态栏」这类命令上；隐藏时底部占位一起 收起，页面内容可以使用腾出的高度，不会被固定栏挡住；文档级纵滚动条
+    的带也随状态栏收放（下缘插回收回 0）。
 
 func (s *Workbench) SetTheme(theme Theme)
     SetTheme 在不重建菜单/工具栏/页面的前提下换一套主题。
