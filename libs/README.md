@@ -47,3 +47,28 @@ C 工具链），所以这里既没有 .a/.lib，也没有头文件——只有�
 - `NewWindow: SDL_Init: ...` —— 找到了但初始化失败（缺依赖 DLL）。
 
 把上表三个文件放进本目录即可；也可以放到系统 PATH 能搜到的地方。
+
+## libs/fonts —— 补充字体（按需生成，不入库）
+
+Google 的 `NotoSansSC-VF.ttf` / `NotoSerifSC-VF.ttf` 的 fvar 默认字重是
+Thin(100)，而 SDL2_ttf 读不了 VF 命名实例（Chrome 经 DirectWrite 取
+400/700 实例）——直接打开会渲染出细三档的正文。本目录放
+`tools/gen-cjk-instances.ps1` 从系统 VF 实例化出的静态字重面：
+
+| 文件 | 字重 | 作用 |
+| --- | --- | --- |
+| `NotoSansSC-Regular.ttf` | 400 | CJK sans 回退的正体面（替代 VF 的 Thin 默认面） |
+| `NotoSansSC-Bold.ttf` | 700 | 粗体/半粗档真字面（Chrome 对 600 同样就近选 700） |
+| `NotoSerifSC-Regular.ttf` / `NotoSerifSC-Bold.ttf` | 400/700 | serif 回退同理 |
+
+生成（需 python + `pip install fonttools`）：
+
+```
+powershell -ExecutionPolicy Bypass -File tools\gen-cjk-instances.ps1
+```
+
+目录被 `.gitignore` 排除；`backend/sdl2` 的 `fontPathOf` 在系统字体目录
+未命中时来此查找，**仅当系统装了同名 VF 才选用**（Chrome 没选 Noto 的
+机器上引擎也不选，两边族选择一致）。缺文件时退回旧行为（VF Thin 面 +
+合成加粗）。字体为 SIL OFL 许可，允许再分发（生成物随应用打包时附
+许可文本即可）。

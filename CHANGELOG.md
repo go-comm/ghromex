@@ -5,6 +5,20 @@
 
 ## 未发布
 
+**CJK 静态字重面（会议纪要页 CJK 比 Chrome 细三档）**：
+CDP `CSS.getPlatformFontsForNode` 定位根因——Chrome 正文 CJK 用 Noto Sans SC
+Regular(400) 命名实例、标题/th 用 Bold(700)；而 `NotoSansSC-VF.ttf` 的 fvar
+默认字重是 Thin(100)（Google 出厂如此），SDL2_ttf 读不了 VF 实例，引擎画的
+是 Thin 正文 + Thin 合成加粗，整体比 Chrome 细且发灰（字形骨架其实一致）。
+修复：新增 `tools/gen-cjk-instances.ps1`（fonttools instancer）把系统 VF 的
+400/700 实例化成静态面输出到 `libs/fonts/`（gitignore 排除、按需生成，
+OFL 许可允许再分发）；引擎 `fontPathOf` 在系统字体目录未命中时改查该目录，
+`cjkNotoInstance` 在「系统装了 Noto VF」时优先取静态 Regular（没装照旧落
+雅黑，与 Chrome 的族选择一致），粗体档由 `boldVariants` 接静态 Bold
+（Chrome 对无 600 面的 VF 同样 600→700 就近选面）；未生成时退回旧行为。
+回归：`TestCJKStaticWeightInstances`、`TestMeasureCJKWeightRealFaces`；
+会议纪要页标题/正文截图 CJK 字重与 Chrome 对齐。
+
 **数值字重贯通：600 落 Segoe UI Semibold**：
 上一轮把 `font-weight: 600` 归档成粗体后标题「不细了」，但拉丁段仍比
 Chrome 粗一圈且宽 ~6%（`segoeuib` Bold 214.6 vs Chrome Semibold 202.7 @32px）。

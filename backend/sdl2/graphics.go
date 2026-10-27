@@ -108,9 +108,43 @@ func fontPathOf(name string) string {
 		}
 	} else if cand := filepath.Join(fontsDir, name); fileExists(cand) {
 		p = cand
+	} else if b := bundledFontsDir(); b != "" {
+		// 系统字体没有的（如 tools/gen-cjk-instances.ps1 生成的静态字重面）
+		// 再查仓库内补充字体目录 libs/fonts（.gitignore 排除、按需生成）。
+		if cand := filepath.Join(b, name); fileExists(cand) {
+			p = cand
+		}
 	}
 	fontPathCache.Store(name, p)
 	return p
+}
+
+var bundledFontsOnce sync.Once
+var bundledFontsVal string
+
+// bundledFontsDir 返回仓库内补充字体目录 libs/fonts（tools/gen-cjk-instances.ps1
+// 生成的静态字重面等）。查找口径同 findLibsDir：先 cwd 的 .、..、../..
+// 三级（测试的 cwd 是包目录），再试可执行文件旁（打包运行时随包分发）。
+// 进程内只找一次；不存在返回 ""，fontPathOf 直接按未命中处理。
+func bundledFontsDir() string {
+	bundledFontsOnce.Do(func() {
+		try := func(p string) bool {
+			if st, err := os.Stat(p); err == nil && st.IsDir() {
+				bundledFontsVal = p
+				return true
+			}
+			return false
+		}
+		for _, up := range []string{".", "..", filepath.Join("..", "..")} {
+			if try(filepath.Join(up, "libs", "fonts")) {
+				return
+			}
+		}
+		if exe, err := os.Executable(); err == nil && exe != "" {
+			try(filepath.Join(filepath.Dir(exe), "libs", "fonts"))
+		}
+	})
+	return bundledFontsVal
 }
 
 func fileExists(p string) bool {
@@ -349,9 +383,9 @@ type texKey struct {
 	// tier = 字面档位（见 fontTierOf）。不能用 bold 代替：fontPath 是变体
 	// 解析**前**的段路径（如 segoeui.ttf），600（→seguisb）与 700
 	// （→segoeuib）若同 key 会串用彼此的纹理。
-	tier uint8
-	italic   bool
-	lcd      bool
+	tier   uint8
+	italic bool
+	lcd    bool
 	// hint = hinting 档位（fontHinting()）：同 faceKey 的理由——运行中切
 	// GHROMEX_HINT 后必须重建纹理，否则仍命中旧 hinting 栅格化的缓存。
 	hint uint8
@@ -462,6 +496,14 @@ var boldVariants = map[string]string{
 	"segoeui.ttf": "segoeuib.ttf",
 	"msyh.ttc":    "msyhbd.ttc",
 	"simsun.ttc":  "simsunb.ttf",
+	// Noto Sans/Serif SC 的 VF 版：fvar 默认面是 Thin(100)（Google 出厂如此），
+	// SDL2_ttf 读不了 VF 实例，Chrome 靠 DirectWrite 命名实例拿 400/700 真字重。
+	// 粗体档指向 tools/gen-cjk-instances.ps1 生成的静态 Bold 面；未生成时
+	// fontPathOf 落空，退回合成加粗（旧行为）。正体档见 cjkFallbackPath。
+	"notosanssc-vf.ttf":       "NotoSansSC-Bold.ttf",
+	"notosanssc-regular.ttf":  "NotoSansSC-Bold.ttf",
+	"notoserifsc-vf.ttf":      "NotoSerifSC-Bold.ttf",
+	"notoserifsc-regular.ttf": "NotoSerifSC-Bold.ttf",
 }
 
 // semiboldVariants 给出各字体文件对应的**真半粗体**（Semibold，600 档）
@@ -477,9 +519,9 @@ var semiboldVariants = map[string]string{
 // 字面档位：由数值 font-weight 与两档布尔归档得出，face/度量/纹理三处
 // 共用同一口径。
 const (
-	tierRegular = iota // 0：正体
-	tierSemibold       // 1：半粗（550~649，优先真 Semibold 面）
-	tierBold           // 2：粗体（650+ 或 legacy bold）
+	tierRegular  = iota // 0：正体
+	tierSemibold        // 1：半粗（550~649，优先真 Semibold 面）
+	tierBold            // 2：粗体（650+ 或 legacy bold）
 )
 
 // fontTierOf 把（数值字重, 两档粗体）归档到字面档位。weightNum<=0 表示
@@ -688,8 +730,8 @@ func (g *Graphics) cjkFallbackPath(class string) string {
 			return ""
 		}
 		cjkFallbackPaths.mono = first("simsun.ttc")
-		cjkFallbackPaths.serif = first("NotoSerifSC-VF.ttf", "NotoSerifSC-Regular.otf")
-		cjkFallbackPaths.sans = first("NotoSansSC-VF.ttf", "NotoSansSC-Regular.otf")
+		cjkFallbackPaths.serif = cjkNotoInstance("NotoSerifSC-VF.ttf", "NotoSerifSC-Regular.otf")
+		cjkFallbackPaths.sans = cjkNotoInstance("NotoSansSC-VF.ttf", "NotoSansSC-Regular.otf")
 	})
 	p := ""
 	switch class {
@@ -704,6 +746,40 @@ func (g *Graphics) cjkFallbackPath(class string) string {
 		return g.cjkFont
 	}
 	return p
+}
+
+// cjkNotoInstance 解析 Noto CJK 回退的**正体**字面。门控与选面顺序：
+//
+//  1. 系统里没有该族任何字面（VF 或静态 otf）→ 返回空：这台机器的 Chrome
+//     会把 CJK 交给雅黑，引擎必须同步落到 g.cjkFont，否则两边字形错配。
+//     libs/fonts 的静态面只是 VF 命名实例的替身，不参与门控判定。
+//  2. 系统装了 VF（本机如此，Chrome 即用 Noto 的命名实例渲染 400/700）→
+//     优先取同族静态 Regular 面（tools/gen-cjk-instances.ps1 生成到
+//     libs/fonts）：该 VF 的 fvar 默认字重是 Thin(100)（Google 出厂如此），
+//     SDL2_ttf 读不了 VF 实例，直接打开渲染出的正文会比 Chrome 细三档。
+//  3. 静态面未生成 → 退回 VF 本身（旧行为，Thin 正文），粗体档仍由
+//     boldVariants 接住（见同名 -Bold.ttf，未生成则落回合成加粗）。
+//
+// 粗体/半粗档的选面不在此处：face() 拿到本函数的返回值后按 tier 走
+// boldVariants 就近选面（Chrome 对无 600 面的 VF 同样 600→700）。
+func cjkNotoInstance(vfName, otfFallback string) string {
+	if !systemFontExists(vfName) && !systemFontExists(otfFallback) {
+		return ""
+	}
+	static := strings.Replace(vfName, "-VF.ttf", "-Regular.ttf", 1)
+	for _, n := range []string{static, otfFallback, vfName} {
+		if p := fontPathOf(n); p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
+// systemFontExists 只看系统字体目录（不含 libs/fonts 捆绑面）：用于判定
+// 本机 Chrome 会不会选中该族——捆绑面是 VF 实例的替身，不该反过来改变
+// 族选择。
+func systemFontExists(name string) bool {
+	return fileExists(filepath.Join(fontsDir, name))
 }
 
 // fontPath 兼容旧调用：不带 family 信息时的 standard 解析。

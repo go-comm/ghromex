@@ -27,3 +27,6 @@ desktop.ini
 
 # notepad -shot ��� flag �������·�����ɵĿ��գ���ʷ�ӣ���������
 /-out
+
+# 生成的 CJK 静态字重实例（tools/gen-cjk-instances.ps1），勿提交
+libs/fonts/

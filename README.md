@@ -544,7 +544,10 @@ monospace/cursive → 新宋体（Chrome 在中文 Windows 上的默认等宽字
 在中文 Windows 上实际使用的系统字体：sans-serif/Arial/Segoe UI → Noto Sans SC、
 serif/Times → Noto Serif SC、monospace/cursive → 新宋体、system-ui → 微软雅黑；
 显式指定中文字体族（雅黑/黑体/宋体/等线…）时该字体自带 CJK 字形、不触发
-逐字回退；
+逐字回退；Noto CJK 在系统上通常是 VF 单文件且 fvar 默认字重是 Thin(100)，
+SDL2_ttf 读不了 VF 命名实例（Chrome 经 DirectWrite 取 400/700 实例），引擎
+因此优先用 `tools/gen-cjk-instances.ps1` 生成的静态 Regular/Bold 面
+（落 `libs/fonts/`，gitignore）——未生成时退回 VF 本体（正文偏细）；
 行盒（line-height: normal）直接用 SDL_ttf 的 `TTF_FontAscent`/
 `TTF_FontDescent`：行盒高 = 各内联盒「基线以上高度」的最大值 +
 「基线以下高度」的最大值，无内容时不加 strut。该口径是 FreeType 的像素
@@ -553,7 +556,8 @@ serif/Times → Noto Serif SC、monospace/cursive → 新宋体、system-ui → 
 （一半在文字之上、一半在之下，half-leading 取 floor(leading/2+0.5)，
 与 Chrome 的基线落点一致），行盒高度严格等于声明值；
 粗体按字体族选**真粗体字文件**（雅黑 → msyhbd.ttc、Arial → arialbd.ttf、
-Segoe UI → segoeuib.ttf），不依赖 FreeType 对常规字形的合成加粗——合成加粗
+Segoe UI → segoeuib.ttf、Noto Sans/Serif SC → 生成的 NotoSansSC-Bold.ttf），
+不依赖 FreeType 对常规字形的合成加粗——合成加粗
 明显更重，24px 中文标题上还会出现笔画粘连/重影（浏览器按字体族选粗体字重，
 同页对照下 h2 墨量比由 1.26 收敛到 1.01）；无真粗体文件的字体（黑体等）
 仍走合成加粗，与浏览器一致；
