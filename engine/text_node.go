@@ -28,6 +28,7 @@ type textRun struct {
 func NewTextNode(text string) HTMLElement {
 	t := &textNode{}
 	e := newElement("#text").(*htmlElement)
+	e.nodeType = nodeText
 	e.text = text
 	e.self = t
 	t.HTMLElement = e

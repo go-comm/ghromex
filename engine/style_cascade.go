@@ -135,6 +135,22 @@ func resolveStylesTreeIn(doc HTMLDocument, e HTMLElement, base *htmlElement,
 		if cb == nil || cb.generated {
 			continue
 		}
+		// 文本节点不独立级联，直接共享父元素的 computed 对象（与 ::before
+		// 文本盒同法，见 generated.go）：真实 DOM 里文本不是元素，选择器
+		// 匹配不到它，绘制层从它读的属性（color/font/line-height/
+		// text-decoration/visibility）全是继承属性、与父元素等值。省下每
+		// 文本节点一份 400B 胖样式对象与一轮全量规则匹配——文本多的页面里
+		// 文本节点占节点数一半以上（实测 6.5 万节点 API 参考页省 15.2MB）。
+		// 代价：共享对象上父元素的**非继承**属性（display/position/padding
+		// 等）也会从文本节点的 computed 读出来——按这些属性分支的场合必须
+		// 用 isText() 排除（文本不是盒）：isPositioned、layoutPositioned、
+		// shiftBox 的 fixed 跳过、renderNodeTextColor 的 opacity 包裹、
+		// GetBoundingClientRect。另外文本节点上的内联 style 从此不生效
+		// （真实浏览器同样没有 Text.style，属口径收敛）。
+		if cb.isText() {
+			cb.computed = comp
+			continue
+		}
 		resolveStylesTreeIn(doc, child, cb, base, author)
 	}
 }

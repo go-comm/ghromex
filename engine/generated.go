@@ -89,9 +89,11 @@ func canGenerateContent(host *htmlElement) bool {
 		DisplayTableColumn, DisplayTableColumnGroup:
 		return false
 	}
+	if host.isText() { // 文本节点不是元素，没有伪元素
+		return false
+	}
 	switch strings.ToLower(host.tagName) {
-	case "#text", // 文本节点不是元素，没有伪元素
-		"input", "textarea", "select", "option", "optgroup",
+	case "input", "textarea", "select", "option", "optgroup",
 		"img", "br", "hr", "iframe", "video", "audio", "canvas", "svg":
 		return false
 	}

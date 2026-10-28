@@ -402,8 +402,10 @@ func shiftBox(e HTMLElement, dx, dy int) {
 		base.runs[i].y += dy
 	}
 	for _, c := range base.children {
-		if cb := inner(c); cb != nil && cb.computed != nil &&
-			cb.computed.Position() == PositionFixed {
+		// 文本共享父元素 computed（见 style_cascade.go）：fixed 判定会把
+		// 父元素的 position 读进来，但文本片段没有独立盒、必须随父平移。
+		if cb := inner(c); cb != nil && !cb.isText() &&
+			cb.computed != nil && cb.computed.Position() == PositionFixed {
 			continue
 		}
 		shiftBox(c, dx, dy)
@@ -540,6 +542,12 @@ func layoutPositioned(g Graphics, el *htmlElement, vw, vh int) {
 	for _, child := range el.children {
 		che := inner(child)
 		if che == nil || che.computed == nil {
+			continue
+		}
+		if che.isText() {
+			// 文本片段随父行盒落位，不是独立定位盒：共享父 computed 后
+			// Position()/Display() 读出的是父元素的值，这里必须跳过
+			// （否则 relative 父下的文本会被再偏移一遍）。见 style_cascade.go。
 			continue
 		}
 		if che.computed.Display() == DisplayNone {

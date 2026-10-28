@@ -110,6 +110,23 @@ type HTMLElement interface {
 	FormatJSON(prefix string, indent bool) string
 }
 
+// nodeType 是节点的 DOM 类型（内部枚举）。
+//
+// 文本节点的标签名沿用 "#text"（TagName()/序列化口径，与浏览器一致），但
+// **所有行为分支一律看这个字段**：节点类型是类型信息，寄存在名字字符串里
+// 有两处硬伤——拼错一个字符编译期拦不住（大小写不同的 "#Text" 静默失效），
+// 而且它和「标签名恰好等于 #text 的元素」无法区分。换成类型位后，构造点
+// （NewTextNode）负责打标，判定收敛到 isText() 一处。
+type nodeType uint8
+
+const (
+	// nodeElement 元素节点。零值：newElement 与 `*e = *src` 结构体复制都默认它，
+	// 所以漏打标只会退化成「当元素处理」（独立级联、有盒），不会静默丢内容。
+	nodeElement nodeType = iota
+	// nodeText 文本节点：没有盒、不参与选择器匹配、computed 共享父元素那一份。
+	nodeText
+)
+
 func newElement(tag string) HTMLElement {
 	e := &htmlElement{}
 	e.self = e
@@ -263,10 +280,20 @@ type htmlElement struct {
 	// 时背景与边框不绘制（CSS 2.1 §17.5.1.1），几何与命中照旧占位——与
 	// Chrome 口径一致。由表格布局每轮写入（含复位），绘制层只读。
 	noCellDeco bool
+	// nodeType 是节点 DOM 类型（见 nodeType 的说明）。零值 = 元素，故只有
+	// 文本节点需要打标（NewTextNode）。
+	nodeType nodeType
 }
 
 func (element *htmlElement) TagName() string {
 	return element.tagName
+}
+
+// isText 判断节点是否为文本节点（判据是 nodeType，不是标签名字符串——
+// 见 nodeType 的说明）。文本没有盒、不参与选择器、computed 共享父元素，
+// 按这些口径分支的场合都走这里。
+func (element *htmlElement) isText() bool {
+	return element.nodeType == nodeText
 }
 
 func (element *htmlElement) SetAttribute(key string, value string) {
@@ -619,6 +646,11 @@ func (element *htmlElement) onPaintChanged() {
 // GetBoundingClientRect 返回边框盒。
 func (element *htmlElement) GetBoundingClientRect() Rect {
 	comp := element.computed
+	if element.isText() {
+		// 文本没有自己的盒：共享父 computed（见 style_cascade.go）后
+		// pd/bd 会读出父元素的 padding/border，文本盒保持零盒口径不变。
+		comp = nil
+	}
 	l := element.x
 	t := element.y
 	w := element.width

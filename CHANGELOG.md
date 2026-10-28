@@ -74,6 +74,42 @@
 203B/节点 ≈ 12.6 MB，却要改 164 处调用点，并为每个条目引入生命周期管理
 （节点离树时回收，漏则真泄漏）；纯重排以零调用点改动拿到 6 MB，故不做。
 
+**大文档常驻内存再 −15.2 MB（−20.4%）：文本节点共享父元素 computed**：
+一个文本节点原先也是一份完整的 `cssStyleDeclaration`（400B）加一轮全量规则
+匹配，但文本在 DOM 里**不是元素**——选择器本来就匹配不到它，而绘制要从它读的
+`color`/`font-size`/`font-family`/`font-weight`/`line-height`/`text-decoration`/
+`visibility` 全是**继承**属性，与父元素等值。现在级联时直接让文本节点的
+`computed` 指向父元素那一份（与 `::before`/`::after` 文本盒同法）：
+
+| | 前 | 后 |
+|---|---|---|
+| 37,579 个文本节点的独立样式对象 | 37,579 | **0** |
+| 714KB / 65,080 节点页常驻堆 | 74.6 MB | **59.4 MB** |
+| 整轮 解析+级联+布局+绘制 | 132.0 ms | **101.2 ms** |
+
+叠加同版本前的字段重排，同一页 **81.3 MB → 59.4 MB（累计 −27%）**、
+**134.0 → 101.2 ms（−24.5%）**。
+
+代价是共享对象带着父元素的**非继承**属性（display/position/padding/opacity/
+overflow），凡是拿 computed 判「盒」的地方都要把文本排除：`isPositioned`、
+`layoutPositioned`、`shiftBox` 的 fixed 跳过、`renderNodeTextColor` 的 opacity
+包裹、`GetBoundingClientRect` 零盒。这不是给文本开的特例——文本本来就没有盒，
+排除后行为与共享前逐像素一致（5 处各有回归用例）。
+另：文本节点上的内联 `style` 从此不生效（真实浏览器同样没有 `Text.style`，
+口径收敛）。
+
+**顺带去硬编码：节点类型不再靠比较标签名 `"#text"`**。`htmlElement` 新增
+`nodeType uint8`（`nodeElement` 零值 / `nodeText`，构造点 `NewTextNode` 打标），
+上述 5 处与 `canGenerateContent` 一律改走 `isText()`。字符串判据的硬伤是编译期
+拦不住（大小写不同的 `"#Text"` 静默失效），且会误伤「标签名恰好等于 `#text`」的
+元素——旧口径下这种元素不独立级联、按零盒处理、画不出来。`"#text"` 只保留在
+`TagName()`/序列化等展示口径上。
+回归见 `engine/cascade_text_share_internal_test.go`（8 条）：5 处守卫各一条、
+标签名为 `#text` 的元素按元素处理一条、`:hover` 纯绘制档下文本随父换色一条
+（共享必须**就地改写**同一对象；级联若换新对象，文本会永久停在旧颜色）。
+变异验证：把 `isText()` 退回字符串比较 → 立即失败；级联换新对象且不重新共享 →
+立即失败；`interactionNeedsReflow` 恒 true → 档位断言失败。
+
 - 修正 README 级联机制说明：规则主键索引（按尾部复合选择器查候选桶 + 完整特异度
   排序）早已实现，原「尚未做规则索引」的表述过时，改为「尚未做失效缓存」
 **修复：开页后与每次窗口缩放后的第一档滚轮会重排整棵树（压力页实测 1750ms）**：
