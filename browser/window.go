@@ -314,11 +314,18 @@ func (win *Window) Run() error {
 	running := true
 	// GHROMEX_BENCH：分段计时（布局/清屏/重绘/呈现/空闲）。只做本地诊断，
 	// 不进 CI——计时不可复现，断言它只会得到 flaky 测试。口径说明见 bench.go。
+	//
+	// GHROMEX_SCROLLPROBE 复用同一套采集（持续滚动的每一帧本来就要重绘），
+	// 另外补 TickScroll 计时与调用构成，见 scrollprobe.go。
 	var bench *bench
 	var counter *countingGraphics
-	if benchEnabled() {
+	var probe *scrollProbe
+	if benchEnabled() || scrollProbeEnabled() {
 		bench = newBench(win)
 		counter = &countingGraphics{inner: win.sdl.Graphics()}
+	}
+	if scrollProbeEnabled() {
+		probe = newScrollProbe(win)
 	}
 	for running {
 		// 只有基准模式才取时间戳：正常路径上这行是白跑（time.Now 每次
@@ -326,6 +333,11 @@ func (win *Window) Run() error {
 		var frameStart time.Time
 		if bench != nil {
 			frameStart = time.Now()
+		}
+		// 滚动探针：帧首往事件队列塞一格滚轮，让它走真实滚轮那条链
+		//（onWheel → 滚动动画 → TickScroll），而不是人造的静止重绘。
+		if probe != nil {
+			probe.inject()
 		}
 		for {
 			ev, ok := win.sdl.PollEvent()
@@ -350,6 +362,7 @@ func (win *Window) Run() error {
 					// 强制重排（文档内容没变，变更计数不会动）。
 					win.lastChange = -1 // 强制重排
 					win.dirty = true
+					probe.noteResize()
 				}
 			case sdl2.EventWindowExposed:
 				// 被覆盖后重新暴露：内容已丢（Win7 无 DWM + GPU 后缓冲），
@@ -362,6 +375,7 @@ func (win *Window) Run() error {
 			case sdl2.EventMouseButtonDown:
 				win.onMouseDown(ev)
 			case sdl2.EventMouseMotion:
+				probe.noteMotion()
 				win.onMouseMove(ev)
 			case sdl2.EventMouseButtonUp:
 				win.onMouseUp(ev)
@@ -390,10 +404,21 @@ func (win *Window) Run() error {
 				dLayout = time.Since(t0)
 				win.lastChange = c
 				win.dirty = true
+				probe.addLayout(dLayout)
 			}
 			// 滚动动画：只平移已布局的盒子，不重排（滚动偏移与盒模型无关，
 			// 每帧一次全量级联+布局足以让大页面滚动发顿）。
-			if engine.TickScroll(doc) {
+			//
+			// 探针期单独计时这一段：它是滚动期**唯一每帧必跑的引擎遍历**，
+			// bench 的四个桶里没有它（正常路径不取时间戳，见 frameStart 守卫）。
+			if probe != nil {
+				t0 := time.Now()
+				moved := engine.TickScroll(doc)
+				probe.addTick(time.Since(t0), moved)
+				if moved {
+					win.dirty = true
+				}
+			} else if engine.TickScroll(doc) {
 				win.dirty = true
 			}
 			// 提示气泡：目标稳定悬停到点后就弹出，弹出/收起都只要重绘。
@@ -414,6 +439,11 @@ func (win *Window) Run() error {
 				t0 = time.Now()
 				engine.RenderNode(g, doc)
 				dRender = time.Since(t0)
+				if probe != nil && counter != nil {
+					// 记调用构成：滚动期的「文字/帧」应稳定在可见片段数，
+					// 跟着滚动位置大幅波动说明视口裁剪没起作用。
+					probe.addDraw(counter.texts, counter.colors, counter.calls)
+				}
 				t0 = time.Now()
 				win.sdl.Present()
 				dPresent = time.Since(t0)
@@ -452,6 +482,9 @@ func (win *Window) Run() error {
 					bench.calibVsync()
 				}
 				bench.report()
+				if probe != nil {
+					probe.report() // 与 bench 同批界出报告，两段数字对得上
+				}
 			}
 		}
 
@@ -461,6 +494,9 @@ func (win *Window) Run() error {
 	}
 	if bench != nil {
 		bench.report() // 退出前把不足一批的样本也报出来
+	}
+	if probe != nil {
+		probe.report()
 	}
 	return nil
 }

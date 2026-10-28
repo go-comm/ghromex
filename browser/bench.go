@@ -289,10 +289,15 @@ func pct(d []time.Duration, p float64) time.Duration {
 	return s[idx]
 }
 
-// fmtSeg 格式化一段耗时的分位数。
+// fmtSeg 格式化一段耗时的分位数，附带最大值。
+//
+// max 不是可选的：分位数会**吞掉**最要紧的那类缺陷。压力页实测「开页后第一档
+// 滚轮整棵树重排 1.75 秒」在 104 帧的批次里只占一个样本，p95/p99 读出来仍是
+// 43/44ms——看着正常，实际用户体感是「每次打开页面后第一下滚轮卡住」。偶发的
+// 一次性尖峰只有 max 能看见。
 func fmtSeg(d []time.Duration) string {
-	return fmt.Sprintf("p50=%s p95=%s p99=%s",
-		fmtDur(pct(d, 0.50)), fmtDur(pct(d, 0.95)), fmtDur(pct(d, 0.99)))
+	return fmt.Sprintf("p50=%s p95=%s p99=%s max=%s",
+		fmtDur(pct(d, 0.50)), fmtDur(pct(d, 0.95)), fmtDur(pct(d, 0.99)), fmtDur(pct(d, 1.00)))
 }
 
 // fmtDur 把耗时格式化成毫秒（带一位小数）。

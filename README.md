@@ -715,10 +715,35 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
 ### 怎么量：`GHROMEX_BENCH=1`
 
 主循环的各段（布局 / 清屏 / 重绘 / 呈现 / 空闲）**分开计时**，累积 ≥300 帧
-（`GHROMEX_BENCH_FRAMES` 可调）后报 p50/p95/p99，并打印渲染路径（driver 名、
-是否 dummy）。基准模式会**强制每帧重绘、且不进入空闲休眠**（模拟持续动画）：
-静态页面平时不重绘、主循环还会 `Delay(10)` 省 CPU，那样量到的只是空闲休眠，
-渲染管线的成本和 vsync 等待都测不到。
+（`GHROMEX_BENCH_FRAMES` 可调）后报 p50/p95/p99/**max**，并打印渲染路径
+（driver 名、是否 dummy）。基准模式会**强制每帧重绘、且不进入空闲休眠**
+（模拟持续动画）：静态页面平时不重绘、主循环还会 `Delay(10)` 省 CPU，那样量到
+的只是空闲休眠，渲染管线的成本和 vsync 等待都测不到。
+
+**max 不是可选的**：分位数会吞掉最要紧的那类缺陷——压力页上「开页后第一档滚轮
+重排整棵树 1750ms」在 104 帧的批次里只占一个样本，p95/p99 读出来仍是 43/44ms
+（看着正常），用户体感却是「每次打开页面后第一下滚轮卡住」。偶发的一次性尖峰只
+有 max 能看见。
+
+滚动期另有专项探针 `GHROMEX_SCROLLPROBE=1`（隐含 bench 的分段采集，另加
+`TickScroll` 计时、绘制调用构成、布局取证、到界自动掉头，见
+`browser/scrollprobe.go`）。它**注入真实滚轮事件**走 `onWheel → 滚动动画 →
+TickScroll` 那条链，而不是人造的静止重绘——bench 的「强制每帧重绘」量到的是
+「把当前这一屏重画一遍」，滚动专属的开销（`TickScroll` 平移子树、滚动到新位置
+后可见集合变化）完全没进统计。用法与压力页生成器见上一节「大文档滚动」：
+
+```
+go run ./examples/stressgen -out .temp/stress.html
+go build -o .temp/browser.exe ./examples/browser
+GHROMEX_SCROLLPROBE=1 GHROMEX_SCROLLPROBE_EVERY=8 GHROMEX_SCROLLPROBE_NOTCH=4 ^
+  .temp\browser.exe -page .temp\stress.html -exit-after 40s
+```
+
+`EVERY=8 / NOTCH=4` 是接近真实设备的节奏：**每帧**注入会让滚动动画每帧被重定向
+（`startScrollAnim` 清零动画时间），那一帧本就没有位移，量到的是「注入频率超过
+真实设备」的失真数据。探针自带「到界自动掉头」（连续 4 次无位移就反向），并报
+「有位移帧」比例——比例低说明页面不可滚或滚轮落在不可滚动元素上，这批数字按静止
+页理解。
 
 只做本地诊断，**不进 CI**：计时受机器负载、驱动、电源策略影响，数值不可
 复现，写成断言只会得到 flaky 的测试。
@@ -925,7 +950,11 @@ scrollMark 的增量相等」，于是开页后（以及每次窗口缩放后）
 | `GHROMEX_FONT=路径` | 指定 standard 字体（默认 Arial，即 sans-serif） |
 | `GHROMEX_CJK_FONT=路径` | 指定 CJK fallback 字体（默认微软雅黑） |
 | `SDL_VIDEO_DRIVER=dummy` | 无显示器运行（配合 `Window.Screenshot()` 做回读断言） |
-| `GHROMEX_BENCH=1` | 分段基准：布局/清屏/重绘/呈现/空闲分开计时，≥300 帧后报 p50/p95/p99，并打印渲染路径（driver 名、是否 dummy）。只做本地诊断，**不进 CI**（计时不可复现，断言它只会得到 flaky 测试）。`GHROMEX_BENCH_FRAMES` 调每批样本数 |
+| `GHROMEX_BENCH=1` | 分段基准：布局/清屏/重绘/呈现/空闲分开计时，≥300 帧后报 p50/p95/p99/max，并打印渲染路径（driver 名、是否 dummy）。只做本地诊断，**不进 CI**（计时不可复现，断言它只会得到 flaky 测试）。`GHROMEX_BENCH_FRAMES` 调每批样本数 |
+| `GHROMEX_SCROLLPROBE=1` | 滚动专项探针（隐含 `GHROMEX_BENCH` 的分段采集）：帧首注入真实滚轮走 `onWheel → 滚动动画 → TickScroll` 那条链，另计 `TickScroll` 耗时、绘制调用构成（文字段/色块）、布局帧数与尖峰帧号、缩放与鼠标移动事件帧号、有位移帧比例。带「到界自动掉头」（连续无位移即反向），避免长页面滚到底后样本变成静止页。只做本地诊断，不进 CI |
+| `GHROMEX_SCROLLPROBE_NOTCH=n` | 每次注入滚 n 格（一格 = 100px，默认 1） |
+| `GHROMEX_SCROLLPROBE_EVERY=n` | 每 n 帧注入一次（默认 1＝持续滚）。设 1 会让滚动动画每帧被重定向（`startScrollAnim` 清零动画时间、该帧无位移），量到的是注入频率失真；接近真实设备的节奏是 ≥6 |
+| `GHROMEX_SCROLLPROBE_STALL=n` | 连续 n 次「注入了但内容没位移」判为碰到滚动边界并掉头（默认 4） |
 
 ## 开发与测试
 
