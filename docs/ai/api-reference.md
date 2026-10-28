@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-10-27 21:53
+> 生成时间: 2026-10-28 12:14
 
 ---
 
@@ -713,6 +713,49 @@ dialog.ErrUnsupported。
 一句话：分析用 -dump-svg / -dump-png，快照存档用 DumpPNG（先自己 Refresh + RenderNode），截图用
 Screenshot。
 
+本文件是 GHROMEX_SCROLLPROBE 滚动探针：在真实主循环里**持续注入滚轮事件**， 把「滚动一帧到底花多少」拆开量出来。
+
+# 为什么 GHROMEX_BENCH 不够
+
+bench 强制每帧重绘，但页面是**静止**的：它量到的是「把当前这一屏重画一遍」 的成本，滚动专属的那部分开销（TickScroll
+遍历子树平移盒子、滚到新位置后 可见集合变化带来的调用数变化）完全没进统计——TickScroll 在主循环里甚至是 裸调用、没计时。而「离屏纹理 /
+瓦片缓存」这类优化的收益，恰恰只在滚动时 才存在。所以本探针做三件 bench 不做的事：
+
+ 1. 每帧注入滚轮（走真实事件队列：onWheel → 滚动动画 → TickScroll）， 量的就是用户狂滚滚轮时的那条路径，不是人造的静止重绘；
+ 2. 单独计时 TickScroll（引擎每帧在滚动期唯一的遍历开销）；
+ 3. 记录每帧绘制调用的**构成**（文字段 vs 色块）与「有位移的帧」比例， 用来判断视口裁剪是否真的生效、以及滚到底之后数据是否已经失真。
+
+# 读法
+
+  - 「平移 p50」很大（几 ms）→ 瓶颈在**引擎遍历子树**，离屏纹理救不了它
+    （瓦片同样要更新位置），该优化的是滚动偏移的表达方式（偏移不进盒子坐标， 改在绘制期现算）；
+  - 「平移」很小而「重绘/呈现」大 → 瓶颈在**绘制与填充**，脏矩形/分层纹理 才有肉；
+  - 「文字/帧」随滚动位置大幅波动 → 视口裁剪没起作用（或页面本身在视口外 还有大量片段），先修裁剪再谈缓存；
+  - 「有位移帧」比例低 → 注入没换来位移（页面压根不可滚、或滚轮落点是 不可滚动元素），这批重绘/呈现数字量的其实是静止页，**作废**。
+    探针自带「到界掉头」（连续几次无位移就反向滚），所以正常长页面 跑不出低比例；真跑出来了就说明不是「滚到底」的问题，是滚动没发生。
+
+# 环境变量
+
+    GHROMEX_SCROLLPROBE=1                 开探针（隐含 bench 的分段采集）
+    GHROMEX_SCROLLPROBE_NOTCH=n           每次注入滚 n 格（一格 100px，默认 1）
+    GHROMEX_SCROLLPROBE_EVERY=n           每 n 帧注入一次（默认 1＝持续滚）
+    GHROMEX_SCROLLPROBE_STALL=n           连续 n 次无位移判为到界并掉头（默认 4）
+    GHROMEX_BENCH_FRAMES=n                批次样本数（与 bench 共用，默认 300）
+
+# 不进 CI
+
+与 bench 同一层：计时不可复现，只做本地诊断。
+
+# 用法
+
+    GHROMEX_SCROLLPROBE=1 go run ./examples/portal
+    GHROMEX_SCROLLPROBE=1 GHROMEX_BENCH_FRAMES=600 go run ./examples/portal
+    GHROMEX_SCROLLPROBE=1 GHROMEX_SCROLLPROBE_NOTCH=2 GHROMEX_SCROLLPROBE_EVERY=2 \
+        go run ./examples/portal        # 每 2 帧滚 2 格（更接近真实滚轮节奏）
+    GHROMEX_GPU=1 GHROMEX_SCROLLPROBE=1 go run ./examples/portal   # 量加速路径
+
+探针隐含 bench 的采集（分段计时 + 每帧重绘），因为持续滚动的每一帧本来 就要重绘——「强制每帧重绘」在这里不是失真，正是被测对象。
+
 VARIABLES
 
 var ErrUnsupported = sdl2.ErrUnsupported
@@ -1264,6 +1307,8 @@ func LayoutDocument(doc HTMLDocument)
     已布局的盒子上（applyScrollOffsets，按绝对偏移重新施加，安全因为本次没 有重排、盒子还带着上一轮的平移量——它内部按
     scrollShift* 差值换算）。 大文档每档滚轮触发的 4s+ 全量重排因此降为一次纯平移。
 
+    视口尺寸变化是否决项：平移改不了盒宽，尺寸变了本次就必须全量（见 viewportResized）。
+
 func MeasureDocumentWithStylesheet(g Graphics, doc HTMLDocument, mw, mh int)
     MeasureDocumentWithStylesheet 完整流水线入口：级联 + 布局，不依赖 Viewport。
 
@@ -1347,6 +1392,10 @@ func OpenBufferedDocument(w, h int, src string) (*BufferGraphics, HTMLDocument, 
     它把「建视口 → OpenDocument → RenderNode」三步收成一步：视口与缓冲的尺寸
     由同一处给定，不会写岔（尺寸不一致时，像素断言会读到空白处）。
 
+func PaintCount(doc HTMLDocument) int64
+    PaintCount 返回重绘级变更计数（与 ChangeCount 配对的第二个单调基线，
+    见包注释）。主循环用它与上次记下的基线比对，判断「只有样式变了、跳过 布局直接重绘」。
+
 func ParseHTMLInto(doc HTMLDocument, src string)
     ParseHTMLInto 将 HTML 源码解析进既有文档： <head>/<body> 内容路由到文档结构节点，<style> 编译进文档样式表，
     <link rel="stylesheet" href> 交给文档的样式表加载器（见 DocumentOptions）， <title> 写入 head
@@ -1376,7 +1425,8 @@ func SelectedText(doc HTMLDocument) (string, bool)
     password 返回真实 value（浏览器允许选中并复制密码框内容），显示层 的 ● 掩码只在绘制/SVG 导出时生效。
 
 func SetActiveElement(doc HTMLDocument, el HTMLElement)
-    SetActiveElement 设置按下态元素（nil 表示没有按下）。 状态变化触发变更通知（:active 规则要改样式）。
+    SetActiveElement 设置按下态元素（nil 表示没有按下）。 状态变化按档位分级处理（同
+    SetHoveredElement：:active 规则全为纯绘制 属性时只重绘不重排）。
 
 func SetBaselineAdjust(px int) int
     SetBaselineAdjust 设置全局文本基线补偿（像素，正数=下移），返回设置前的 值。用于与 Chrome 对照时的微调；0 =
@@ -1388,8 +1438,9 @@ func SetChecked(el HTMLElement, on bool)
 
 func SetFocusedElement(doc HTMLDocument, el HTMLElement)
     SetFocusedElement 设置聚焦元素；不可聚焦的元素等效清除（nil）。 首次聚焦某控件时光标移到值末尾（与浏览器点选落位一致；精确落点由
-    点击坐标修正）；再次聚焦保留该控件原有的光标与选区。 焦点变化触发文档变更通知——聚焦框/光标重绘与文本变化走同一条
-    changed→重排重绘链路；:focus 样式也因此更新。
+    点击坐标修正）；再次聚焦保留该控件原有的光标与选区。 焦点变化按**变更档位**处理（见 applyStateChange）：聚焦框/光标/选区由
+    渲染层按 focus 现画、:focus 规则为纯绘制属性时只重绘不重排，规则可能 改盒模型时才走
+    changed→重排重绘链路；光标跟随的滚动是独立的滚动标记 （markScrollChanged），不参与档位判定。
 
     失焦不丢弃编辑状态：选区与光标原样留在控件上，只是停止绘制（渲染 路径按 focused 决定是否画选区）。页内菜单（记事本的「复制/剪切/
     粘贴」）点击时编辑区会先失焦，若失焦即清空选区，菜单动作就无选中 可用；保留状态后，应用层把焦点交还给编辑区即可继续操作。
@@ -1397,8 +1448,14 @@ func SetFocusedElement(doc HTMLDocument, el HTMLElement)
 func SetHoveredElement(doc HTMLDocument, el HTMLElement)
     SetHoveredElement 设置悬停元素（nil 表示鼠标不在文档上）。
 
-    悬停态变化会改样式（:hover 规则），故触发变更通知 → 重排重绘。 悬停元素**没变**时不通知：鼠标移动是最频繁的事件，每次都重排会把
-    主循环拖垮（浏览器同样只在悬停目标变化时重算样式）。
+    悬停态变化会改样式（:hover 规则），但**不一定是重排**——按变更档位分级 处理（见 applyStateChange /
+    change_level.go）：
+
+      - 页面没有 :hover 规则、悬停目标也不是表单控件 → 什么都不变：不标记、 不通知（与下一段「没变就不通知」同口径）；
+      - 规则只改颜色/背景这类纯绘制属性 → 就地重算受影响子树、记重绘账， 主循环只重绘不布局（42 万元素页面从 1.72 秒降到零重排）；
+      - 规则可能改盒模型（padding/width/font-…）→ 照旧 markChanged 全量重排。
+
+    悬停元素**没变**时不通知：鼠标移动是最频繁的事件，每次都重排会把 主循环拖垮（浏览器同样只在悬停目标变化时重算样式）。
 
 func SetSelectValue(sel HTMLElement, value string) bool
     SetSelectValue 按值选中选项并触发变更通知；未找到匹配项返回 false。 程序化赋值不改变展开态（与浏览器一致）。
@@ -1691,6 +1748,38 @@ const (
 	CaptionSideTop    CaptionSide = iota // 默认：题注在网格上方
 	CaptionSideBottom                    // 题注在网格下方
 )
+type ChangeLevel uint8
+    ChangeLevel 是一次变更需要的处理档位（见包注释）。
+
+const (
+	// ChangeNone：自基线以来没有待处理变更。
+	ChangeNone ChangeLevel = iota
+	// ChangePaintOnly：只影响绘制（颜色/背景/边框色那类），盒模型没变。
+	// 样式已在状态变更时就地重算，主循环跳过 LayoutDocument 直接重绘。
+	ChangePaintOnly
+	// ChangeReflow：盒模型可能变了，必须 LayoutDocument 全量级联 + 布局。
+	ChangeReflow
+)
+func PendingChange(doc HTMLDocument, reflowBase, paintBase int64) (ChangeLevel, int64, int64)
+    PendingChange 返回自调用方基线 (reflowBase, paintBase) 以来待处理变更的
+    档位，以及两个计数的当前值（即处理完这一档后应记下的新基线）。
+
+    用法（主循环的布局门）：
+
+        level, reflow, paint := engine.PendingChange(doc, lastChange, lastPaint)
+        switch level {
+        case engine.ChangeReflow:
+            engine.LayoutDocument(doc)
+            lastChange, lastPaint = reflow, paint
+        case engine.ChangePaintOnly:
+            lastPaint = paint // 只重绘，不布局
+        }
+
+    档位取两本账里的**最高**档：重排待处理时无视重绘计数（全量布局会顺带 消化掉样式），全部记平即 ChangeNone。
+
+    非引擎实现的文档（宿主自定义 HTMLDocument）没有重绘级账本——其状态类 变更本来就走不进引擎的 markPaintChanged——此时
+    paint 原样返回 paintBase，档位只由 ChangeCount 决定。
+
 type ClearSide uint8
     ClearSide 是 clear 的计算值：块级元素的上外边距边被下推到指定方向上 所有浮动盒的下缘之下。
 
@@ -1934,7 +2023,9 @@ type HTMLDocument interface {
 	// SetOnNavigate 注册链接导航回调：点击带 href 的 <a> 时以 href 调用。
 	// 引擎不内置多文档/外跳，跳转策略由应用决定；f 为 nil 时移除。
 	SetOnNavigate(f func(href string))
-	// ChangeCount 返回内容变化计数，后端据此判断是否需要重排。
+	// ChangeCount 返回**重排级**内容变化计数，后端据此判断是否需要布局。
+	// 纯绘制级变更（悬停/按下/焦点的样式档）不进这本账，由 PaintCount /
+	// PendingChange 单独暴露（见 change_level.go）。
 	ChangeCount() int64
 
 	Close()

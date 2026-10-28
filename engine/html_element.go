@@ -599,6 +599,23 @@ func (element *htmlElement) onScrollChanged() {
 	}
 }
 
+// onPaintChanged 沿父链通知文档「仅重绘变更」（语义见
+// htmlDocument.markPaintChanged）：状态改了、要重画，但盒模型没变——布局
+// 无事可做。用在只影响渲染层的元素状态上（如单行 input 的文本滚动窗口
+// textScrollX/Set：grep 显示只有 render/svg_dump/光标定位读它，全部是
+// 绘制期口径，见 ensureCaretVisible）。
+// 同上，方法名区别于文档侧，防断言接口与实现同名导致的无限递归。
+func (element *htmlElement) onPaintChanged() {
+	e := element.self
+	for e != nil {
+		if d, ok := e.(interface{ markPaintChanged() }); ok {
+			d.markPaintChanged()
+			return
+		}
+		e = e.ParentElement()
+	}
+}
+
 // GetBoundingClientRect 返回边框盒。
 func (element *htmlElement) GetBoundingClientRect() Rect {
 	comp := element.computed

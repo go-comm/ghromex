@@ -17,6 +17,10 @@ type Stylesheet struct {
 	// 条规则的页面里，级联占整轮布局的 ~70%（实测 4s），分桶后降到百毫秒级。
 	// 规则变更后置空重建（见 Merge/invalidateIndex）。
 	idx *sheetIndex
+	// interact 是 :hover/:active/:focus 的静态扫描缓存（见 interactions）：
+	// 交互状态变更的档位判定（重排还是只重绘）与受影响子树根的收集只看
+	// 「提及该状态的规则」这一子集，惰性算一次后复用。与 idx 同步失效。
+	interact *interactionScan
 }
 
 // hasPseudoRules 报告样式表里是否有伪元素选择器（结果惰性缓存）。
@@ -56,9 +60,10 @@ type sheetIndex struct {
 	all     []indexEntry // 无可用主键的尾部片段：* / [attr=...] / 仅伪类
 }
 
-// invalidateIndex 清空索引，下次 ensureIndex 重建。规则变更后调用。
+// invalidateIndex 清空索引与交互状态扫描缓存，下次重建。规则变更后调用。
 func (s *Stylesheet) invalidateIndex() {
 	s.idx = nil
+	s.interact = nil
 }
 
 // ensureIndex 惰性构建索引：O(规则数) 一次性扫描，后续复用。

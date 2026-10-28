@@ -274,6 +274,15 @@ func matchCompound(doc HTMLDocument, c *compoundSelector, e HTMLElement) bool {
 // matchCompoundBase 匹配复合选择器片段里**除伪元素之外**的部分。伪元素
 // 级联用宿主元素调它：p:hover::before 的 :hover 仍然按宿主状态判定。
 func matchCompoundBase(doc HTMLDocument, c *compoundSelector, e HTMLElement) bool {
+	return matchCompoundBy(doc, c, e, matchPseudo)
+}
+
+// matchCompoundBy 按调用方给定的伪类判定函数匹配复合片段（除伪元素之外
+// 的部分）。交互状态的 binder 判定（compoundBindable）要把 hover/active
+// 当作「可满足」，普通匹配则按文档当前状态——差异只在伪类这一步，其余
+// （标签/ id/类/属性）完全同口径。
+func matchCompoundBy(doc HTMLDocument, c *compoundSelector, e HTMLElement,
+	match func(HTMLDocument, pseudoClass, HTMLElement) bool) bool {
 	if e == nil {
 		return false
 	}
@@ -299,7 +308,7 @@ func matchCompoundBase(doc HTMLDocument, c *compoundSelector, e HTMLElement) boo
 		}
 	}
 	for _, ps := range c.pseudos {
-		if !matchPseudo(doc, ps, e) {
+		if !match(doc, ps, e) {
 			return false
 		}
 	}

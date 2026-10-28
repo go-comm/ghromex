@@ -74,21 +74,56 @@ func TestPseudoHoverMatchesAncestors(t *testing.T) {
 	_ = d
 }
 
-// 悬停态变化要触发变更通知（应用层据此重排重绘）。
-func TestPseudoHoverChangeNotifies(t *testing.T) {
+// 悬停态变化的**档位契约**（见 applyStateChange / change_level.go）：
+//   - 页面没有 :hover 规则、目标也不是表单控件 → 什么都不变，两本账
+//     （重排 ChangeCount / 重绘 PaintCount）都不动。无规则也重排正是压力页
+//     上「鼠标滑一下卡 1.72 秒」的来源；
+//   - 规则只改纯绘制属性 → 只进重绘账，主循环跳过布局直接重绘；
+//   - 规则可能改盒模型（width/padding/font-…）→ 照旧进重排账全量重排。
+//
+// 悬停目标没变则一律不标记（鼠标移动是最频繁的事件）。
+func TestPseudoHoverChangeTiers(t *testing.T) {
+	// 无 :hover 规则的普通 div：不产生任何标记。
 	doc := pseudoDoc(t, `<!doctype html><html><body style="margin:0">
 		<div id="d" style="width:50px;height:10px"></div></body></html>`)
 	d := doc.QuerySelector("#d")
-	before := doc.ChangeCount()
+	rc, pc := doc.ChangeCount(), engine.PaintCount(doc)
 	engine.SetHoveredElement(doc, d)
-	if doc.ChangeCount() == before {
-		t.Error("悬停态变化未触发变更通知")
+	if doc.ChangeCount() != rc || engine.PaintCount(doc) != pc {
+		t.Error("无 :hover 规则的悬停不该产生任何变更标记")
 	}
-	// 悬停目标没变 → 不通知（鼠标移动是最频繁的事件）
-	mid := doc.ChangeCount()
+	// 悬停目标没变 → 不标记。
 	engine.SetHoveredElement(doc, d)
-	if doc.ChangeCount() != mid {
-		t.Error("悬停目标未变却触发了变更通知")
+	if doc.ChangeCount() != rc || engine.PaintCount(doc) != pc {
+		t.Error("悬停目标未变却产生了变更标记")
+	}
+
+	// 纯绘制规则：只进重绘账。
+	doc2 := pseudoDoc(t, `<!doctype html><html><head><style>
+		a { color: #000000; } a:hover { color: #FF0000; }
+	</style></head><body style="margin:0"><a id="a" href="#">x</a></body></html>`)
+	a := doc2.QuerySelector("#a")
+	rc, pc = doc2.ChangeCount(), engine.PaintCount(doc2)
+	engine.SetHoveredElement(doc2, a)
+	if doc2.ChangeCount() != rc {
+		t.Error("纯绘制 :hover 不该进重排账（会退化成整树重排）")
+	}
+	if engine.PaintCount(doc2) != pc+1 {
+		t.Error("纯绘制 :hover 应进重绘账")
+	}
+
+	// 可能改盒模型的规则：照旧进重排账。
+	doc3 := pseudoDoc(t, `<!doctype html><html><head><style>
+		div { width: 50px; } div:hover { width: 200px; }
+	</style></head><body style="margin:0"><div id="d">x</div></body></html>`)
+	d3 := doc3.QuerySelector("#d")
+	rc, pc = doc3.ChangeCount(), engine.PaintCount(doc3)
+	engine.SetHoveredElement(doc3, d3)
+	if doc3.ChangeCount() != rc+1 {
+		t.Error("含盒模型声明的 :hover 应进重排账（全量重排）")
+	}
+	if engine.PaintCount(doc3) != pc {
+		t.Error("重排档不该再记一笔重绘账")
 	}
 }
 

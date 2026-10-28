@@ -27,8 +27,11 @@ type Window struct {
 	sdl *sdl2.Window
 	doc engine.HTMLDocument
 
-	// lastChange 是上次布局时文档的变更计数：变了就重排。
+	// lastChange 是上次处理时文档的**重排级**变更计数（ChangeCount）：变了
+	// 就重排。lastPaint 是**重绘级**计数（PaintCount）：只有它变了就跳过
+	// 布局直接重绘（悬停/焦点的纯绘制档，见 engine.PendingChange）。
 	lastChange int64
+	lastPaint  int64
 	// dirty 为 true 才重绘：内容变化/窗口尺寸变化/暴露(EXPOSED)/首帧。
 	// 空闲时零绘制，避免每帧产生的绘制指令垃圾把稳态内存抬高数 MB；
 	// 但 EXPOSED 必须重绘——否则无 DWM 环境下窗口被别窗覆盖后永不可恢复。
@@ -141,6 +144,7 @@ func (win *Window) OpenDocumentWith(src string, opts engine.DocumentOptions) (en
 	}
 	win.doc = doc
 	win.lastChange = doc.ChangeCount()
+	win.lastPaint = engine.PaintCount(doc)
 	win.dirty = true // 首次打开强制出一帧
 	if win.onDocument != nil {
 		win.onDocument(doc)
@@ -398,13 +402,26 @@ func (win *Window) Run() error {
 		}
 		var dLayout, dClear, dRender, dPresent, dIdle time.Duration
 		if doc := win.doc; doc != nil {
-			if c := doc.ChangeCount(); c != win.lastChange {
+			// 变更档位（engine.PendingChange）：重排档走 LayoutDocument +
+			// 重绘；纯绘制档（悬停/焦点只改颜色那类）样式已在状态变更时
+			// 就地重算、盒模型没变，跳过布局只重绘——42 万元素页面的全量
+			// 重排是 1.7 秒，鼠标滑一下不该付这个钱。
+			//
+			// 计数在布局**之前**取（与旧实现的 c 同款）：布局期间宿主回调
+			// 里产生的新变更归下一轮，本轮不把它算成「已处理」。
+			level, reflowN, paintN := engine.PendingChange(doc, win.lastChange, win.lastPaint)
+			switch level {
+			case engine.ChangeReflow:
 				t0 := time.Now()
 				engine.LayoutDocument(doc)
 				dLayout = time.Since(t0)
-				win.lastChange = c
+				win.lastChange = reflowN
+				win.lastPaint = paintN // 全量级联顺带消化掉待处理的纯绘制变更
 				win.dirty = true
 				probe.addLayout(dLayout)
+			case engine.ChangePaintOnly:
+				win.lastPaint = paintN
+				win.dirty = true
 			}
 			// 滚动动画：只平移已布局的盒子，不重排（滚动偏移与盒模型无关，
 			// 每帧一次全量级联+布局足以让大页面滚动发顿）。
@@ -457,7 +474,8 @@ func (win *Window) Run() error {
 			// 基准模式**不进空闲休眠**：它已强制每帧重绘（模拟持续动画），
 			// 再睡 10ms 量的就是「静态页白等」——既不是真实吞吐，还把
 			// vsync 等待藏进休眠里看不见。
-			pending = doc.ChangeCount() != win.lastChange || engine.ScrollAnimating(doc) || engine.TooltipPending(doc)
+			lvl, _, _ := engine.PendingChange(doc, win.lastChange, win.lastPaint)
+			pending = lvl != engine.ChangeNone || engine.ScrollAnimating(doc) || engine.TooltipPending(doc)
 			if bench != nil {
 				pending = true
 			}

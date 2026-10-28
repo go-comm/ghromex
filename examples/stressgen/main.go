@@ -12,9 +12,11 @@
 //	GHROMEX_SCROLLPROBE=1 GHROMEX_SCROLLPROBE_EVERY=8 GHROMEX_SCROLLPROBE_NOTCH=4 \
 //	  .temp/browser.exe -page .temp/stress.html -exit-after 40s
 //
-// 页面本身是内容页（标题 + 段落 + 表格 + 列表 + 标签），刻意不写 :hover、
+// 页面本身是内容页（标题 + 段落 + 表格 + 列表 + 标签），默认不写 :hover、
 // 不放图片、不用表单：这样滚动期的开销全在「遍历 + 布局 + 绘制」，不会被
 // 悬停重排、纹理上传、控件布局抢走注意力（这些各自另有实测，见 CHANGELOG）。
+// -hover=paint|box 生成带悬停规则的变体，量交互状态变更的三档代价
+//（engine/hover_change.go：零标记 / 只重绘 / 全量重排）。
 package main
 
 import (
@@ -30,6 +32,11 @@ func main() {
 	sections := flag.Int("sections", 6000, "节数（每节约 21 个元素）")
 	para := flag.Int("para", 8, "每节段落数")
 	lists := flag.Int("li", 5, "每节列表项数")
+	// hover 变体：档位实测用（见 engine/hover_change.go 的三档）。
+	//   ""     无 :hover 规则（默认）——悬停应当零标记零重排；
+	//   paint  规则只改颜色/背景——悬停只重绘、不重排；
+	//   box    规则改盒模型（padding）——悬停回退全量重排（基线对照）。
+	hover := flag.String("hover", "", "悬停规则变体：\"\"|paint|box")
 	flag.Parse()
 
 	f, err := os.Create(*out)
@@ -50,6 +57,18 @@ func main() {
 	fmt.Fprintln(w, `ul{margin:0 0 6px;padding-left:20px}li{margin:0 0 2px}`)
 	fmt.Fprintln(w, `.tag{display:inline-block;padding:1px 6px;border:1px solid #c8ccd4;border-radius:10px;background:#eef2f7;font-size:12px}`)
 	fmt.Fprintln(w, `table{border-collapse:collapse;margin:0 0 6px}td,th{border:1px solid #ccd2da;padding:3px 8px}`)
+	switch *hover {
+	case "paint":
+		// 纯绘制档：只改颜色/背景，盒模型不动。
+		fmt.Fprintln(w, `section:hover{background:#eef6ff}h2:hover{color:#d0111b}.tag:hover{background:#dbe9ff}`)
+	case "box":
+		// 重排档：padding 进盒模型，悬停必须全量重排（对照基线）。
+		fmt.Fprintln(w, `section:hover{padding:18px 20px}`)
+	case "":
+	default:
+		fmt.Fprintln(os.Stderr, "未知的 -hover 取值（应为 paint|box 或留空）:", *hover)
+		os.Exit(2)
+	}
 	fmt.Fprintln(w, `</style></head><body>`)
 	fmt.Fprintln(w, `<h1>滚动压力页</h1>`)
 

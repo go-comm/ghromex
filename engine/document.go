@@ -42,7 +42,9 @@ type HTMLDocument interface {
 	// SetOnNavigate 注册链接导航回调：点击带 href 的 <a> 时以 href 调用。
 	// 引擎不内置多文档/外跳，跳转策略由应用决定；f 为 nil 时移除。
 	SetOnNavigate(f func(href string))
-	// ChangeCount 返回内容变化计数，后端据此判断是否需要重排。
+	// ChangeCount 返回**重排级**内容变化计数，后端据此判断是否需要布局。
+	// 纯绘制级变更（悬停/按下/焦点的样式档）不进这本账，由 PaintCount /
+	// PendingChange 单独暴露（见 change_level.go）。
 	ChangeCount() int64
 
 	Close()
@@ -138,6 +140,12 @@ type htmlDocument struct {
 	// 抬起即清零。与 dragInput/dragScroll 互斥，按下时先于命中测试判掉。
 	dragViewAxis int
 	changed      int64
+	// paintChanged 是**重绘级**变更计数：样式已在标记前就地重算、盒模型
+	// 没变（:hover/:active/:focus 的纯绘制档，见 applyStateChange），主循环
+	// 按它与 ChangeCount 的差额分别决定「布局+重绘」与「只重绘」。它不进
+	// changed/scrollMark 两本账：滚动快路径的「增量相等」判据只认那两本，
+	// 悬停因此不会污染滚动快路径（PendingChange 包注释有完整分工说明）。
+	paintChanged int64
 	// scrollMark 是最近一次**滚动**变更的计数（scrollBy/wheel/光标跟随等
 	// 只动 scrollTop/scrollLeft 的路径），用于布局快速路径：滚动不改变盒
 	// 模型与级联，只需重平移，不必每帧全量重排。lastLayoutChange 是上次
@@ -358,6 +366,20 @@ func (document *htmlDocument) ChangeCount() int64 {
 
 func (document *htmlDocument) markChanged() {
 	document.changed++
+	if document.onChanged != nil {
+		document.onChanged()
+	}
+}
+
+// markPaintChanged 标记一次**重绘级**变更：样式已经算完（调用方负责在
+// 标记前就地重算，见 applyStateChange）、盒模型没变，LayoutDocument 无事
+// 可做——主循环见 PaintCount 变化即跳过布局直接重绘。
+//
+// onChanged 照常通知：这是真实的视觉变更，应用层可能要同步 chrome（如
+// 按悬停态改状态栏）。应用在回调里改 DOM 仍会走 markChanged 升级为重排，
+// 两本账互不干扰。
+func (document *htmlDocument) markPaintChanged() {
+	document.paintChanged++
 	if document.onChanged != nil {
 		document.onChanged()
 	}

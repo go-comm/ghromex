@@ -100,8 +100,10 @@ func FocusedElement(doc HTMLDocument) HTMLElement {
 // SetFocusedElement 设置聚焦元素；不可聚焦的元素等效清除（nil）。
 // 首次聚焦某控件时光标移到值末尾（与浏览器点选落位一致；精确落点由
 // 点击坐标修正）；再次聚焦保留该控件原有的光标与选区。
-// 焦点变化触发文档变更通知——聚焦框/光标重绘与文本变化走同一条
-// changed→重排重绘链路；:focus 样式也因此更新。
+// 焦点变化按**变更档位**处理（见 applyStateChange）：聚焦框/光标/选区由
+// 渲染层按 focus 现画、:focus 规则为纯绘制属性时只重绘不重排，规则可能
+// 改盒模型时才走 changed→重排重绘链路；光标跟随的滚动是独立的滚动标记
+// （markScrollChanged），不参与档位判定。
 //
 // 失焦不丢弃编辑状态：选区与光标原样留在控件上，只是停止绘制（渲染
 // 路径按 focused 决定是否画选区）。页内菜单（记事本的「复制/剪切/
@@ -116,6 +118,7 @@ func SetFocusedElement(doc HTMLDocument, el HTMLElement) {
 		el = nil
 	}
 	if !sameElement(d.focus, el) {
+		oldFocus := d.focus
 		d.focus = el
 		// 光标与选区只挂在可编辑输入上（按钮/链接只有「有焦点」这一态）。
 		if el != nil && editableInput(el) {
@@ -137,7 +140,8 @@ func SetFocusedElement(doc HTMLDocument, el HTMLElement) {
 				ensureCaretVisible(doc, b)
 			}
 		}
-		d.markChanged()
+		// 焦点不沿父链继承：候选就是新旧焦点自身。
+		d.applyStateChange(stateFocus, []HTMLElement{oldFocus, el})
 	}
 }
 

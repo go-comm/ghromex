@@ -401,6 +401,9 @@ func ensureCaretVisible(doc HTMLDocument, el *htmlElement) {
 	if scroll != el.textScrollX || !el.textScrollSet {
 		el.textScrollX = scroll
 		el.textScrollSet = true
-		el.onChanged()
+		// 文本滚动窗口是**绘制层**状态（inputVisibleWindow 只在渲染/导出/
+		// 光标定位处被读）：位置没变、只是首次定位也要记重排账的话，首次
+		// 聚焦每个 input 都会拖一次整树重排（大页面 1.7 秒）。改记重绘账。
+		el.onPaintChanged()
 	}
 }

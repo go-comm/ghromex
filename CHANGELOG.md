@@ -5,6 +5,45 @@
 
 ## 未发布
 
+**修复：悬停/按下/焦点一律全量重排（压力页实测 1.72s → 零重排）**：
+`SetHoveredElement` / `SetActiveElement` / `SetFocusedElement` 变化时一律
+`markChanged` → 主循环全量级联 + 布局。鼠标滑过一个元素就是 1.7 秒（14.9MB /
+约 42 万元素的压力页），而这些变更里绝大多数**只改颜色**——盒模型一个像素都
+不动；无 `:hover` 规则的页面更是连样式都不变，1.7 秒什么都没买到。
+
+现在按**变更档位**分级（新增 `engine/change_level.go` 与 `hover_change.go`）：
+
+| 档位 | 判定 | 处理 |
+|---|---|---|
+| `ChangeNone` | 状态不命中任何规则/控件 | 零标记零通知（悬停完全免费） |
+| `ChangePaintOnly` | 规则声明全为纯绘制属性（白名单） | 就地重算受影响子树 + 重绘账，**跳过布局** |
+| `ChangeReflow` | 规则可能改盒模型 | 照旧 `markChanged` 全量重排 |
+
+关键设计：
+
+- **API 不破坏**：`ChangeCount()` 签名不动，新增 `PaintCount()`（第二个单调
+  计数）与 `PendingChange(doc, reflowBase, paintBase)`（统一读口，返回档位
+  与新基线）。主循环布局门改按档位 switch：重排档 `LayoutDocument` + 重绘，
+  纯绘制档只重绘。
+- **样式在标记前就地级联**：paint 档不跑布局，但受影响子树的 computed 已算完
+  ——下一帧即便走滚动快路径跳过级联，悬停颜色也不回退。
+- **paint 账不进 changed/scrollMark**：滚动快路径的「增量相等」判据不受污染，
+  悬停后下一档滚轮照旧 40ms 纯平移。
+- **级联范围收得住**：引擎选择器只有后代/子代组合符，含状态的复合片段只向下
+  展开 → 命中翻转的元素必在状态链元素子树内，逐根 `resolveStylesTreeIn` 即可，
+  子树外 computed 原样保留（回归用白盒哨兵钉住）。
+- **白名单保守**：只收颜色族/`background-*`/`-color` 后缀/visibility/opacity/
+  cursor/text-decoration/pointer-events/border-radius；未收录与引擎未实现的
+  属性（transform/filter/box-shadow 等）一律回退全量——判错方向只能多排一次，
+  不会漏排。
+- 附带修一处同类浪费：首次聚焦 input 时 `ensureCaretVisible` 给**纯绘制状态**
+  （文本滚动窗口 `textScrollX/Set`，只有渲染层读）记了重排账，改记重绘账。
+
+三档同口径实测（`stressgen -hover paint|box` 生成变体，悬停中部 section）：
+无规则 **None / 1.0ms 零标记**；纯绘制规则 **PaintOnly / <1ms**；盒模型规则
+**Reflow / 1.78s 回退基线**（修前三档统一 1.72~1.78s 全量重排）。回归见
+`engine/hover_change_internal_test.go`（9 条，判据为文本测量次数与账本增量）。
+
 **大文档常驻内存 −7.4%（结构体字段重排，零逻辑改动）**：
 `htmlElement` 14 个 bool 原先散在 8 字节对齐字段之间，每个后面都留 5~7B
 空洞（共 58B，占 8.5%）；`cssStyleDeclaration` 的 22 个单字节枚举同样被

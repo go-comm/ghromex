@@ -5,9 +5,11 @@ import "strings"
 // 伪类（pseudo-class）支持：选择器里的 :hover / :focus 等动态状态，
 // 以及 :first-child / :nth-child() 等结构伪类、:not() 否定伪类。
 //
-// 动态伪类的状态存在文档上（hover/active/focus），状态变化触发变更
-// 通知 → 重排重绘 → 级联重算，样式随之更新——与浏览器「改状态 → 重算
-// 样式」的链路一致。结构伪类只看 DOM 形状，随级联一起算。
+// 动态伪类的状态存在文档上（hover/active/focus），状态变化按**变更档位**
+// 处理（见 applyStateChange / change_level.go）：可能什么都不做、只重算
+// 受影响子树的样式 + 重绘、或（规则改了盒模型时）升级为全量重排——与浏览器
+// 「改状态 → 重算样式 → 视需要重排」的链路一致。结构伪类只看 DOM 形状，
+// 随级联一起算。
 //
 // 函数型伪类（:not() / :nth-child()）在 ParseSelector 期即把参数预解析
 // 为结构化形态（:not 的选择器列表、:nth-child 的 An+B），匹配期零解析
@@ -45,7 +47,15 @@ func HoveredElement(doc HTMLDocument) HTMLElement {
 
 // SetHoveredElement 设置悬停元素（nil 表示鼠标不在文档上）。
 //
-// 悬停态变化会改样式（:hover 规则），故触发变更通知 → 重排重绘。
+// 悬停态变化会改样式（:hover 规则），但**不一定是重排**——按变更档位分级
+// 处理（见 applyStateChange / change_level.go）：
+//
+//   - 页面没有 :hover 规则、悬停目标也不是表单控件 → 什么都不变：不标记、
+//     不通知（与下一段「没变就不通知」同口径）；
+//   - 规则只改颜色/背景这类纯绘制属性 → 就地重算受影响子树、记重绘账，
+//     主循环只重绘不布局（42 万元素页面从 1.72 秒降到零重排）；
+//   - 规则可能改盒模型（padding/width/font-…）→ 照旧 markChanged 全量重排。
+//
 // 悬停元素**没变**时不通知：鼠标移动是最频繁的事件，每次都重排会把
 // 主循环拖垮（浏览器同样只在悬停目标变化时重算样式）。
 func SetHoveredElement(doc HTMLDocument, el HTMLElement) {
@@ -56,8 +66,10 @@ func SetHoveredElement(doc HTMLDocument, el HTMLElement) {
 	if sameElement(d.hover, el) {
 		return
 	}
+	old := d.hover
 	d.hover = el
-	d.markChanged()
+	// :hover 沿父链继承：链上任何一代的命中都可能翻转，新旧两条链都算候选。
+	d.applyStateChange(stateHover, append(stateChain(old), stateChain(el)...))
 }
 
 // ActiveElement 返回当前被按下的元素（鼠标按下到抬起之间）。
@@ -69,7 +81,8 @@ func ActiveElement(doc HTMLDocument) HTMLElement {
 }
 
 // SetActiveElement 设置按下态元素（nil 表示没有按下）。
-// 状态变化触发变更通知（:active 规则要改样式）。
+// 状态变化按档位分级处理（同 SetHoveredElement：:active 规则全为纯绘制
+// 属性时只重绘不重排）。
 func SetActiveElement(doc HTMLDocument, el HTMLElement) {
 	d, ok := doc.(*htmlDocument)
 	if !ok {
@@ -78,8 +91,22 @@ func SetActiveElement(doc HTMLDocument, el HTMLElement) {
 	if sameElement(d.active, el) {
 		return
 	}
+	old := d.active
 	d.active = el
-	d.markChanged()
+	d.applyStateChange(stateActive, append(stateChain(old), stateChain(el)...))
+}
+
+// stateChain 返回元素自身及其全部祖先（自底向上）。
+//
+// :hover/:active 沿父链继承（matchHoverState），状态变化可能让链上**任何
+// 一代**的选择器命中翻转，链上元素连同其子树（继承属性的传播范围）因此
+// 都是级联候选（见 applyStateChange）。nil 返回空切片。
+func stateChain(el HTMLElement) []HTMLElement {
+	var out []HTMLElement
+	for cur := el; cur != nil; cur = cur.ParentElement() {
+		out = append(out, cur)
+	}
+	return out
 }
 
 // OnDocumentMouseMove 按坐标更新悬停态：命中测试后把命中的元素记为
