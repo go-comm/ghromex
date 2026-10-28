@@ -5,6 +5,14 @@
 
 ## 未发布
 
+- 新增 `docs/rfc/0001-scroll-offset-propagation.md`：滚动偏移改「绘制/命中
+  期现算」（offset 传播 + fixed 截断 + sticky helper + 裁剪子树剪枝）的设计
+  **封存**。结论：它只消除滚动帧 345ms 里的平移 107ms + 快路径 40ms，真正
+  的大头（重绘遍历 198ms）分文未动，而 `GetBoundingClientRect` 坐标语义的
+  改动对 ui/事件/宿主是高风险连锁——在重绘遍历有解（display list 缓存 /
+  瓦片化 / 子树剪枝）之前不动底层坐标系。文档含完整设计、验证方案、封存
+  理由与重启条件，供未来极致性能优化直接取用。
+
 **修复：悬停/按下/焦点一律全量重排（压力页实测 1.72s → 零重排）**：
 `SetHoveredElement` / `SetActiveElement` / `SetFocusedElement` 变化时一律
 `markChanged` → 主循环全量级联 + 布局。鼠标滑过一个元素就是 1.7 秒（14.9MB /
