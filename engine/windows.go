@@ -57,6 +57,9 @@ func OpenBufferedDocument(w, h int, src string) (*BufferGraphics, HTMLDocument, 
 // 已布局的盒子上（applyScrollOffsets，按绝对偏移重新施加，安全因为本次没
 // 有重排、盒子还带着上一轮的平移量——它内部按 scrollShift* 差值换算）。
 // 大文档每档滚轮触发的 4s+ 全量重排因此降为一次纯平移。
+//
+// 视口尺寸变化是否决项：平移改不了盒宽，尺寸变了本次就必须全量（见
+// viewportResized）。
 func LayoutDocument(doc HTMLDocument) {
 	v := doc.Viewport()
 	if v == nil {
@@ -70,16 +73,24 @@ func LayoutDocument(doc HTMLDocument) {
 	if g == nil {
 		g = NewFakeGraphics()
 	}
-	if d, ok := doc.(*htmlDocument); ok {
-		if delta, scrollDelta := d.changed-d.lastLayoutChange, d.scrollMark-d.lastAppliedScrollMark; delta > 0 && delta == scrollDelta {
+	// hd 为 nil 表示这不是引擎自己的文档实现（宿主自定义），只能全量布局。
+	hd, _ := doc.(*htmlDocument)
+	resized := false
+	if hd != nil {
+		// 先比对尺寸再判快路径：本次布局用的就是新尺寸，尺寸这笔账要落在
+		// 记账**之前**，否则 changed 比 lastLayoutChange 多出一笔永不算数的
+		// 账，下一档滚轮的「只发生了滚动」判定失效（差 1 就不等）→ 整棵树
+		// 重排（实测 42 万元素页面 1.75 秒，发生在开页后与每次缩放后的第一
+		// 档滚轮上）。
+		resized = hd.viewportResized(v)
+		if delta, scrollDelta := hd.changed-hd.lastLayoutChange, hd.scrollMark-hd.lastAppliedScrollMark; !resized && delta > 0 && delta == scrollDelta {
 			// 仅滚动：跳过级联与布局。盒子还带着上一轮已施加的平移量
 			// （scrollShift*），必须按**增量**平移（applyScrollDeltas），
 			// 不能用 applyScrollOffsets 的绝对平移——那会二次位移。
 			applyScrollDeltas(g, base, v.ViewportWidth(), v.ViewportHeight())
 			layoutSelectPopups(g, base, v.ViewportWidth(), v.ViewportHeight())
-			d.lastLayoutChange = d.changed
-			d.lastAppliedScrollMark = d.scrollMark
-			d.syncViewportSize(v)
+			hd.lastLayoutChange = hd.changed
+			hd.lastAppliedScrollMark = hd.scrollMark
 			return
 		}
 	}
@@ -88,26 +99,32 @@ func LayoutDocument(doc HTMLDocument) {
 	layoutPositioned(g, base, v.ViewportWidth(), v.ViewportHeight())
 	applyScrollOffsets(g, base, v.ViewportWidth(), v.ViewportHeight())
 	layoutSelectPopups(g, base, v.ViewportWidth(), v.ViewportHeight())
-	// 视口尺寸变了 → 补一次变更通知。窗口缩放只改视口、不改文档内容，
-	// onChanged 不会触发，应用层（编辑器铺满窗口、状态栏重排等）就
-	// 收不到任何信号。放在布局之后通知：此时 DOM 结构已稳定，应用层
-	// 在回调里改样式只会让本次布局的结果过期一次（后端按 ChangeCount
-	// 再排一遍即可收敛）。
-	if d, ok := doc.(*htmlDocument); ok {
-		d.lastLayoutChange = d.changed
-		d.lastAppliedScrollMark = d.scrollMark
-		d.syncViewportSize(v)
+	if hd != nil {
+		// 记账在通知之前：通知里宿主可能改样式（又一次 markChanged），那笔
+		// 账属于下一轮，不能让本轮的 lastLayoutChange 把它算成「已布局」。
+		hd.lastLayoutChange = hd.changed
+		hd.lastAppliedScrollMark = hd.scrollMark
+		// 视口尺寸变了 → 补一次通知。窗口缩放只改视口、不改文档内容，
+		// onChanged 不会触发，应用层（编辑器铺满窗口、状态栏重排等）就
+		// 收不到任何信号。放在布局之后通知：此时 DOM 结构已稳定，应用层
+		// 在回调里改样式只会让本次布局的结果过期一次（后端按 ChangeCount
+		// 再排一遍即可收敛）。只通知、不 +changed——尺寸变化本次布局已经
+		// 消化掉了，多加一笔账会把滚动快路径永久废掉（见 notifyChanged）。
+		if resized {
+			hd.notifyChanged()
+		}
 	}
 }
 
-// syncViewportSize 比对并记录视口尺寸，变化时补一次变更通知（见
-// LayoutDocument 的说明）。
-func (d *htmlDocument) syncViewportSize(v Viewport) {
+// viewportResized 比对并记录视口尺寸，返回是否变了。变了则本次不能走滚动
+// 快路径：平移改不了盒宽，必须全量级联+布局（见 LayoutDocument）。
+func (d *htmlDocument) viewportResized(v Viewport) bool {
 	w, h := v.ViewportWidth(), v.ViewportHeight()
-	if d.vpW != w || d.vpH != h {
-		d.vpW, d.vpH = w, h
-		d.markChanged()
+	if d.vpW == w && d.vpH == h {
+		return false
 	}
+	d.vpW, d.vpH = w, h
+	return true
 }
 
 // HeadlessViewport 提供无显示环境下的测试视口（FakeGraphics）。

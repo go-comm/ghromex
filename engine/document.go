@@ -151,7 +151,8 @@ type htmlDocument struct {
 	// vpW/vpH 是上次布局时的视口尺寸。窗口缩放后后端只强制重排、并不
 	// 改文档内容（onChanged 不触发），应用层无从得知窗口变了——而
 	// 「编辑区铺满窗口剩余区域」这类 chrome 必须跟着窗口尺寸走。布局
-	// 时比对尺寸，变化则补一次变更通知（见 LayoutDocument）。
+	// 时比对尺寸：变化则本次不走滚动快路径（平移改不了盒宽），布局后
+	// 补一次**回调通知**（不加 changed，见 notifyChanged）。
 	vpW, vpH int
 }
 
@@ -370,6 +371,22 @@ func (document *htmlDocument) markChanged() {
 func (document *htmlDocument) markScrollChanged() {
 	document.changed++
 	document.scrollMark++
+	if document.onChanged != nil {
+		document.onChanged()
+	}
+}
+
+// notifyChanged 只回调宿主、不加 changed 计数。
+//
+// 用在「本次布局已经消化掉的变更」上：视口尺寸变化就是典型——LayoutDocument
+// 这一趟本来就用的是新尺寸，重排已经完成，通知宿主只是让应用层（编辑区铺满
+// 窗口、状态栏重排那类 chrome）跟上，不需要再排一遍。
+//
+// 这类地方**不能**用 markChanged：+1 会把 changed 抬到 lastLayoutChange 之上
+// （记账在布局末尾，标记在记账之后），此后每次 LayoutDocument 的「只发生了
+// 滚动」判定都要多算这一笔而不相等，快路径从此失效——实测后果是开页后与每次
+// 缩放后的**第一档滚轮整棵树重排**（42 万元素页面 1.75 秒）。
+func (document *htmlDocument) notifyChanged() {
 	if document.onChanged != nil {
 		document.onChanged()
 	}
