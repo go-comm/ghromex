@@ -1045,4 +1045,4 @@ go test ./...
 
 ## 更新日志
 
-当前版本 **v0.3.0**，逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v0.5.0**，逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。
