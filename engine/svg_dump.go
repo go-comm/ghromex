@@ -561,19 +561,17 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 				emitSelection(sr)
 			}
 		}
-		for i, ln := range l.lines {
-			y := l.y + i*l.lh
-			if ln.text == "" {
+		first, last := l.visibleRows(base.y, base.height)
+		for i := first; i <= last; i++ {
+			ln := l.lines[i]
+			if ln.end <= ln.start {
 				continue
 			}
-			if clipOK {
-				if y+l.lh <= base.y || y >= base.y+base.height {
-					continue
-				}
-			} else if y < base.y || y+l.lh > base.y+base.height {
-				continue // 盒外整行不导出（渲染路径同样丢弃）
+			y := l.y + i*l.lh
+			if !clipOK && (y < base.y || y+l.lh > base.y+base.height) {
+				continue // 无裁剪原语：盒外整行不导出（渲染路径同样丢弃）
 			}
-			emitText(l.x, y+l.lh, ln.text)
+			emitText(l.x, y+l.lh, l.lineText(ln))
 		}
 		return
 	}

@@ -44,12 +44,12 @@ func layoutHoles(typ reflect.Type) (holes int, where string) {
 // 单字节枚举必须聚在一起放在尾部（夹在 8 字节字段之间会各自撑出 5~7B 空洞）。
 // 这两条一旦破功，六万节点的页面就要多付近 6MB，故在此钉住：
 //
-//	htmlElement         624B（重排前 680B）
+//	htmlElement         632B（重排前 680B）
 //	cssStyleDeclaration 400B（重排前 440B）
 func TestNodeStructFieldPacking(t *testing.T) {
 	for _, typ := range []reflect.Type{reflect.TypeOf(htmlElement{}), reflect.TypeOf(cssStyleDeclaration{})} {
 		name := typ.Name()
-		want := map[string]int{"htmlElement": 624, "cssStyleDeclaration": 400}[name]
+		want := map[string]int{"htmlElement": 632, "cssStyleDeclaration": 400}[name]
 		if got := int(typ.Size()); got != want {
 			t.Errorf("%s sizeof = %d，期望 %d（字段分段被打破？新增字段请按「含指针 → 纯数值 → 单字节标记」归位）",
 				name, got, want)

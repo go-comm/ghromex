@@ -4,6 +4,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // 输入编辑用到的控制键码。ASCII 区取值对齐 SDL2 SDL_keysym.sym
@@ -65,7 +66,26 @@ func displayValue(b *htmlElement) string {
 		strings.ToLower(b.GetAttribute("type")) != "password" {
 		return v
 	}
-	return strings.Repeat("●", len([]rune(v)))
+	return strings.Repeat("●", runeLen(v))
+}
+
+// runeLen 返回字符串的 rune 数：零分配统计（utf8.RuneCountInString 按
+// 字节扫描，不产生 []rune）。旧口径 len([]rune(value)) 对 19.5MB 的值
+// 每次都分配 80MB 临时切片——光标夹紧、全选、状态栏都会走到。
+func runeLen(s string) int {
+	return utf8.RuneCountInString(s)
+}
+
+// valueRuneLen 返回 value 属性的 rune 数（光标/选区下标的长度上界）。
+//
+// textarea 直接读折行缓存的 runes（O(1)）：缓存与值同生命周期，
+// SetAttribute("value") 会把它整个丢弃，不会读到陈旧值。缓存未建立时
+// 回退零分配统计。
+func valueRuneLen(b *htmlElement) int {
+	if b.wrap != nil {
+		return len(b.wrap.runes)
+	}
+	return runeLen(b.GetAttribute("value"))
 }
 
 // focusableElement 判断元素是否可聚焦：可编辑输入（input/textarea）、
@@ -125,13 +145,13 @@ func SetFocusedElement(doc HTMLDocument, el HTMLElement) {
 			if b := inner(el); b != nil {
 				if !b.caretInit {
 					// 首次聚焦：光标落到值末尾（精确落点由点击坐标修正）。
-					b.caret = len([]rune(b.GetAttribute("value")))
+					b.caret = valueRuneLen(b)
 					b.selAnchor = b.caret
 					b.caretInit = true
 				} else {
 					// 保留原光标与选区，但失焦期间值可能被改过（如程序化
 					// 设值），下标要按新长度夹紧，否则光标会落到值外。
-					n := len([]rune(b.GetAttribute("value")))
+					n := valueRuneLen(b)
 					b.caret = clampCaret(b.caret, n)
 					b.selAnchor = clampCaret(b.selAnchor, n)
 				}
@@ -156,7 +176,7 @@ func CaretPosition(el HTMLElement) (line, col int, ok bool) {
 	if b == nil || !editableInput(el) {
 		return 0, 0, false
 	}
-	caret := clampCaret(b.caret, len([]rune(b.GetAttribute("value"))))
+	caret := clampCaret(b.caret, valueRuneLen(b))
 	if strings.EqualFold(b.tagName, "textarea") {
 		// 折行宽度来自布局结果。还没布局（首次重排之前，应用设完值就急着
 		// 刷状态栏）或已经 display:none 时它是 0，按 0 宽折行会把每个字符
@@ -287,7 +307,7 @@ func insertTextAtCaret(doc HTMLDocument, b *htmlElement, s string) {
 		hi = c
 	}
 	b.SetAttribute("value", string(r[:c])+s+string(r[hi:]))
-	setCaret(doc, b, c+len([]rune(s)))
+	setCaret(doc, b, c+runeLen(s))
 }
 
 // stripControlChars 丢弃控制字符（<0x20 与 0x7F）。文本输入通道理论上
@@ -442,7 +462,7 @@ func OnDocumentKeyDownMods(doc HTMLDocument, key int, mods uint16) bool {
 			if !editableInput(f) {
 				return false
 			}
-			n := len([]rune(b.GetAttribute("value")))
+			n := valueRuneLen(b)
 			setSelection(doc, b, 0, n)
 			return true
 		case 'c', 'C':
@@ -480,7 +500,7 @@ func OnDocumentKeyDownMods(doc HTMLDocument, key int, mods uint16) bool {
 //
 // 单行 input 没有上下行，Shift+Up/Down 不改变选区（按键仍被消费）。
 func onShiftSelectKey(doc HTMLDocument, b *htmlElement, key int) bool {
-	n := len([]rune(b.GetAttribute("value")))
+	n := valueRuneLen(b)
 	caret := clampCaret(b.caret, n)
 	anchor := clampCaret(b.selAnchor, n)
 	var target int
@@ -635,6 +655,7 @@ func onDocumentKeyDown(doc HTMLDocument, key int) bool {
 func inputVisibleWindow(g Graphics, b *htmlElement, px, weightNum int, bold bool, family string) (text string, cut, tw, th int) {
 	full := displayValue(b)
 	runes := []rune(full)
+	total := len(runes) // 舍头前的完整 rune 数，cut 由它推算
 	tw, th = measureTextW(g, full, px, weightNum, bold, family)
 	// 按钮型不截断：auto 宽按 value 文本测量（Chrome 同语义）。
 	typ := strings.ToLower(b.GetAttribute("type"))
@@ -683,7 +704,7 @@ func inputVisibleWindow(g Graphics, b *htmlElement, px, weightNum int, bold bool
 	if decl := resolvedLineHeight(b.computed); decl >= 0 {
 		th = decl
 	}
-	return string(runes), len([]rune(full)) - len(runes), tw, th
+	return string(runes), total - len(runes), tw, th
 }
 
 // controlLayout 返回当前控件的行布局：textarea 为折行结果，
@@ -698,14 +719,17 @@ func controlLayout(doc HTMLDocument, b *htmlElement) textareaLayout {
 	// Home/End 行边界的前缀宽必须与绘制的掩码文本同口径。
 	// 单行 input 的「行」= 可见窗口（舍头保尾），行区间按完整显示值
 	// 编号，光标下标因此仍是完整值里的位置。
-	visible, cut, tw, _ := inputVisibleWindow(g, b, px, weightNum, bold, family)
-	full := len([]rune(displayValue(b)))
-	lines := []textareaLine{{text: visible, start: cut, end: full, w: tw}}
+	_, cut, tw, _ := inputVisibleWindow(g, b, px, weightNum, bold, family)
+	// 行区间 [cut, full) 编号在完整显示值的 rune 空间里（舍头保尾裁掉的
+	// 前缀仍是区间内坐标的一部分），lineText 按区间现切出可见窗口文本。
+	display := displayValue(b)
+	runes := []rune(display)
+	lines := []textareaLine{{start: cut, end: len(runes), w: tw}}
 	_, lh := measureTextW(g, "Mg", px, weightNum, bold, family)
 	if lh <= 0 {
 		lh = b.height
 	}
-	return textareaLayout{x: b.x, y: b.y, w: b.width, h: b.height, lh: lh, lines: lines}
+	return textareaLayout{x: b.x, y: b.y, w: b.width, h: b.height, lh: lh, lines: lines, runes: runes}
 }
 
 // caretLineEdgeTarget 返回光标所在行的行首/行尾下标（start=true 为行首）。
@@ -715,7 +739,7 @@ func controlLayout(doc HTMLDocument, b *htmlElement) textareaLayout {
 // 算会把光标送到看不见的区间（Home 键尤其明显）。
 func caretLineEdgeTarget(doc HTMLDocument, b *htmlElement, start bool, caret int) int {
 	if !strings.EqualFold(b.tagName, "textarea") {
-		n := len([]rune(b.GetAttribute("value")))
+		n := valueRuneLen(b)
 		if start {
 			return 0
 		}
@@ -734,7 +758,7 @@ func caretLineEdgeTarget(doc HTMLDocument, b *htmlElement, start bool, caret int
 
 // moveCaretToLineEdge 把光标移到本行行首/行尾。start=true 为行首。
 func moveCaretToLineEdge(doc HTMLDocument, b *htmlElement, start bool) bool {
-	n := len([]rune(b.GetAttribute("value")))
+	n := valueRuneLen(b)
 	setCaret(doc, b, caretLineEdgeTarget(doc, b, start, clampCaret(b.caret, n)))
 	return true
 }
@@ -767,7 +791,7 @@ func caretVerticalTarget(doc HTMLDocument, b *htmlElement, dy, caret int) int {
 // moveCaretVertical 上/下移动一行：保持列位置，越界时贴边。
 // 单行输入没有可移动的行，直接消费不改光标。
 func moveCaretVertical(doc HTMLDocument, b *htmlElement, dy int) bool {
-	n := len([]rune(b.GetAttribute("value")))
+	n := valueRuneLen(b)
 	setCaret(doc, b, caretVerticalTarget(doc, b, dy, clampCaret(b.caret, n)))
 	return true
 }

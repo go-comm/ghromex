@@ -542,7 +542,7 @@ func TestDetectEOL(t *testing.T) {
 func TestUndoRestoresPreviousText(t *testing.T) {
 	np := newTestNotepad(t)
 	np.editor.SetValue("abc")
-	if len(np.undo) == 0 {
+	if np.undo.len() == 0 {
 		t.Fatal("文本变化后没有压入撤销快照")
 	}
 	np.undoEdit()
@@ -550,10 +550,10 @@ func TestUndoRestoresPreviousText(t *testing.T) {
 		t.Fatalf("撤销后编辑区 = %q, want 空", got)
 	}
 	// 撤销动作自身不再压快照（否则连撤会来回抖）。
-	before := len(np.undo)
+	before := np.undo.len()
 	np.undoEdit()
-	if len(np.undo) != before {
-		t.Fatalf("撤销后栈长度 = %d, want %d（撤销动作不该压栈）", len(np.undo), before)
+	if np.undo.len() != before {
+		t.Fatalf("撤销后栈长度 = %d, want %d（撤销动作不该压栈）", np.undo.len(), before)
 	}
 }
 

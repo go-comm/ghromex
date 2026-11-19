@@ -38,10 +38,10 @@ func (n *notepad) buildSpec() ui.Spec {
 
 	undoAct := cmd("撤销", "Ctrl+Z", n.undoEdit).
 		WithIcon("undo").
-		When(func() bool { return len(n.undo) > 0 })
+		When(func() bool { return n.undo.len() > 0 })
 	redoAct := cmd("重做", "Ctrl+Y", n.redoEdit).
 		WithIcon("redo").
-		When(func() bool { return len(n.redo) > 0 })
+		When(func() bool { return n.redo.len() > 0 })
 	cutAct := cmd("剪切", "Ctrl+X", n.cut).WithIcon("cut")
 	copyAct := cmd("复制", "Ctrl+C", n.copySelection).WithIcon("copy")
 	pasteAct := cmd("粘贴", "Ctrl+V", n.paste).WithIcon("paste")

@@ -40,7 +40,7 @@ func SetValue(el HTMLElement, value string) {
 		value = normalizeNewlines(value)
 	}
 	b.SetAttribute("value", value)
-	b.caret = len([]rune(value))
+	b.caret = runeLen(value)
 	b.selAnchor = b.caret // 程序化设值后无选区，光标在末尾
 	if strings.EqualFold(b.tagName, "textarea") {
 		// 光标落在值末尾：滚动到光标行（scrollTop 负值 = 哨兵，由布局期

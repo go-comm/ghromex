@@ -3,6 +3,67 @@
 版本号即 git tag（Go module 语义：`v0.5.0` 可从
 `github.com/go-comm/ghromex@v0.5.0` 直接取用）。
 
+## 未发布
+
+**修复：大文本 textarea 打开即涨到 400MB（实测常驻 400MB+ → 105MB）**。
+用 `examples/notepad` 打开 19.5MB 的 `LICENSES.chromium.html`（360,214 行），
+内存涨到 400MB 且编辑时继续上冲。纯引擎探针（不跑 notepad 代码，只
+`CreateElement("textarea") + SetValue + RenderNode`）即可复现：**首帧总分配
+1,358MB，5 帧累计 7,855MB**。
+
+根因在引擎：`layoutTextarea` 一帧内被上溯**约 8 次**（绘制、选区矩形、
+光标↔坐标映射、滚动条几何、滚动夹紧、SVG 导出…），而它每次都从头贪心折行
+全文——`[]rune(value)` 一次 80MB、逐字 `string(r)` 2000 万次、每行再
+`string(cur)` 复制一份。8 × 全文折行 = GC 追不上，临时对象变成几百 MB 常驻。
+
+- **折行缓存**：新增 `htmlElement.wrap *textareaWrap`，缓存「值 → rune 视图 +
+  行表」。键含 `Graphics`/可用宽/字号/字重/字体族（所有 `Graphics` 实现都是
+  指针类型，接口比较 O(1) 安全）；值变化由 `SetAttribute("value")` /
+  `RemoveAttribute("value")` 把整个缓存置 `nil` 失效。实测**首帧 1,358MB →
+  119MB，后续 50 帧累计仅 504KB（≈10KB/帧）**。
+- **行只存 rune 下标**：`textareaLine` 去掉 `text` 字段，只留
+  `{start,end,w}`；行文本由 `textareaLayout.lineRunes/lineText` 按区间现切，
+  只在绘制/SVG 导出的那一刻落成 string。单行 input 的 `controlLayout` 改为
+  在 `runes` 里放显示值（password 的 ● 掩码口径不变）。
+- **逐字宽度备忘**：`wrapTextarea` 内 ASCII 走 128 元素定长数组、其余走 map，
+  度量次数从「字符总数」降到「不同字符数」。
+- **大文档的行遍历只做两次定位**：`caretRow` 线性扫描 → 二分（行 `end`
+  单调）；绘制/选区矩形/SVG 导出三处的「遍历全表 + 逐行判盒」→ 新增
+  `textareaLayout.visibleRows` 用除法定位首尾可见行。19.5MB 在 900px 宽下
+  折出约 24 万行，同屏可见只有十几行。
+- 行为口径保持：值归一化、行区间 rune 下标、渲染/光标/选区同源不变；
+  `\r\n` 的行区间收在 `\r` 之前（不把控制字符当字形画成行尾方块），且
+  `\r\n` 一起消费（不额外多出一个空行）。
+- 回归：新增 `engine/textarea_wrap_cache_internal_test.go`，判定用**文本测量
+  次数**而非计时（同 `scroll_layout_internal_test.go` 的口径）——缓存失效时
+  行为仍然正确、只有性能塌掉，光看输出对不出来。含「二次布局测量次数掉到
+  常数」「值/宽度变化正确失效」「行文本按区间现切」「caretRow 二分与线性
+  扫描逐一对齐」4 条。
+- `htmlElement` 因含指针段多 1 个指针字段，尺寸不变量 624B → **632B**
+  （`field_packing_internal_test.go` 同步；分段与空洞两条不变量不受影响）。
+
+**应用层：notepad 的撤销栈与状态栏不再按全文拷贝**。引擎之外，notepad 自己
+也是这条内存曲线的一部分：
+
+- 撤销/重做栈原本是 `[]string` 存 200 条**全文快照**——19.5MB 的文档就是
+  3.9GB。改为新增的 `snapshotStack`，同时受条数（`maxUndo` 200）与总字节
+  （新增 `maxUndoBytes` 32MB）双重限制，超预算从栈底丢最旧的快照并断引用
+  （`items[0] = ""`，否则被裁掉的快照仍占着内存）。
+- 状态栏「N 个字符」原本每次刷新都 `len([]rune(n.cur))`：一句提示复制整篇
+  文档（19.5MB → 80MB）。改为随 `n.cur` 一起维护的 `n.curChars`
+  （`utf8.RuneCountInString`，零分配）。
+- 「N 个字被选中」原本走 `SelectedText` 复制选区再数长度；全选一份 19.5MB
+  文档就是每次光标移动复制 19.5MB。新增引擎公开 API
+  `engine.SelectionLength(doc) (int, bool)`——只返回选区 rune 数、不复制文本。
+- `engine.SelectedText` 内部不再 `[]rune(整个 value)` 取子串，改走新增的
+  `valueRunes`（textarea 命中折行缓存时 O(1) 复用）。
+- 光标夹紧、全选、Shift+方向键、`setSelection`、`SetValue` 等处共 **13 个**
+  `len([]rune(value))` 热路径统一改为零分配的 `runeLen` / 命中缓存的
+  `valueRuneLen`。
+- `loadFile` 的 `string(data)` 由两次合并为一次（少一次 19.5MB 瞬时复制）。
+- 新增公开 API：`engine.SelectionLength`（`docs/ai/api-reference.md` 待重新
+  生成时纳入）。
+
 ## v0.5.0 — 2026-10-28
 
 **大文档性能与交互响应**。以 714KB / 65,080 节点（27,501 元素 + 37,579 文本）

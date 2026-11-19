@@ -49,13 +49,18 @@ func TestWrapTextareaRules(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			lines := wrapTextarea(g, c.value, c.maxW, px, 0, false, "")
+			lines := wrapTextarea(g, []rune(c.value), c.maxW, px, 0, false, "")
 			if len(lines) != len(c.wants) {
 				t.Fatalf("行数 = %d, want %d: %#v", len(lines), len(c.wants), lines)
 			}
+			runes := []rune(c.value)
 			for i, ln := range lines {
-				if ln.text != c.wants[i] {
-					t.Errorf("行[%d].text = %q, want %q", i, ln.text, c.wants[i])
+				got := ""
+				if ln.start >= 0 && ln.end <= len(runes) && ln.end > ln.start {
+					got = string(runes[ln.start:ln.end])
+				}
+				if got != c.wants[i] {
+					t.Errorf("行[%d] 文本 = %q, want %q", i, got, c.wants[i])
 				}
 				if ln.start != c.starts[i] || ln.end != c.ends[i] {
 					t.Errorf("行[%d] 区间 = [%d,%d), want [%d,%d)",
@@ -76,7 +81,7 @@ func TestWrapTextareaRules(t *testing.T) {
 
 func TestCaretRowEdges(t *testing.T) {
 	g := NewFakeGraphics()
-	lines := wrapTextarea(g, "ab\ncd", 1000, 10, 0, false, "")
+	lines := wrapTextarea(g, []rune("ab\ncd"), 1000, 10, 0, false, "")
 	if len(lines) != 2 {
 		t.Fatalf("行数 = %d, want 2", len(lines))
 	}
@@ -225,8 +230,8 @@ func TestPasswordCaretLayoutUsesMaskedText(t *testing.T) {
 	if len(l.lines) != 1 {
 		t.Fatalf("行数 = %d, want 1: %#v", len(l.lines), l.lines)
 	}
-	if l.lines[0].text != "●●" {
-		t.Fatalf("行文本 = %q, want ●●（controlLayout 未按显示文本测量）", l.lines[0].text)
+	if got := l.lineText(l.lines[0]); got != "●●" {
+		t.Fatalf("行文本 = %q, want ●●（controlLayout 未按显示文本测量）", got)
 	}
 
 	g := vp.Graphics()

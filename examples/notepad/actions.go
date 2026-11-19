@@ -17,16 +17,12 @@ import (
 // （一次改动一条快照），撤销即弹栈并写回。重做对称——把当前值压回撤销
 // 栈、弹出重做栈的值写回。撤销/重做本身不再压栈（applying 标记）。
 func (n *notepad) redoEdit() {
-	if len(n.redo) == 0 {
+	next, ok := n.redo.pop()
+	if !ok {
 		n.message("没有可重做的操作")
 		return
 	}
-	next := n.redo[len(n.redo)-1]
-	n.redo = n.redo[:len(n.redo)-1]
-	n.undo = append(n.undo, n.cur)
-	if len(n.undo) > maxUndo {
-		n.undo = n.undo[1:]
-	}
+	n.undo.push(n.cur)
 	n.applying = true
 	n.editor.SetValue(next)
 	n.applying = false

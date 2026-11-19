@@ -96,19 +96,21 @@ func renderTextareaValue(g Graphics, b *htmlElement, comp CSSStyleDeclaration, p
 			g.DrawColor(sr.x, sr.y, sr.w, sr.h, selectionColor)
 		}
 	}
-	for i, ln := range l.lines {
-		y := l.y + i*l.lh
-		if ln.text == "" {
+	// 只迭代可视行范围：大文档折行后可达上百万行，遍历全表逐行判裁剪
+	// 是纯浪费（visibleRows 已把范围收窄到同屏可见的十几行）。
+	//   - 裁剪后端：边缘半截行照画，由 overflow 裁剪截断（滚动时必有半截行）；
+	//   - 无裁剪后端：边缘半截行整行丢弃（历史口径，避免溢出到相邻内容）。
+	first, last := l.visibleRows(b.y, b.height)
+	for i := first; i <= last; i++ {
+		ln := l.lines[i]
+		if ln.end <= ln.start {
 			continue
 		}
-		if clipOK {
-			if y+l.lh <= b.y || y >= b.y+b.height {
-				continue // 与盒子完全不相交才丢弃
-			}
-		} else if y < b.y || y+l.lh > b.y+b.height {
+		y := l.y + i*l.lh
+		if !clipOK && (y < b.y || y+l.lh > b.y+b.height) {
 			continue // 无裁剪原语：盒外整行丢弃，避免溢出到相邻内容
 		}
-		g.DrawText(l.x, y, ln.w, l.lh, p, ln.text)
+		g.DrawText(l.x, y, ln.w, l.lh, p, l.lineText(ln))
 		if dec != TextDecorationNone {
 			drawDecoration(g, dec, l.x, y, ln.w, l.lh, l.asc, px, p)
 		}

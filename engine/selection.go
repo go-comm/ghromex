@@ -20,7 +20,7 @@ func selectionRange(b *htmlElement) (lo, hi int, ok bool) {
 	if b == nil {
 		return 0, 0, false
 	}
-	n := len([]rune(b.GetAttribute("value")))
+	n := valueRuneLen(b)
 	a, c := b.selAnchor, b.caret
 	if a < 0 {
 		a = 0
@@ -39,6 +39,16 @@ func selectionRange(b *htmlElement) (lo, hi int, ok bool) {
 		a, c = c, a
 	}
 	return a, c, true
+}
+
+// valueRunes 返回 value 属性的 rune 视图：textarea 布局后已有折行缓存，
+// 直接复用（大文本下省掉一次几十 MB 的 []rune 转换）；缓存不存在时
+// 只能转一次。只要长度的调用方请改用 valueRuneLen（零分配）。
+func valueRunes(b *htmlElement) []rune {
+	if b.wrap != nil {
+		return b.wrap.runes
+	}
+	return []rune(b.GetAttribute("value"))
 }
 
 // SelectedText 返回聚焦输入当前选中的文本。第二个返回值为 false 表示
@@ -61,8 +71,30 @@ func SelectedText(doc HTMLDocument) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	r := []rune(b.GetAttribute("value"))
+	r := valueRunes(b)
 	return string(r[lo:hi]), true
+}
+
+// SelectionLength 返回聚焦输入当前选区的 rune 数，第二个返回值为 false
+// 表示没有选区（或没有聚焦输入）。
+//
+// 与 SelectedText 相比它不复制选区文本：状态栏这类每帧都要刷新、只关心
+// 「选中多少字」的场景用它，避免为一句提示复制整个选区（全选一份 19.5MB
+// 的文档就是 19.5MB 的临时分配）。
+func SelectionLength(doc HTMLDocument) (int, bool) {
+	f := FocusedElement(doc)
+	if f == nil {
+		return 0, false
+	}
+	b := inner(f)
+	if b == nil || !editableInput(f) {
+		return 0, false
+	}
+	lo, hi, ok := selectionRange(b)
+	if !ok {
+		return 0, false
+	}
+	return hi - lo, true
 }
 
 // controlCaretFromPoint 把坐标反推为控件光标（rune 下标），不修改状态。
@@ -236,14 +268,12 @@ func textareaSelectionRects(g Graphics, b *htmlElement, l textareaLayout,
 		return nil
 	}
 	var out []clipRect
-	for i, ln := range l.lines {
+	first, last := l.visibleRows(b.y, b.height)
+	for i := first; i <= last; i++ {
+		ln := l.lines[i]
 		y := l.y + i*l.lh
-		if clipOK {
-			if y+l.lh <= b.y || y >= b.y+b.height {
-				continue
-			}
-		} else if y < b.y || y+l.lh > b.y+b.height {
-			continue
+		if !clipOK && (y < b.y || y+l.lh > b.y+b.height) {
+			continue // 无裁剪原语：盒外整行丢弃，避免高亮画到盒外
 		}
 		// 行文本为 [start,end)，换行符位于 end。以下覆盖三种交集：
 		// 选区在行首之前/行内到行尾/空行被整行选中。
@@ -264,7 +294,7 @@ func textareaSelectionRects(g Graphics, b *htmlElement, l textareaLayout,
 		if to > ln.end {
 			to = ln.end
 		}
-		runes := []rune(ln.text)
+		runes := l.lineRunes(ln)
 		x1 := l.x + textPrefixWidth(g, runes, from-ln.start, px, weightNum, bold, family)
 		x2 := l.x + textPrefixWidth(g, runes, to-ln.start, px, weightNum, bold, family)
 		if hi > ln.end {

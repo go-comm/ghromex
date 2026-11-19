@@ -176,6 +176,11 @@ type htmlElement struct {
 	genBefore, genAfter *htmlElement
 	// genText 是生成盒内的文本节点（内容为空时为 nil）。
 	genText *textNode
+	// wrap 是 textarea 的折行缓存（懒分配，非 textarea 元素恒为 nil）：
+	// 长文本 textarea 一帧内会被 layoutTextarea 上溯多次（绘制、选区、
+	// 光标映射、滚动条几何…），不缓存的话每帧都要重新全文折行，
+	// 19.5MB 的单子实测单帧分配 1.3GB，GC 追不上就是几百 MB 常驻。
+	wrap *textareaWrap
 
 	// —— 第二段：纯数值（不含指针，GC 扫描止于上一段）
 	width   int
@@ -306,6 +311,11 @@ func (element *htmlElement) SetAttribute(key string, value string) {
 		element.id = value
 	case "style":
 		element.inline = ParseInlineStyle(value)
+	case "value":
+		// textarea 的折行缓存与值绑定，值一变就作废（缓存里含旧值的
+		// rune 视图与行区间，留着会画出旧文本）。input 的 value 也走这里，
+		// 它不建缓存，置 nil 是空操作。
+		element.wrap = nil
 	}
 	element.onChanged()
 }
@@ -323,6 +333,8 @@ func (element *htmlElement) RemoveAttribute(key string) {
 		element.id = ""
 	case "style":
 		element.inline = nil
+	case "value":
+		element.wrap = nil
 	}
 	element.onChanged()
 }

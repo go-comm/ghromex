@@ -41,6 +41,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
@@ -56,9 +57,12 @@ const (
 	baseFont = 14 // 编辑区默认字号
 	minFont  = 8
 	maxFont  = 32
-	maxUndo  = 200 // 撤销栈深度
-	appName  = "记事本"
-	untitled = "未命名"
+	maxUndo  = 200 // 撤销栈深度上限
+	// maxUndoBytes 是撤销/重做栈的总字节预算：一条快照就是整篇文档，
+	// 按条数限在大文档上会吃几个 GB（19.5MB × 200），故另加字节上限。
+	maxUndoBytes = 32 << 20 // 32MB
+	appName      = "记事本"
+	untitled     = "未命名"
 
 	// 编辑区的等宽字体；正文态直接用主题的 Font。
 	monoFont = `Consolas, 'Courier New', monospace`
@@ -212,8 +216,9 @@ type notepad struct {
 	path         string // 当前文件路径（空 = 未命名）
 	eol          string // 当前文件的换行风格（保存时按它写回；编辑区内部只有 '\n'）
 	cur          string // 编辑区最近一次的文本（撤销快照与状态栏都用它）
-	undo         []string
-	redo         []string
+	curChars     int    // cur 的 rune 数（状态栏用；随 cur 一起更新，避免每次重算）
+	undo         snapshotStack
+	redo         snapshotStack
 	applying     bool   // 正在执行撤销/重做/替换：此时不再压入快照
 	dirty        bool   // 有未保存的修改
 	font         int    // 编辑区字号（格式 → 放大/缩小）
@@ -224,6 +229,50 @@ type notepad struct {
 	lastW, lastH int    // 上次排版时的视口尺寸
 	lastTitle    string // 上次写入窗口的标题（避免每次按键都调平台接口）
 }
+
+// snapshotStack 是文本快照栈（撤销/重做用），按「总字节数」限额。
+//
+// 引擎没有撤销栈，示例程序自己存全文快照。按条数限在大文档上会失控：
+// 19.5MB 的文件存 200 条就是 3.9GB 常驻。因此改成字节预算——超预算时
+// 从栈底（最旧的快照）开始丢，始终保留最近一条可撤销。
+type snapshotStack struct {
+	items []string
+	bytes int
+}
+
+// push 压入一份快照并按预算裁剪（最旧的先出）：同时受条数 maxUndo 与
+// 总字节 maxUndoBytes 约束，始终保留最近一条可撤销。
+func (s *snapshotStack) push(text string) {
+	s.items = append(s.items, text)
+	s.bytes += len(text)
+	for len(s.items) > 1 && (len(s.items) > maxUndo || s.bytes > maxUndoBytes) {
+		old := s.items[0]
+		s.items[0] = "" // 断引用，否则被裁掉的快照仍占着内存
+		s.bytes -= len(old)
+		s.items = s.items[1:]
+	}
+}
+
+// pop 弹出并返回最近一份快照（栈空时返回 false）。
+func (s *snapshotStack) pop() (string, bool) {
+	if len(s.items) == 0 {
+		return "", false
+	}
+	last := s.items[len(s.items)-1]
+	s.items[len(s.items)-1] = ""
+	s.bytes -= len(last)
+	s.items = s.items[:len(s.items)-1]
+	return last, true
+}
+
+// reset 清空栈。
+func (s *snapshotStack) reset() {
+	s.items = nil
+	s.bytes = 0
+}
+
+// len 返回快照条数。
+func (s *snapshotStack) len() int { return len(s.items) }
 
 // bind 装配页面控件、安装 ui 工作台并接上事件。
 //
@@ -242,6 +291,7 @@ func (n *notepad) bind() {
 		return
 	}
 	n.cur = n.editorValue()
+	n.curChars = utf8.RuneCountInString(n.cur)
 	n.font = baseFont
 	n.showStatus = true
 	n.matchAt = -1
@@ -317,13 +367,11 @@ func (n *notepad) onChanged() {
 	n.syncLayout()
 	if v := n.editorValue(); v != n.cur {
 		if !n.applying {
-			n.undo = append(n.undo, n.cur)
-			if len(n.undo) > maxUndo {
-				n.undo = n.undo[1:]
-			}
-			n.redo = nil // 有了新改动，重做栈作废
+			n.undo.push(n.cur)
+			n.redo.reset() // 有了新改动，重做栈作废
 		}
 		n.cur = v
+		n.curChars = utf8.RuneCountInString(v)
 		n.dirty = true
 	}
 	if n.workbench != nil {
@@ -399,13 +447,15 @@ func (n *notepad) updateStatus() {
 		pos = fmt.Sprintf("行 %d，列 %d", line, col)
 	}
 	sel := ""
-	if txt, ok := engine.SelectedText(n.doc); ok {
-		sel = strconv.Itoa(len([]rune(txt))) + " 个字被选中"
+	if n, ok := engine.SelectionLength(n.doc); ok {
+		sel = strconv.Itoa(n) + " 个字被选中"
 	}
 	if n.workbench != nil {
 		n.workbench.SetStatusSegment("file", name)
 		n.workbench.SetStatusSegment("pos", pos)
-		n.workbench.SetStatusSegment("chars", strconv.Itoa(len([]rune(n.cur)))+" 个字符")
+		// 字符数用缓存的 n.curChars：这里每次按键都会走，直接对
+		// len([]rune(cur)) 会为一句提示复制整篇文档（19.5MB → 80MB）。
+		n.workbench.SetStatusSegment("chars", strconv.Itoa(n.curChars)+" 个字符")
 		n.workbench.SetStatusSegment("sel", sel)
 		n.workbench.SetStatusSegment("eol", eolName(n.eol))
 	}
@@ -488,11 +538,13 @@ func (n *notepad) focusEditor() {
 // newFile 清空编辑区。
 func (n *notepad) newFile() {
 	n.editor.SetValue("")
-	n.undo = nil
-	n.redo = nil
+	n.undo.reset()
+	n.redo.reset()
 	n.path = ""
 	n.dirty = false
 	n.eol = defaultEOL() // 新文档回到平台默认换行风格
+	n.cur = ""
+	n.curChars = 0
 	if n.workbench != nil {
 		n.workbench.Refresh()
 	}
@@ -606,11 +658,16 @@ func (n *notepad) loadFile(path string) {
 		n.message("打开失败：" + err.Error())
 		return
 	}
+	// 字节串 → 文本只转一次：19.5MB 的文档少转一遍就省 19.5MB 瞬时分配
+	// （旧实现 detectEOL(string(data)) 与 SetValue(string(data)) 各转一遍）。
+	text := string(data)
 	// 记下原文件的换行风格，保存时按它写回；编辑区内部统一成 LF。
-	n.eol = detectEOL(string(data))
-	n.editor.SetValue(string(data))
-	n.undo = nil
-	n.redo = nil
+	n.eol = detectEOL(text)
+	n.editor.SetValue(text)
+	n.undo.reset()
+	n.redo.reset()
+	n.cur = n.editorValue()
+	n.curChars = utf8.RuneCountInString(n.cur)
 	n.path = path
 	n.dirty = false
 	if n.workbench != nil {
@@ -671,13 +728,12 @@ func (n *notepad) writeFile(path string) {
 // 引擎没有撤销栈：示例程序在文档变更回调里比对文本，变了就把旧值压栈
 // （一次改动一条快照），撤销即弹栈并写回。撤销动作本身不再压栈。
 func (n *notepad) undoEdit() {
-	if len(n.undo) == 0 {
+	prev, ok := n.undo.pop()
+	if !ok {
 		n.message("没有可撤销的操作")
 		return
 	}
-	prev := n.undo[len(n.undo)-1]
-	n.undo = n.undo[:len(n.undo)-1]
-	n.redo = append(n.redo, n.cur) // 当前内容进重做栈，重做时再弹回来
+	n.redo.push(n.cur) // 当前内容进重做栈，重做时再弹回来
 	n.applying = true
 	n.editor.SetValue(prev)
 	n.applying = false
@@ -696,7 +752,7 @@ func (n *notepad) copySelection() {
 		return
 	}
 	clipboard.SetText(txt)
-	n.message("已复制 " + strconv.Itoa(len([]rune(txt))) + " 个字符")
+	n.message("已复制 " + strconv.Itoa(utf8.RuneCountInString(txt)) + " 个字符")
 }
 
 // cut 剪切：复制选区后删除它。
@@ -709,7 +765,7 @@ func (n *notepad) cut() {
 	}
 	clipboard.SetText(txt)
 	engine.OnDocumentKeyDown(n.doc, engine.KeyDelete)
-	n.message("已剪切 " + strconv.Itoa(len([]rune(txt))) + " 个字符")
+	n.message("已剪切 " + strconv.Itoa(utf8.RuneCountInString(txt)) + " 个字符")
 }
 
 // paste 从系统剪贴板粘贴到光标处（有选区则替换选区）。
