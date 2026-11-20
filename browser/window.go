@@ -79,6 +79,13 @@ type Window struct {
 	// 返回 true 表示「还有每帧任务」（主循环据此把空闲休眠从 10ms 降到 1ms）。
 	// 拖动无边框窗口这类高频动作在这里把一批事件合并成一次窗口移动。
 	frameHandler func() bool
+
+	// delay 是主循环的空闲休眠实现，默认 win.sdl.Delay。
+	//
+	// 抽成字段只为让测试断言「请求睡几毫秒」这条策略本身：Windows 的
+	// Sleep(1) 不保证 1ms（默认计时器粒度 15.6ms，负载下 1ms 会被拉成
+	// ~15ms），按回调次数反推档位会假失败——见 frame_handler_test.go。
+	delay func(ms int)
 }
 
 // Options 是建窗参数。零值表示位于 (0,0) 的固定尺寸普通窗口（带边框）；
@@ -115,7 +122,7 @@ func NewWithOptions(o Options) (*Window, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Window{sdl: sdl}, nil
+	return &Window{sdl: sdl, delay: sdl.Delay}, nil
 }
 
 // ViewportWidth 实现 engine.Viewport。
@@ -483,7 +490,7 @@ func (win *Window) Run() error {
 
 		if !pending {
 			t0 := time.Now()
-			win.sdl.Delay(idleDelay(busy))
+			win.delay(idleDelay(busy))
 			dIdle = time.Since(t0)
 		}
 
