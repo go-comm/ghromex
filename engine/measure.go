@@ -1,6 +1,9 @@
 package engine
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // MeasureNode 布局入口：对根节点在 (mw, mh) 可用空间内执行一次布局。
 // 若样式尚未级联（computed 为空），先以空样式表级联。
@@ -732,7 +735,9 @@ func isButtonElement(el *htmlElement) bool {
 func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, cy int, align TextAlign, excl []floatRect) (flowW, flowH int) {
 	cursorX := cx
 	cursorY := cy
-	var curLine []lineItem
+	// 行盒累加缓冲跨轮复用（见 layout_cache.go）：不折行的长行（pre /
+	// nowrap）一行就是几十万项，每轮从 nil 重新 grow 是几百 MB 的瞬时分配。
+	curLine := el.takeLineBuf()
 	maxRight := cx
 	// floats 是本容器自己的块格式化上下文里的浮动盒（含从祖先继承来的）。
 	// 必须复制一份：append 可能复用底层数组，直接写会污染父级的列表。
@@ -1208,7 +1213,10 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 
 	for _, child := range el.children {
 		if tnc, ok := child.(*textNode); ok {
-			tnc.node.runs = nil
+			// runs 是布局结果、也是全页最大的一块内存（每 token 一项，19.5MB
+			// 文档约 450 万项 ≈ 250MB）：内容每轮照旧重写，但底层数组跨轮
+			// 复用，不再每轮从 nil 重新 grow（那是 1.7GB 的瞬时分配 + GC 扫描）。
+			tnc.node.runs = tnc.node.runs[:0]
 			raw := tnc.Text()
 			if preserveWS {
 				addPreText(tnc, raw, wsMode == WhiteSpacePreWrap)
@@ -1460,6 +1468,14 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	}
 
 	flushLine()
+	// 归还行盒缓冲（跨轮复用，见 layout_cache.go）并释放 runs 尾部指向旧
+	// 文本的引用（缓冲复用后，多余的那一段仍挂着上一轮的内容）。
+	el.putLineBuf(curLine)
+	for _, child := range el.children {
+		if tnc, ok := child.(*textNode); ok {
+			trimRuns(tnc.node)
+		}
+	}
 	return maxRight - cx, cursorY - cy
 }
 
@@ -1491,14 +1507,21 @@ func hasLeadingBlank(s string) bool {
 }
 
 // hasTrailingBlank 报告文本是否以空白结尾。
+//
+// 只看**最后一个 rune**：尾部空白判定本来就只看末字符，旧实现却把整串转成
+// []rune 再取尾——19.5MB 的文本一次 78MB 临时切片，而每个文本节点每轮重排
+// 都要问一次。改成从尾部按字节回退解码，O(1) 且零分配。
+//
+// 非法 UTF-8：旧口径经 []rune 消毒成 U+FFFD（不是空白 → false）；这里
+// DecodeLastRuneInString 对坏字节同样返回 U+FFFD，口径一致。
 func hasTrailingBlank(s string) bool {
-	rs := []rune(s)
-	for i := len(rs) - 1; i >= 0; i-- {
-		switch rs[i] {
-		case ' ', '\t', '\n', '\r', '\f', ' ':
-			return true
-		}
+	if s == "" {
 		return false
+	}
+	r, _ := utf8.DecodeLastRuneInString(s)
+	switch r {
+	case ' ', '\t', '\n', '\r', '\f', ' ':
+		return true
 	}
 	return false
 }

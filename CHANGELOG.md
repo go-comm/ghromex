@@ -16,6 +16,50 @@
 0.33ms/帧。新增公开 API `engine.SelectionLength`（只返回选区 rune 数、
 不复制文本）。无破坏性变更，按 minor 收口。
 
+**增量布局阶段一：布局缓冲跨轮复用 + 尾部零分配，稳定态重排分配 1.76GB → 36MB**。
+前面几阶段把「打开文档」「敲一个字」的常驻内存压下来了，但**稳定态全量重排**
+（悬停、焦点、`ChangeCount` 驱动的任何一次 `LayoutDocument`）仍然是重灾区：
+19.5MB 的 `LICENSES.chromium.html`（780 个 `<pre>`）一次重排实测 **503ms /
+1.76GB 分配**，CPU 的 60% 花在 `runtime.scanObject`（GC 扫 runs 指针）。
+
+根因：`layoutChildren` 每轮都**从零重建所有布局结果**——往 `node.runs` 逐个
+`append textRun`（每 token 一项，全页约 450 万项、56B/项 ≈ 250MB），切片每轮
+从 `nil` 按 1.25× 重新 grow，累计分配约 5 倍终值；行盒累加缓冲 `curLine`
+同理（长 `<pre>` 单行几十万项）；`hasTrailingBlank` 每节点每轮把整串转成
+`[]rune` 取尾（19.5MB → 一次 78MB 临时切片）。runs 是**布局结果**，该占的内存
+必须占；不该占的是「每轮重新分配一遍」。本阶段让底层缓冲跨轮复用，内容照旧
+每轮重写。
+
+- **`runs` 跨轮复用**：`layoutChildren` 开头 `node.runs = node.runs[:0]`（替代
+  `= nil`），`append` 直接接在旧底层数组上，不再从 `nil` grow。函数末尾
+  `trimRuns` 释放尾部（`cap` 超出 `len` 且缩得较多时）仍挂着上一轮 `textRun`
+  的那段引用——缓冲复用后若不放手，旧文档内容会被旧 `textRun.text` 子串钉在
+  内存里。`n==0 || n*4>=cap` 时跳过（缩得不多不值得再走一遍尾部）。
+- **行盒缓冲 `curLine` 跨轮复用**：新增 `engine/layout_cache.go`。
+  `layoutChildren` 开头 `el.takeLineBuf()` 取上一轮留的缓冲（取走即置 `nil`，
+  防 `onChanged`→宿主刷新重入时两次布局共用同一底层数组）；函数末尾
+  `el.putLineBuf` 归还。`cap` 超 `maxLineScratch`（4096 项）的不保留——宁可在
+  下轮重新 grow，也不让一行的峰值变成整个生命的常驻。
+- **`hasTrailingBlank` 零分配**：`[]rune(s)` → `utf8.DecodeLastRuneInString`，
+  O(1) 且零分配，口径与旧消毒一致（坏字节同样落到 `U+FFFD`→非空白→false）。
+- **结构体字段**：`htmlElement` 新增 `lcache *layoutCache`（指针段末尾，懒分配，
+  非行内内容多的元素恒为 `nil`），尺寸不变量 **632B → 640B**（多出的 8B 是一个
+  指针，落在含指针段、不产生空洞）；`Clone` 里 `c.lcache = nil`。
+
+同口径对比（无头探针，稳定态单次 `LayoutDocument` 的耗时 / 分配）：
+
+| 场景 | 改前 | 改后 |
+|---|---|---|
+| 真实 credits 页（19.5MB / 780 `<pre>`） | 503ms / 1762MB | **328ms / 36MB** |
+| 单节点 `<p>` 1M 字符（可折行） | 41ms / 161MB | **21ms / 36MB** |
+| 单节点 `<pre>` 1M 字符（不折行） | 70ms / 379MB | **52ms / 257MB** |
+
+真实 credits 页重排分配 **1762 → 36MB（−98%，约 49×）**；重排后常驻堆连续 20
+轮稳定在 ~491MB 无增长（`HeapAlloc` 同值）。`<pre>` 不折行的单节点场景收益
+有限（一整行几十万项，`curLine` 超上限不保留），留给阶段二「脏标记 + 文本
+token 缓存」从根上消除「未变更子树整块重排」。行为口径不变：`examples/ua`、
+`examples/notepad` 的 `-dump-svg` 与上一提交逐字节一致（SHA256 全等）。
+
 **修复：大文本 textarea 打开即涨到 400MB（实测常驻 400MB+ → 105MB）**。
 用 `examples/notepad` 打开 19.5MB 的 `LICENSES.chromium.html`（360,214 行），
 内存涨到 400MB 且编辑时继续上冲。纯引擎探针（不跑 notepad 代码，只

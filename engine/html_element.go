@@ -181,6 +181,10 @@ type htmlElement struct {
 	// 光标映射、滚动条几何…），不缓存的话每帧都要重新全文折行，
 	// 19.5MB 的单子实测单帧分配 1.3GB，GC 追不上就是几百 MB 常驻。
 	wrap *textareaWrap
+	// lcache 是布局期的缓冲缓存（懒分配，非行内内容多的元素恒为 nil）：
+	// 行盒累加缓冲（curLine）跨轮复用，长 pre 单行可达几十万项、lineItem
+	// 约 120B，每轮从零 grow 就是几百 MB 的瞬时分配（见 layout_cache.go）。
+	lcache *layoutCache
 
 	// —— 第二段：纯数值（不含指针，GC 扫描止于上一段）
 	width   int
@@ -697,6 +701,9 @@ func (element *htmlElement) Clone() HTMLElement {
 	c.parentElement = nil
 	c.runs = nil
 	c.computed = nil
+	// 布局缓冲不随克隆复制：行盒累加缓冲属于「这一轮排版」的临时产物，
+	// 克隆体自己会重新长一份（共享同一块数组会让两次布局互相踩）。
+	c.lcache = nil
 	// 生成盒是宿主级联的产物，不随克隆复制：克隆元素会按自己的伪元素
 	// 规则重建（共享节点会造成两个宿主争用同一份布局几何）。
 	c.generated = false
