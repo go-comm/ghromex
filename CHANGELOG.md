@@ -97,6 +97,44 @@
 - 新增公开 API：`engine.SelectionLength`（`docs/ai/api-reference.md` 待重新
   生成时纳入）。
 
+**修复：`input` / `select` 的可见窗口每帧 O(n²)**。顺着 textarea 的问题排查其它
+标签，`input` 的 `inputVisibleWindow`（`engine/text_input.go`）与 `select` 的
+`selectDisplayClipped`（`engine/form_render.go`）踩的是同一类坑：判「舍到哪」
+时每舍掉一个字符，就把剩下的**整串**重新量一遍；`input` 还额外在渲染路径里
+每帧无条件 `[]rune(displayValue)`（`engine/render.go`），选区前缀宽
+（`inputSelectionRects`）与 SVG 导出（`engine/svg_dump.go`）也各 `[]rune` 一份
+全文。2 倍长度 → 4 倍开销，值一长就卡死。
+
+| 场景（1024×720，纯引擎探针，`RenderNode` 稳定帧） | 修复前 | 修复后 |
+|---|---|---|
+| `input` 5,000 字符 | 54 ms / 12.9 MB / 帧 | **0.05 ms / 0.003 MB** / 帧 |
+| `input` 10,000 字符 | 213 ms / 50.8 MB / 帧 | **0.10 ms / 0.003 MB** / 帧 |
+| `input` 20,000 字符 | 860 ms / 201 MB / 帧 | **0.16 ms / 0.003 MB** / 帧 |
+| `input` 1,000,000 字符 | （O(n²)，未在可接受时间内跑完） | **7.5 ms / 0.003 MB** / 帧 |
+| `select` 1,000 字符 option | 2.5 ms / 0.51 MB / 帧 | **<0.01 ms / 0.001 MB** / 帧 |
+| `select` 4,000 字符 option | 33.9 ms / 8.17 MB / 帧 | **<0.01 ms / 0.004 MB** / 帧 |
+| `select` 200,000 字符 option | （O(n²)，同上） | **0.33 ms / 0.20 MB** / 帧 |
+
+- **`inputVisibleWindow`**：`[]rune` + 「每步重量整串」改成**字节游标 + 单字宽
+  累加**。逐 rune 推进的判据与旧实现逐字一致（同样是「累计单字宽不超过
+  target 的最长前缀」，「至少留最后一个 rune」「单字宽 ≤0 立即停」两处边界
+  原样保留），循环结束只对可见窗口量一次；单字宽按 rune 缓存，实际度量次数
+  只与「不同字符数」有关。保尾分支（未定位/`target == maxScroll`）仍逐字补
+  舍，但首轮已把窗口推到 `avail` 附近，通常 0~2 次。
+- **`clipTailToWidth`**（新助手，`form_render.go`）：select 截断与 SVG 导出的
+  输入尾部截断共用——先指数探测超限位置，再在 `(lo,hi]` 内二分，度量次数
+  O(log 可见字符数)，与整串长度无关；「至少保留 1 个 rune」与旧口径一致。
+- **去每帧全文 `[]rune`**：渲染光标前缀改按字节切（`val[:runeByteIndex(val,
+  c-cut)]`，仍用 `g.MeasureText` 的两档口径，不改光标宽口径）；选区矩形同理
+  用 `prefixWidth` + 字节切（`textPrefixWidth` 随之删除）；非法 UTF-8 在
+  `inputVisibleWindow` 入口一次性 `string([]rune(full))` 消毒，保持旧 U+FFFD
+  口径。
+- 正确性：临时写入新旧实现逐项比对的随机化用例（4,000 组 input、3,000 组
+  select，含 ASCII/CJK/组合附加符/非法 UTF-8/password/button/负宽度/
+  `textScrollSet` 各态）——`text`/`cut`/`tw`/`th` 与截断结果全部一致，验完即删；
+  `examples/ua` 与 `examples/notepad` 的 `-dump-svg` 与上一提交**逐字节一致**
+  （SHA256）。
+
 ## v0.5.0 — 2026-10-28
 
 **大文档性能与交互响应**。以 714KB / 65,080 节点（27,501 元素 + 37,579 文本）

@@ -596,14 +596,10 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 	// 字符按控件内盒裁掉（render.go 的 textClip），dump 同口径「看不见就不
 	// 导出」——从尾部舍掉溢出字符（按钮型 auto 宽恰好放得下，不触发）。
 	if !buttonLike && base.width > 0 && w > base.width-4 {
-		runes := []rune(val)
-		for len(runes) > 1 {
-			if tw, _ := fakeMeasureText(string(runes), fs); tw <= base.width-4 {
-				break
-			}
-			runes = runes[:len(runes)-1]
-		}
-		val = string(runes)
+		val = clipTailToWidth(val, base.width-4, func(s string) int {
+			tw, _ := fakeMeasureText(s, fs)
+			return tw
+		})
 		w, h = fakeMeasureText(val, fs)
 	}
 	tx := base.x

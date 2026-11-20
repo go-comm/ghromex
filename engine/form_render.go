@@ -23,21 +23,50 @@ func isFormControl(b *htmlElement) bool {
 // 实测 auto 宽 select 把自己的值截成 "Alph"）。
 const selectArrowWidth = 16
 
+// clipTailToWidth 返回 s 的最长前缀（按 rune 边界切，至少保留 1 个 rune），
+// 使 measure 后的宽度不超过 avail。旧实现「从尾部每舍一个 rune 就把剩下的
+// 整串重新量一遍」是 O(n²)——4000 字符的 option 每帧 34ms，更长的值直接卡死。
+// 这里先指数探测宽度超限的位置，再在小窗口内二分，度量次数只与可见字符数 k
+// 有关（O(log k)），与整串长度无关。绘制与 SVG 导出共用同一助手，保证两处
+// 截断结果一致。
+func clipTailToWidth(s string, avail int, measure func(string) int) string {
+	n := runeLen(s)
+	if n == 0 {
+		return s
+	}
+	lo, hi := 0, 1
+	for hi < n && measure(s[:runeByteIndex(s, hi)]) <= avail {
+		lo = hi
+		hi *= 2
+	}
+	if hi >= n {
+		hi = n
+		if measure(s) <= avail {
+			return s
+		}
+	}
+	for lo+1 < hi {
+		mid := (lo + hi) / 2
+		if measure(s[:runeByteIndex(s, mid)]) <= avail {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	if lo < 1 {
+		lo = 1 // 一个字符都放不下时保留首字（与旧实现「至少留一个」同口径）
+	}
+	return s[:runeByteIndex(s, lo)]
+}
+
 // selectDisplayClipped 按可用宽度截断 select 的显示文本（超宽舍尾保留头：
 // 光标不在 select 尾部）。绘制与 SVG 导出共用，保证同一控件两处文本一致
 // （此前导出全值、渲染截断，用 SVG 校验布局会误判）。
 func selectDisplayClipped(g Graphics, b *htmlElement, avail, size, weightNum int, bold bool, family string) string {
-	val := selectDisplayText(b)
-	runes := []rune(val)
-	for len(runes) > 1 {
-		tw, _ := measureTextW(g, val, size, weightNum, bold, family)
-		if tw <= avail {
-			break
-		}
-		runes = runes[:len(runes)-1]
-		val = string(runes)
-	}
-	return val
+	return clipTailToWidth(selectDisplayText(b), avail, func(s string) int {
+		w, _ := measureTextW(g, s, size, weightNum, bold, family)
+		return w
+	})
 }
 
 // renderSelectValue 绘制 select 收起态的选中文本与右侧下拉箭头。

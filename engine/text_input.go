@@ -690,12 +690,16 @@ func onDocumentKeyDown(doc HTMLDocument, key int) bool {
 // 点击可见区会把光标定位到不可见的前缀里，随后插入的字符落到错误位置。
 func inputVisibleWindow(g Graphics, b *htmlElement, px, weightNum int, bold bool, family string) (text string, cut, tw, th int) {
 	full := displayValue(b)
-	runes := []rune(full)
-	total := len(runes) // 舍头前的完整 rune 数，cut 由它推算
+	if !utf8.ValidString(full) {
+		// 非法 UTF-8：旧实现经 []rune 消毒（坏字节 → U+FFFD）。先消毒一次，
+		// 后面按字节游标切窗口才能与旧口径逐字节一致；正常输入不付这笔钱。
+		full = string([]rune(full))
+	}
 	tw, th = measureTextW(g, full, px, weightNum, bold, family)
 	// 按钮型不截断：auto 宽按 value 文本测量（Chrome 同语义）。
 	typ := strings.ToLower(b.GetAttribute("type"))
 	buttonLike := typ == "submit" || typ == "reset" || typ == "button"
+	start := 0 // 窗口起点的字节下标（恒落在 rune 边界上）
 	if !buttonLike {
 		avail := b.width - 4
 		maxScroll := tw - avail
@@ -718,20 +722,53 @@ func inputVisibleWindow(g Graphics, b *htmlElement, px, weightNum int, bold bool
 		// 不再强制舍满——保头（target=0）必须能看到首字。
 		// 例外：保尾（target == maxScroll，含未定位默认）向上取整，保证末字完整可见
 		// —— Chrome 的 max scroll 将窗口钉在文本末尾，旧口径同样“末尾完整可见”。
+		//
+		// 按字节游标逐 rune 推进：旧实现每舍一个字都把剩下的整串重新度量
+		// 一遍（20k 字符的 value 每帧 0.9 秒、200MB 分配），是 O(n²)。这里
+		// 单字宽按 rune 缓存后累加，循环结束只对可见窗口量一次；同一段文本
+		// 里重复字符极多（19MB 源码也就百来个不同字符），实际度量次数因此
+		// 只与「不同字符数」有关。
 		dropped := 0
-		for len(runes) > 1 {
-			cw, _ := measureTextW(g, string(runes[0]), px, weightNum, bold, family)
+		var wcache map[rune]int
+		if len(full) > 256 {
+			wcache = make(map[rune]int, 64)
+		}
+		for start < len(full) {
+			r, sz := utf8.DecodeRuneInString(full[start:])
+			if sz <= 0 || start+sz >= len(full) {
+				break // 至少保留最后一个 rune（旧口径 len(runes) > 1）
+			}
+			cw, cached := 0, false
+			if wcache != nil {
+				cw, cached = wcache[r]
+			}
+			if !cached {
+				cw, _ = measureTextW(g, full[start:start+sz], px, weightNum, bold, family)
+				if wcache != nil {
+					wcache[r] = cw
+				}
+			}
 			if cw <= 0 || dropped+cw > target {
 				break
 			}
-			runes = runes[1:]
+			start += sz
 			dropped += cw
-			tw, th = measureTextW(g, string(runes), px, weightNum, bold, family)
+		}
+		if start > 0 {
+			// 窗口宽/高按实际可见子串量一次（旧实现在循环里每步都量，结果
+			// 同口径，只是白花时间）。
+			tw, th = measureTextW(g, full[start:], px, weightNum, bold, family)
 		}
 		if target == maxScroll {
-			for len(runes) > 1 && tw > avail {
-				runes = runes[1:]
-				tw, th = measureTextW(g, string(runes), px, weightNum, bold, family)
+			// 保尾（含未定位默认）：窗口仍超宽时继续舍头，直到末字完整可见。
+			// 首轮已把窗口推到 avail 附近，这里通常 0~2 次。
+			for start < len(full) && tw > avail {
+				_, sz := utf8.DecodeRuneInString(full[start:])
+				if sz <= 0 || start+sz >= len(full) {
+					break
+				}
+				start += sz
+				tw, th = measureTextW(g, full[start:], px, weightNum, bold, family)
 			}
 		}
 	}
@@ -740,7 +777,7 @@ func inputVisibleWindow(g Graphics, b *htmlElement, px, weightNum int, bold bool
 	if decl := resolvedLineHeight(b.computed); decl >= 0 {
 		th = decl
 	}
-	return string(runes), total - len(runes), tw, th
+	return full[start:], runeLen(full[:start]), tw, th
 }
 
 // controlLayout 返回当前控件的行布局：textarea 为折行结果，

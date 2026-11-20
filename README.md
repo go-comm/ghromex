@@ -1063,6 +1063,39 @@ padding/opacity/overflow…），所以凡是「拿 computed 判盒」的地方�
 折 19.5MB）。这属于「增量折行」范畴，不在本次范围；本次只把「一次重折行」和
 「一次编辑」本身的常数因子压下来。
 
+### input / select 的可见窗口：从 O(n²) 到 O(n)
+
+同一类坑在其它控件里也有，且更糟——`inputVisibleWindow` 与 `selectDisplayClipped`
+判「舍到哪」时，**每舍掉一个字符就把剩下的整串重新量一遍**，2 倍长度 → 4 倍
+开销；`input` 还在渲染路径里每帧无条件 `[]rune(displayValue)`。日常值很短所以
+没暴露，长值直接卡死（19MB 的 `input` value 首帧 15 分钟没跑完）。
+
+| 场景（1024×720 无头视口，稳定帧 `RenderNode`） | 修复前 | 修复后 |
+|---|---|---|
+| `input` 5,000 字符 | 54 ms / 12.9 MB / 帧 | **0.05 ms / 0.003 MB** |
+| `input` 10,000 字符 | 213 ms / 50.8 MB / 帧 | **0.10 ms / 0.003 MB** |
+| `input` 20,000 字符 | 860 ms / 201 MB / 帧 | **0.16 ms / 0.003 MB** |
+| `input` 1,000,000 字符 | O(n²)，跑不完 | **7.5 ms / 0.003 MB** |
+| `select` 1,000 字符 option | 2.5 ms / 0.51 MB / 帧 | **<0.01 ms / 0.001 MB** |
+| `select` 4,000 字符 option | 33.9 ms / 8.17 MB / 帧 | **<0.01 ms / 0.004 MB** |
+| `select` 200,000 字符 option | O(n²)，跑不完 | **0.33 ms / 0.20 MB** |
+
+三处改动：
+
+1. **字节游标 + 单字宽累加**（`inputVisibleWindow`）：不再 materialize `[]rune`，
+   也不用「丢一字重测整串」。判据与旧实现逐字一致（累计单字宽 ≤ target 的最长
+   前缀、至少留最后一个 rune、单字宽 ≤0 立即停），单字宽按 rune 缓存，度量次数
+   只与「不同字符数」有关；窗口宽只在循环结束后量一次。`cut` 仍是 rune 下标。
+2. **`clipTailToWidth`**（select 截断与 SVG 导出的输入尾部截断共用）：指数探测
+   出超限位置后在小窗口内二分，度量次数 O(log 可见字符数)，与整串长度无关。
+3. **去掉每帧全文 `[]rune`**：光标前缀与选区矩形都改按 rune 边界切字节
+   （`runeByteIndex`），非法 UTF-8 只在入口消毒一次。
+
+正确性用「新旧实现逐项比对」的随机化用例钉住（4,000 组 input / 3,000 组
+select，含 CJK、组合附加符、非法 UTF-8、password/button、负宽度与各种
+`textScrollSet` 状态，比 `text`/`cut`/`tw`/`th` 与截断结果），并用
+`examples/ua`、`examples/notepad` 的 `-dump-svg` 与上一提交做 SHA256 逐字节比对。
+
 
 ### 内存：差异在原生侧，不在引擎侧
 

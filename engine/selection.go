@@ -243,38 +243,26 @@ func prefixWidth(g Graphics, s string, px, weightNum int, bold bool, family stri
 	return w
 }
 
-// textPrefixWidth 返回 runes 前 n 个字符的像素宽（n 已由调用方夹紧）。
-func textPrefixWidth(g Graphics, runes []rune, n, px, weightNum int, bold bool, family string) int {
-	if n <= 0 {
-		return 0
-	}
-	if n > len(runes) {
-		n = len(runes)
-	}
-	w, _ := measureTextW(g, string(runes[:n]), px, weightNum, bold, family)
-	return w
-}
-
 // inputSelectionRects 计算单行 input 的选区高亮矩形。val 是已经按
 // inputVisibleWindow 舍头保尾后的可见文本，cut 是它在完整显示值中的
 // 起始下标——高亮前缀宽必须与渲染文本同口径，否则超宽输入的选区会
 // 整体偏移到被裁掉的前缀上。
 func inputSelectionRects(g Graphics, val string, cut, tx, ty, th, px, weightNum int,
 	bold bool, family string, lo, hi int) []clipRect {
-	runes := []rune(val)
 	from := lo - cut
 	to := hi - cut
 	if from < 0 {
 		from = 0
 	}
-	if to > len(runes) {
-		to = len(runes)
+	if n := runeLen(val); to > n {
+		to = n
 	}
 	if from >= to {
 		return nil
 	}
-	x1 := tx + textPrefixWidth(g, runes, from, px, weightNum, bold, family)
-	x2 := tx + textPrefixWidth(g, runes, to, px, weightNum, bold, family)
+	// 前缀按 rune 边界切字节再量（不 materialize []rune[val]）。
+	x1 := tx + prefixWidth(g, val[:runeByteIndex(val, from)], px, weightNum, bold, family)
+	x2 := tx + prefixWidth(g, val[:runeByteIndex(val, to)], px, weightNum, bold, family)
 	if x2 <= x1 {
 		return nil
 	}

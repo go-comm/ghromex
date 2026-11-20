@@ -553,7 +553,6 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 					textClip = pushClip(g, bx+bd[eLeft], by+bd[eTop],
 						bw-bd[eLeft]-bd[eRight], bh-bd[eTop]-bd[eBottom])
 				}
-				fullRunes := []rune(displayValue(base))
 				// 按钮型 value 文本水平居中（对齐 Chrome 按钮文字）；按钮型
 				// 不截断（auto 宽已按 value 外盒测量），故此处不会被裁短。
 				buttonLike := typ == "submit" || typ == "reset" || typ == "button"
@@ -596,9 +595,12 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 						cc = NewColor(0, 0, 0, 255)
 					}
 					cx := tx + tw
-					if c := base.caret; c >= 0 && c < len(fullRunes) {
+					// 光标下标是完整显示值（未舍头）的 rune 下标；可见窗口里
+					// 落在 [cut, cut+runeLen(val)) 时才按可见前缀宽度定位，
+					// 落在被裁掉的前缀里则贴左缘。
+					if c := base.caret; c >= 0 && c < cut+runeLen(val) {
 						if c > cut {
-							pw, _ := g.MeasureText(string(fullRunes[cut:c]), size, p.Bold(), p.FontFamily())
+							pw, _ := g.MeasureText(val[:runeByteIndex(val, c-cut)], size, p.Bold(), p.FontFamily())
 							cx = tx + pw
 						} else {
 							cx = tx
