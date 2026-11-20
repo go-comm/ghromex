@@ -130,6 +130,40 @@ credits 页累计 **503 → 230.8ms（−54%）**、分配 **1762 → 10.9MB（�
 /超上下标用例全绿；行为口径不变：`examples/ua`、`examples/notepad` 的 `-dump-svg`
 与 `688c360` 基线逐字节一致（SHA256 全等）。
 
+**就地写槽位：行盒与 runs 不再经栈上临时副本，重排 231 → 188ms**。上一轮之后
+`-list` 出行级 profile，两处热点都是「先构造再整份拷贝」：
+
+- `addPreToken` 里 `append(curLine, lineItem{...})` 占该函数 62% 的 flat：
+  `lineItem` 有 120B，编译器先在栈上构造一份、再整份拷进底层数组，每 token
+  两趟写内存（全页 450 万 token ≈ 1GB 搬运）。
+- `flushLine` 落位循环里 `append(runs, textRun{...})` 占该函数 71% 的 flat，
+  同样的形状（`textRun` 56B）。
+
+改成「先预留槽位、再逐字段写进去」：容量够就 `curLine = curLine[:n+1]`，
+不够才走 `append`（只为拿到扩容），然后 `it := &curLine[n]` 逐字段赋值。
+**必须写全每一个字段**（缓冲跨轮复用，槽位里可能留着上一轮的旧值）。
+
+- 试过 `*pushLineSlot() = lineItem{...}` 的统一写法（结构体字面量没写到的字段
+  自动为零值，将来加字段不会漏）——**更慢**：credits 197 → 215ms，编译器仍按
+  「栈上构造 + 整份拷贝」处理。因此保留逐字段写法，并在代码里注明这个坑。
+- 扩容判断写在原地而不是抽成闭包：闭包返回 `*lineItem` 会让 `curLine` 的
+  扩容逃逸分析变差。
+- 只改写入方式，不改任何值：runs/lineItem 的内容与逐字段赋值前完全一致，
+  故 SVG 仍逐字节相同。
+
+同口径对比（无头探针，稳定态单次 `LayoutDocument` 的耗时 / 分配）：
+
+| 场景 | 收敛旁路+指针化 | + 就地写槽位 |
+|---|---|---|
+| 真实 credits 页（19.5MB / 780 `<pre>`） | 230.8ms / 10.9MB | **187.8ms / 10.9MB** |
+| 单节点 `<p>` 1M 字符（可折行） | 17.3ms / 35.5MB | **16.5ms / 35.5MB** |
+| 单节点 `<pre>` 1M 字符（不折行） | 41.7ms / 255.6MB | **42ms / 255.6MB** |
+
+credits 页累计 **503 → 187.8ms（−63%）**、分配 **1762 → 10.9MB（−99.4%）**。
+`<pre>` 不折行的单节点场景在噪声内（该场景的账在 `curLine` 超 `maxLineScratch`
+不保留、每轮重新 grow 的 255MB 分配上）。行为口径不变：`examples/ua`、
+`examples/notepad` 的 `-dump-svg` 与 `688c360` 基线逐字节一致（SHA256 全等）。
+
 **修复：大文本 textarea 打开即涨到 400MB（实测常驻 400MB+ → 105MB）**。
 用 `examples/notepad` 打开 19.5MB 的 `LICENSES.chromium.html`（360,214 行），
 内存涨到 400MB 且编辑时继续上冲。纯引擎探针（不跑 notepad 代码，只

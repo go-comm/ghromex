@@ -1215,6 +1215,55 @@ credits 页累计 **503 → 230.8ms（−54%）**、分配 **1762 → 10.9MB（�
 与 `688c360` 基线逐字节一致（SHA256 全等）。
 
 
+### 就地写槽位（阶段二后续二）：重排 231 → 188ms
+
+`go tool pprof -list` 出行级 profile 后，两处热点都是同一个形状——「先在栈上
+构造结构体、再整份拷进切片」：
+
+| 位置 | 结构体 | 该行列的 flat |
+|---|---|---|
+| `addPreToken` 的 `append(curLine, lineItem{...})` | 120B | 270ms / 该函数 430ms 的 62% |
+| `flushLine` 落位的 `append(runs, textRun{...})` | 56B | 210ms / 该函数 270ms 的 71% |
+
+`append` 带结构体字面量时编译器不能就地构造：先在栈上写一份（含零初始化），
+再 memmove 进底层数组，每 token 两趟写内存。全页 450 万 token 就是约 1GB 的
+纯搬运。改成**先预留槽位、再逐字段写进去**：
+
+```go
+if len(curLine) < cap(curLine) {
+    curLine = curLine[:len(curLine)+1]
+} else {
+    curLine = append(curLine, lineItem{}) // 只为拿到扩容
+}
+it := &curLine[len(curLine)-1]
+it.tn, it.el, it.token = tn, nil, tok
+it.x, it.y, it.w = cursorX, cursorY, w
+// ……全部字段都要写
+```
+
+- **必须写全每一个字段**：`curLine`/`runs` 的底层数组跨轮复用（阶段一），槽位里
+  留着上一轮的值，漏一个字段就是读到旧 token / 旧坐标。
+- **`*slot = lineItem{...}` 的写法更慢**：试过把它包成 `pushLineSlot()` 返回指针、
+  调用方写一个结构体字面量（没写到的字段自动零值，将来加字段不会漏）——实测
+  credits **197 → 215ms**，编译器仍按「栈上构造 + 整份拷贝」处理，等于没省。
+  所以保留逐字段写法，并在代码注释里写明这个坑。
+- **不抽成闭包**：`pushLineSlot` 作为闭包会让 `curLine` 的扩容写回跨函数边界，
+  内联不进去；就地写判断反而更快。
+- 只改「怎么写」，不改「写什么」：值与改前逐项相同，所以 SVG 仍逐字节一致。
+
+同口径对比（无头探针，稳定态单次 `LayoutDocument` 的耗时 / 分配）：
+
+| 场景 | 收敛旁路+指针化 | + 就地写槽位 |
+|---|---|---|
+| 真实 credits 页（19.5MB / 780 `<pre>`） | 230.8ms / 10.9MB | **187.8ms / 10.9MB** |
+| 单节点 `<p>` 1M 字符（可折行） | 17.3ms / 35.5MB | **16.5ms / 35.5MB** |
+| 单节点 `<pre>` 1M 字符（不折行） | 41.7ms / 255.6MB | **42ms / 255.6MB** |
+
+credits 页累计 **503 → 187.8ms（−63%）**、分配 **1762 → 10.9MB（−99.4%）**。
+`<pre>` 不折行的单节点场景在噪声内——那 255MB 的账是 `curLine` 超过
+`maxLineScratch`（4096 项）不保留、每轮重新 grow，与写入方式无关。
+
+
 ### 内存：差异在原生侧，不在引擎侧
 
 

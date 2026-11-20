@@ -934,9 +934,25 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				return
 			}
 		}
-		curLine = append(curLine, lineItem{tn: pendingTN, token: " ",
-			x: cursorX, y: cursorY, w: spaceW, asc: spaceAsc, desc: spaceDesc,
-			leadAsc: spaceLeadAsc, leadDesc: spaceLeadDesc})
+		// 间隙空格也写进槽位（见 addPreToken 的说明：逐字段写才避免整份拷贝）。
+		if len(curLine) < cap(curLine) {
+			curLine = curLine[:len(curLine)+1]
+		} else {
+			curLine = append(curLine, lineItem{})
+		}
+		it := &curLine[len(curLine)-1]
+		it.tn = pendingTN
+		it.el = nil
+		it.token = " "
+		it.x = cursorX
+		it.y = cursorY
+		it.w = spaceW
+		it.asc = spaceAsc
+		it.desc = spaceDesc
+		it.leadAsc = spaceLeadAsc
+		it.leadDesc = spaceLeadDesc
+		it.shift = 0
+		it.valign = VerticalAlignBaseline
 		cursorX += spaceW
 		if spaceLeadAsc > lineAsc {
 			lineAsc = spaceLeadAsc
@@ -1043,10 +1059,22 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			// 行盒高度，故不影响行距与盒尺寸）。
 			y := it.y + dy + (asc - it.asc - it.shift) + baselineAdjust
 			if it.tn != nil {
-				it.tn.node.runs = append(it.tn.node.runs, textRun{
-					text: it.token, x: it.x + dx, y: y, w: it.w, h: it.asc + it.desc,
-					asc: it.asc,
-				})
+				// 同 addPreToken：直接写进 runs 的槽位，避免 56B 的 textRun
+				// 先在栈上构造再拷进底层数组（每 token 一项，全页 450 万项）。
+				runs := it.tn.node.runs
+				if len(runs) < cap(runs) {
+					runs = runs[:len(runs)+1]
+				} else {
+					runs = append(runs, textRun{})
+				}
+				r := &runs[len(runs)-1]
+				r.text = it.token
+				r.x = it.x + dx
+				r.y = y
+				r.w = it.w
+				r.h = it.asc + it.desc
+				r.asc = it.asc
+				it.tn.node.runs = runs
 			} else if it.el != nil {
 				if dy := y - it.y; dy != 0 {
 					shiftBox(it.el, 0, dy)
@@ -1093,9 +1121,30 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 		asc, desc := fontMetricsW(g, tok, fontPx, weightNum, bold, family)
 		leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
-		curLine = append(curLine, lineItem{tn: tn, token: tok,
-			x: cursorX, y: cursorY, w: w, asc: asc, desc: desc,
-			leadAsc: leadAsc, leadDesc: leadDesc})
+		// 直接写进缓冲槽位：lineItem 有 120B，`append(curLine, lineItem{...})`
+		// 会先在栈上构造一份再整份拷进底层数组——每 token 两趟写内存，全页
+		// 450 万 token 就是 1GB 的纯搬运。这里手动扩容后逐字段写，**所有字段
+		// 都要写全**：缓冲跨轮复用，槽位里可能留着上一轮的旧值。用结构体字面量
+		// `*it = lineItem{...}` 会退化成同款栈上构造+整份拷贝（实测 credits
+		// 197 → 215ms），逐字段写才让编译器直接落进槽位。
+		if len(curLine) < cap(curLine) {
+			curLine = curLine[:len(curLine)+1]
+		} else {
+			curLine = append(curLine, lineItem{})
+		}
+		it := &curLine[len(curLine)-1]
+		it.tn = tn
+		it.el = nil
+		it.token = tok
+		it.x = cursorX
+		it.y = cursorY
+		it.w = w
+		it.asc = asc
+		it.desc = desc
+		it.leadAsc = leadAsc
+		it.leadDesc = leadDesc
+		it.shift = 0
+		it.valign = VerticalAlignBaseline
 		cursorX += w
 		if leadAsc > lineAsc {
 			lineAsc = leadAsc
