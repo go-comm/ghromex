@@ -41,14 +41,31 @@ func selectionRange(b *htmlElement) (lo, hi int, ok bool) {
 	return a, c, true
 }
 
-// valueRunes 返回 value 属性的 rune 视图：textarea 布局后已有折行缓存，
-// 直接复用（大文本下省掉一次几十 MB 的 []rune 转换）；缓存不存在时
-// 只能转一次。只要长度的调用方请改用 valueRuneLen（零分配）。
-func valueRunes(b *htmlElement) []rune {
-	if b.wrap != nil {
-		return b.wrap.runes
+// valueText 返回 value 属性的 rune 区间 [lo,hi) 对应的文本（lo/hi 由调用方
+// 夹紧）：textarea 布局后已有折行缓存，按行表把 rune 下标换算成字节下标
+// 后切子串（不复制、也不必先 materialize 整篇 []rune——19.5MB 的值一次
+// []rune 就是 80MB）；缓存不存在时退回旧口径 []rune 切片。
+//
+// 只要长度的调用方请改用 valueRuneLen（零分配）。
+func valueText(b *htmlElement, lo, hi int) string {
+	if w := b.wrap; w != nil {
+		blo, bhi := w.byteIndexOf(lo), w.byteIndexOf(hi)
+		if bhi <= blo {
+			return ""
+		}
+		return w.value[blo:bhi]
 	}
-	return []rune(b.GetAttribute("value"))
+	r := []rune(b.GetAttribute("value"))
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > len(r) {
+		hi = len(r)
+	}
+	if hi <= lo {
+		return ""
+	}
+	return string(r[lo:hi])
 }
 
 // SelectedText 返回聚焦输入当前选中的文本。第二个返回值为 false 表示
@@ -71,8 +88,7 @@ func SelectedText(doc HTMLDocument) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	r := valueRunes(b)
-	return string(r[lo:hi]), true
+	return valueText(b, lo, hi), true
 }
 
 // SelectionLength 返回聚焦输入当前选区的 rune 数，第二个返回值为 false
@@ -218,6 +234,15 @@ func OnDocumentMouseUp(doc HTMLDocument) {
 	SetActiveElement(doc, nil)
 }
 
+// prefixWidth 返回一段前缀文本的像素宽（文本由调用方从 value 子串切好）。
+func prefixWidth(g Graphics, s string, px, weightNum int, bold bool, family string) int {
+	if s == "" {
+		return 0
+	}
+	w, _ := measureTextW(g, s, px, weightNum, bold, family)
+	return w
+}
+
 // textPrefixWidth 返回 runes 前 n 个字符的像素宽（n 已由调用方夹紧）。
 func textPrefixWidth(g Graphics, runes []rune, n, px, weightNum int, bold bool, family string) int {
 	if n <= 0 {
@@ -294,9 +319,9 @@ func textareaSelectionRects(g Graphics, b *htmlElement, l textareaLayout,
 		if to > ln.end {
 			to = ln.end
 		}
-		runes := l.lineRunes(ln)
-		x1 := l.x + textPrefixWidth(g, runes, from-ln.start, px, weightNum, bold, family)
-		x2 := l.x + textPrefixWidth(g, runes, to-ln.start, px, weightNum, bold, family)
+		// 前缀宽与渲染同源：都从 value 的子串上量，不再 materialize 行 rune。
+		x1 := l.x + prefixWidth(g, l.linePrefix(ln, from-ln.start), px, weightNum, bold, family)
+		x2 := l.x + prefixWidth(g, l.linePrefix(ln, to-ln.start), px, weightNum, bold, family)
 		if hi > ln.end {
 			x2 = l.x + ln.w // 选区包含本行行尾（换行符/折行点）
 		}

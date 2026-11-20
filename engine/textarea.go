@@ -1,6 +1,9 @@
 package engine
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // textareaScrollbarWidth 是 textarea 覆盖式滚动条的宽度（px）：贴内容盒
 // 右缘绘制，叠在文本之上，不占布局宽度（折行口径不变）。
@@ -87,15 +90,22 @@ func textareaScrollTo(doc HTMLDocument, b *htmlElement, y int) {
 // 当前字体现算，保证「编辑→绘制→点击回定位」三者口径一致。
 
 // textareaLine 一行折行结果。start/end 为 value 的 rune 下标：
-// [start,end) 即本行文本，行尾 '\n' 位于 end 处（属本行的行尾符）。
+// [start,end) 即本行文本，行尾 '\n' 位于 end 处（属本行的行尾符）——
+// 光标/选区/点击映射全都生活在这个 rune 空间里（对外口径不变）。
 //
-// 行文本不随行存储：由 textareaLayout 的 runes 按区间现切（零拷贝切片，
-// 绘制/导出时才落成 string）。旧实现每折一行就 string(cur) 复制一份，
-// 19.5MB 的 textarea 每帧要复制 8 遍全文，实测单帧分配 1.3GB。
+// bstart/bend 是同一区间的**字节**下标：行文本 = value[bstart:bend]，
+// 绘制/度量时直接切子串，既不必随行存一份文本副本，也不必先 materialize
+// 整篇 []rune（19.5MB 全文 → 80MB）。CRLF 的行文本区间同样不含 '\r'/'\n'：
+// 空行的 start==end 时 bstart==bend。
+//
+// 注意 rune 区间与字节区间并不满足 end-start == bend-bstart（非 ASCII），
+// 所以两个维度都要记账；rune 下标 → 字节下标的换算以行表为锚做行内 walk。
 type textareaLine struct {
-	start int
-	end   int
-	w     int
+	start  int
+	end    int
+	bstart int
+	bend   int
+	w      int
 }
 
 // textareaWrap 是 textarea 的折行缓存（挂在 htmlElement.wrap）。
@@ -107,7 +117,13 @@ type textareaLine struct {
 // 把整个缓存置 nil（见 html_element.go），其余维度在取用时比签名。
 type textareaWrap struct {
 	sig   textareaWrapSig
-	runes []rune         // value 的 rune 视图（行区间的编号空间）
+	value string // 折行所用的值（合法 UTF-8；见 layoutTextarea 的消毒）
+	n     int    // value 的 rune 总数：光标/选区下标的上界，取末行 end
+	// exact 表示 value 就是 value 属性那串字节本身（没有因非法 UTF-8 改写）。
+	// 只有 exact 时行表的字节下标才能直接用于拼接原属性串；
+	// 否则（属性里混着非法字节）编辑路径退回旧的 []rune 口径。
+	exact bool
+
 	lines []textareaLine // 折行结果
 }
 
@@ -130,33 +146,104 @@ type textareaLayout struct {
 	asc    int // 基线以上高度（文本装饰定位用）
 	scroll int
 	lines  []textareaLine
-	runes  []rune // lines 的区间编号空间（textarea 的值 / input 的显示值）
-}
-
-// lineRunes 返回一行的 rune 视图：直接切片，不复制。
-func (l textareaLayout) lineRunes(ln textareaLine) []rune {
-	if ln.start < 0 || ln.end > len(l.runes) || ln.end <= ln.start {
-		return nil
-	}
-	return l.runes[ln.start:ln.end]
+	value  string // lines 的字节来源（textarea 的值 / input 的显示值）
 }
 
 // lineText 返回一行的显示文本（绘制/SVG 导出用；空行返回空串）。
+//
+// 直接切 value 的子串，零拷贝：旧实现先 materialize 整篇 []rune 再
+// string(runes[start:end])，19.5MB 全文每次布局要复制 8 遍。子串共享
+// 值的底层数组——两个按字符串建键的后端缓存（measureKey/texKey）确实会
+// 因此多留一会儿旧值的底层数组，但那是有限的：键只比内容，且再跑一遍
+// 全文（24 万行）就随缓存整体清空换到新值上，不会越积越多。
 func (l textareaLayout) lineText(ln textareaLine) string {
-	rn := l.lineRunes(ln)
-	if rn == nil {
+	if ln.bstart < 0 || ln.bend > len(l.value) || ln.bend <= ln.bstart {
 		return ""
 	}
-	return string(rn)
+	return l.value[ln.bstart:ln.bend]
+}
+
+// linePrefix 返回一行前 n 个 rune 的文本（n 为行内 rune 列数，越界自动
+// 夹紧；度量前缀宽度用，与 lineText 同源自同一 value 子串）。
+func (l textareaLayout) linePrefix(ln textareaLine, n int) string {
+	txt := l.lineText(ln)
+	if n <= 0 || txt == "" {
+		return ""
+	}
+	if cnt := ln.end - ln.start; n >= cnt {
+		return txt
+	}
+	return txt[:runeByteIndex(txt, n)]
+}
+
+// runeByteIndex 返回 s 的前 n 个 rune 占用的字节数（n 超过 rune 数则
+// 返回 len(s)）。合法 UTF-8 前提下逐 rune 走；纯 ASCII 时一步一字节，
+// 不碰 DecodeRune。
+func runeByteIndex(s string, n int) int {
+	if n <= 0 {
+		return 0
+	}
+	for i := 0; i < len(s); {
+		if s[i] < utf8.RuneSelf {
+			i++
+		} else {
+			_, sz := utf8.DecodeRuneInString(s[i:])
+			i += sz
+		}
+		n--
+		if n == 0 {
+			return i
+		}
+	}
+	return len(s)
+}
+
+// byteIndexOf 把 value 的 rune 下标换算成字节下标：先按行表二分定行，
+// 再在行内 walk（一行的 rune 数受 maxW 限制，最长也就几百）。
+// 输入 pos 必须在 [0, n] 内（调用方已夹紧）。
+func (w *textareaWrap) byteIndexOf(pos int) int {
+	if pos <= 0 || len(w.lines) == 0 {
+		return 0
+	}
+	if pos >= w.n {
+		return len(w.value)
+	}
+	row := caretRow(w.lines, pos)
+	ln := w.lines[row]
+	if pos >= ln.start {
+		if pos == ln.end {
+			return ln.bend
+		}
+		return ln.bstart + runeByteIndex(w.value[ln.bstart:ln.bend], pos-ln.start)
+	}
+	// pos < ln.start：只会落在上一行行尾符的空隙里（CRLF 的 '\n' 不属于
+	// 任何行文本），空隙由单字节 '\r'/'\n' 组成，按个数直接偏移即可。
+	if row > 0 {
+		prev := w.lines[row-1]
+		if gap := pos - prev.end; gap >= 1 {
+			return prev.bend + gap
+		}
+	}
+	return 0
 }
 
 // wrapTextarea 按 maxW 贪心折行：'\n' 强制断行，行末优先在空格处回退
 // 断行，超长单词硬切。始终至少返回一行（空值也返回空行，供光标落位）。
 //
-// runes 为调用方缓存的 value 的 rune 切片（本函数不持有副本）：大文本
-// textarea 的值可达几十 MB，每次布局重新 []rune(value) 会把堆打爆。
-// 行文本不在此生成——消费方按 rune 区间现切。
-func wrapTextarea(g Graphics, runes []rune, maxW, fontPx, weightNum int, bold bool, family string) []textareaLine {
+// value 为折行所用的值（合法 UTF-8，见 layoutTextarea 的消毒），本函数
+// 不持有副本也不复制全文：逐 rune 走一遍字节串，同时记下每行的 rune
+// 区间（光标/选区口径）与字节区间（行文本零拷贝切片）。
+//
+// 旧实现吃 []rune(value)：19.5MB 的值每次布局都要 materialize 80MB 的
+// rune 切片，折行本身又只是逐字节走一遍，纯属白花。
+func wrapTextarea(g Graphics, value string, maxW, fontPx, weightNum int, bold bool, family string) []textareaLine {
+	return wrapTextareaInto(g, value, maxW, fontPx, weightNum, bold, family, nil)
+}
+
+// wrapTextareaInto 是 wrapTextarea 的可复用版本：结果追加进 dst（调用方
+// 预分配好容量，避免大表 append 翻倍时的重拷贝）。dst 为 nil 时等价于
+// wrapTextarea。
+func wrapTextareaInto(g Graphics, value string, maxW, fontPx, weightNum int, bold bool, family string, dst []textareaLine) []textareaLine {
 	if g == nil {
 		g = NewFakeGraphics()
 	}
@@ -192,27 +279,39 @@ func wrapTextarea(g Graphics, runes []rune, maxW, fontPx, weightNum int, bold bo
 	}
 
 	var lines []textareaLine
-	start := 0
+	if dst != nil {
+		lines = dst[:0]
+	}
+	start := 0  // 当前行的 rune 起点
+	bstart := 0 // 当前行的字节起点
 	curW := 0
-	lastSpace := -1 // 当前行内最后一个空格的下标（绝对 rune 下标，断行回退点）
+	lastSpace := -1  // 当前行内最后一个空格的 rune 下标（断行回退点）
+	lastSpaceB := -1 // 同一空格的字节下标
 
-	// 行区间 [s,e) 的宽度：按区间现切字符串再度量，与旧实现（对整行字符串
-	// 一次 measure）口径一致。大文本下每行只切一次短串，分配量与行数同阶
-	// 而非与全文同阶。
-	segW := func(s, e int) int {
-		if e <= s {
+	// 行宽：按字节区间切子串再度量，与旧实现（对整行字符串一次 measure）
+	// 口径一致——量的是同一段文本，宽度自然相同。切的是 value 的子串，
+	// 不复制。
+	segW := func(bs, be int) int {
+		if be <= bs {
 			return 0
 		}
-		return measure(string(runes[s:e]))
+		return measure(value[bs:be])
 	}
 
-	// push 记录一行：文本区间 [s,e)，宽度 w。
-	push := func(s, e, w int) {
-		lines = append(lines, textareaLine{start: s, end: e, w: w})
+	// push 记录一行：rune 区间 [s,e) + 字节区间 [bs,be)，宽度 w。
+	push := func(s, e, bs, be, w int) {
+		lines = append(lines, textareaLine{start: s, end: e, bstart: bs, bend: be, w: w})
 	}
 
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
+	ri := 0 // 当前字符的 rune 下标
+	bi := 0 // 当前字符的字节下标
+	for bi < len(value) {
+		// ASCII 快路径：绝大多数字符是单字节，不必走 DecodeRuneInString。
+		r := rune(value[bi])
+		sz := 1
+		if r >= utf8.RuneSelf {
+			r, sz = utf8.DecodeRuneInString(value[bi:])
+		}
 		if r == '\r' {
 			// 兜底：value 由 SetAttribute 直接写入时可能没经过归一（正常路径
 			// SetValue/粘贴/解析都会先折成 '\n'）。CRLF 的 '\r' 交给后面的
@@ -221,53 +320,61 @@ func wrapTextarea(g Graphics, runes []rune, maxW, fontPx, weightNum int, bold bo
 			//
 			// 行文本改由区间现切后，'\r' 必须从区间里排除，否则会画出
 			// 行尾方块：区间收在 '\r' 之前，行尾符 '\n' 仍记在 end 处。
-			if i+1 < len(runes) && runes[i+1] == '\n' {
-				push(start, i, curW) // 区间收在 '\r' 之前：'\r'/'\n' 都不进行文本
-				i++                  // 连 '\n' 一起消费掉，否则下一轮多出一个空行
-				start = i + 1
+			if bi+1 < len(value) && value[bi+1] == '\n' {
+				push(start, ri, bstart, bi, curW) // 区间收在 '\r' 之前：'\r'/'\n' 都不进行文本
+				ri += 2                           // 连 '\n' 一起消费掉，否则下一轮多出一个空行
+				bi += 2
+				start, bstart = ri, bi
 				curW = 0
-				lastSpace = -1
+				lastSpace, lastSpaceB = -1, -1
 				continue
 			}
-			push(start, i, curW)
-			start = i + 1
+			push(start, ri, bstart, bi, curW)
+			ri++
+			bi++
+			start, bstart = ri, bi
 			curW = 0
-			lastSpace = -1
+			lastSpace, lastSpaceB = -1, -1
 			continue
 		}
 		if r == '\n' {
-			// 行尾符记在本行 end 处；下一行从其后开始（循环的 i++ 消费它）
-			push(start, i, curW)
-			start = i + 1
+			// 行尾符记在本行 end 处；下一行从其后开始
+			push(start, ri, bstart, bi, curW)
+			ri++
+			bi++
+			start, bstart = ri, bi
 			curW = 0
-			lastSpace = -1
+			lastSpace, lastSpaceB = -1, -1
 			continue
 		}
 		w := runeW(r)
-		if curW+w > maxW && i > start {
+		if curW+w > maxW && ri > start {
 			if lastSpace > start {
 				// 在最后一个空格处断行：空格**留在上一行末尾**（含在 keep 内），
 				// 下一行从空格之后开始。旧实现 keep=cur[:lastSpace] 把空格本身
 				// 漏在两行之外——显示文本比 value 少字符，且该 rune 不属于任何
 				// 行区间，光标映射随之错位。
-				keepEnd := lastSpace + 1 // 空格下标 lastSpace，空格留在行末 → end=lastSpace+1
-				push(start, keepEnd, segW(start, keepEnd))
-				start = keepEnd
-				curW = segW(start, i)
+				keepEnd := lastSpace + 1   // 空格下标 lastSpace，空格留在行末 → end=lastSpace+1
+				keepEndB := lastSpaceB + 1 // 空格是单字节 ASCII
+				push(start, keepEnd, bstart, keepEndB, segW(bstart, keepEndB))
+				start, bstart = keepEnd, keepEndB
+				curW = segW(bstart, bi)
 			} else {
-				push(start, i, curW)
-				start = i
+				push(start, ri, bstart, bi, curW)
+				start, bstart = ri, bi
 				curW = 0
 			}
-			lastSpace = -1
+			lastSpace, lastSpaceB = -1, -1
 		}
 		if r == ' ' {
-			lastSpace = i
+			lastSpace, lastSpaceB = ri, bi
 		}
 		curW += w
+		ri++
+		bi += sz
 	}
 	// 末行（值以 '\n' 结尾时是空行，光标可落位）
-	push(start, len(runes), curW)
+	push(start, ri, bstart, bi, curW)
 	return lines
 }
 
@@ -293,12 +400,33 @@ func layoutTextarea(g Graphics, el *htmlElement) textareaLayout {
 	// 这里只需在命中时直接复用 lines，未命中才重新 []rune(value)+折行——
 	// 避免每帧对 19.5MB 值做 80MB 的 rune 转换。
 	if el.wrap == nil || el.wrap.sig != sig {
+		value := el.GetAttribute("value")
+		exact := true
+		if !utf8.ValidString(value) {
+			// 非法 UTF-8：一次性消毒成 []rune 口径的串，与旧实现一致
+			// （旧实现每次布局都 []rune(value)，坏字节当场变成 U+FFFD）。
+			// 消毒后行表的字节下标属于这份副本，不能拿去拼原属性串，
+			// 故记 exact=false，编辑路径据此退回旧口径。
+			value = string([]rune(value))
+			exact = false
+		}
+		// 行表每次新建（不 in-place 复用旧数组）：onChanged 回调可能在
+		// 重折途中同步触发 Refresh，旧 textareaLayout 还持有旧行表，复用
+		// 同一底层数组会把它改花。预分配旧表的容量，省掉 append 翻倍
+		// 的十余次重拷贝（24 万行 ≈ 10MB 白扔）。
+		var dst []textareaLine
+		if el.wrap != nil && cap(el.wrap.lines) > 0 {
+			dst = make([]textareaLine, 0, cap(el.wrap.lines))
+		}
 		if el.wrap == nil {
 			el.wrap = &textareaWrap{}
 		}
 		el.wrap.sig = sig
-		el.wrap.runes = []rune(el.GetAttribute("value"))
-		el.wrap.lines = wrapTextarea(g, el.wrap.runes, maxW, px, weightNum, bold, family)
+		el.wrap.value = value
+		el.wrap.exact = exact
+		el.wrap.lines = wrapTextareaInto(g, value, maxW, px, weightNum, bold, family, dst)
+		// rune 总数取末行 end：末行始终是 [start, 全文rune数) 的 push。
+		el.wrap.n = el.wrap.lines[len(el.wrap.lines)-1].end
 	}
 	lines := el.wrap.lines
 	_, lh := measureTextW(g, "Mg", px, weightNum, bold, family)
@@ -335,7 +463,7 @@ func layoutTextarea(g Graphics, el *htmlElement) textareaLayout {
 	}
 	el.scrollTop = scroll
 	return textareaLayout{x: el.x, y: el.y - scroll, w: el.width, h: el.height,
-		lh: lh, asc: asc, scroll: scroll, lines: lines, runes: el.wrap.runes}
+		lh: lh, asc: asc, scroll: scroll, lines: lines, value: el.wrap.value}
 }
 
 // visibleRows 返回绘制盒 [boxY, boxY+boxH) 可能用到的首尾行下标（闭区间）。
@@ -389,15 +517,14 @@ func (l textareaLayout) caretXY(g Graphics, caret int, fontPx, weightNum int, bo
 	}
 	row := caretRow(l.lines, caret)
 	ln := l.lines[row]
-	txt := l.lineRunes(ln)
 	col := caret - ln.start
 	if col < 0 {
 		col = 0
 	}
-	if col > len(txt) {
-		col = len(txt)
+	if col > ln.end-ln.start {
+		col = ln.end - ln.start
 	}
-	w, _ := measureTextW(g, string(txt[:col]), fontPx, weightNum, bold, family)
+	w, _ := measureTextW(g, l.linePrefix(ln, col), fontPx, weightNum, bold, family)
 	return l.x + w, l.y + row*l.lh
 }
 
@@ -418,13 +545,13 @@ func (l textareaLayout) caretFromPoint(g Graphics, x, y int, fontPx, weightNum i
 		row = len(l.lines) - 1
 	}
 	ln := l.lines[row]
-	txt := l.lineRunes(ln)
-	if len(txt) == 0 {
+	cnt := ln.end - ln.start
+	if cnt <= 0 {
 		return ln.start
 	}
 	prev := 0
-	for k := 1; k <= len(txt); k++ {
-		w, _ := measureTextW(g, string(txt[:k]), fontPx, weightNum, bold, family)
+	for k := 1; k <= cnt; k++ {
+		w, _ := measureTextW(g, l.linePrefix(ln, k), fontPx, weightNum, bold, family)
 		if x < l.x+(prev+w)/2 {
 			return ln.start + k - 1
 		}

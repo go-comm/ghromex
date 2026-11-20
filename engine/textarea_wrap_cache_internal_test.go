@@ -160,9 +160,9 @@ func TestTextareaLineTextSlicedNotStored(t *testing.T) {
 			t.Errorf("行[%d] 文本 = %q, want %q", i, got, want[i])
 		}
 	}
-	// 行区间在同一个 rune 空间里，可直接相加还原全文。
-	if got := len(l.runes); got != len("first line\nsecond line\nthird line") {
-		t.Errorf("runes 长度 = %d, want %d", got, len("first line\nsecond line\nthird line"))
+	// 行区间恢复的 rune 总数等于原文 rune 数（末行 end）。
+	if got := l.lines[len(l.lines)-1].end; got != len("first line\nsecond line\nthird line") {
+		t.Errorf("末行 end = %d, want %d", got, len("first line\nsecond line\nthird line"))
 	}
 }
 
@@ -174,7 +174,7 @@ func TestCaretRowMatchesLinearScan(t *testing.T) {
 	for i := 0; i < 500; i++ {
 		fmt.Fprintf(&sb, "row %03d\n", i)
 	}
-	lines := wrapTextarea(g, []rune(sb.String()), 1000, 10, 0, false, "")
+	lines := wrapTextarea(g, sb.String(), 1000, 10, 0, false, "")
 	linear := func(caret int) int {
 		for i, ln := range lines {
 			if caret <= ln.end {

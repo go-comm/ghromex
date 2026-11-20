@@ -78,12 +78,12 @@ func runeLen(s string) int {
 
 // valueRuneLen 返回 value 属性的 rune 数（光标/选区下标的长度上界）。
 //
-// textarea 直接读折行缓存的 runes（O(1)）：缓存与值同生命周期，
+// textarea 直接读折行缓存的 n（O(1)）：缓存与值同生命周期，
 // SetAttribute("value") 会把它整个丢弃，不会读到陈旧值。缓存未建立时
 // 回退零分配统计。
 func valueRuneLen(b *htmlElement) int {
 	if b.wrap != nil {
-		return len(b.wrap.runes)
+		return b.wrap.n
 	}
 	return runeLen(b.GetAttribute("value"))
 }
@@ -294,11 +294,47 @@ func OnDocumentPaste(doc HTMLDocument, text string) bool {
 	return true
 }
 
+// spliceValue 返回把 value 的 rune 区间 [lo,hi) 换成 s 后的新值。
+//
+// 优先按字节空间拼接：textarea 有折行缓存时，行表记着每个 rune 下标
+// 对应的字节下标，切一刀即可。19.5MB 的值实测：字节拼接 1.3ms/19.5MB，
+// 而 []rune 空间拼接要 78ms/117MB——光是先把全文转成 rune 切片就是
+// 80MB 的临时分配（每键一次，19.5MB 的文档根本敲不动）。
+//
+// 缓存不存在（尚未布局）或值里混着非法 UTF-8（缓存记的是消毒后的副本，
+// 字节下标对不上原属性串）时，退回旧的 []rune 口径。
+func spliceValue(b *htmlElement, lo, hi int, s string) string {
+	v := b.GetAttribute("value")
+	if w := b.wrap; w != nil && w.exact {
+		blo, bhi := w.byteIndexOf(lo), w.byteIndexOf(hi)
+		if blo < 0 {
+			blo = 0
+		}
+		if bhi > len(v) {
+			bhi = len(v)
+		}
+		if bhi < blo {
+			bhi = blo
+		}
+		return v[:blo] + s + v[bhi:]
+	}
+	r := []rune(v)
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > len(r) {
+		hi = len(r)
+	}
+	if hi < lo {
+		hi = lo
+	}
+	return string(r[:lo]) + s + string(r[hi:])
+}
+
 // insertTextAtCaret 在光标处插入文本：有选区则先删除选区内容（浏览器
 // 「输入/粘贴替换选区」语义），插入后光标落在插入文本末尾、选区折叠。
 func insertTextAtCaret(doc HTMLDocument, b *htmlElement, s string) {
-	r := []rune(b.GetAttribute("value"))
-	n := len(r)
+	n := valueRuneLen(b)
 	lo, hi, hasSel := selectionRange(b)
 	c := clampCaret(b.caret, n)
 	if hasSel {
@@ -306,7 +342,7 @@ func insertTextAtCaret(doc HTMLDocument, b *htmlElement, s string) {
 	} else {
 		hi = c
 	}
-	b.SetAttribute("value", string(r[:c])+s+string(r[hi:]))
+	b.SetAttribute("value", spliceValue(b, c, hi, s))
 	setCaret(doc, b, c+runeLen(s))
 }
 
@@ -559,13 +595,13 @@ func onDocumentKeyDown(doc HTMLDocument, key int) bool {
 		// 不消费（浏览器同语义——按钮聚焦时按方向键不会改按钮的 value）。
 		return false
 	}
-	r := []rune(b.GetAttribute("value"))
+	n := valueRuneLen(b)
 	caret := b.caret
 	if caret < 0 {
 		caret = 0
 	}
-	if caret > len(r) {
-		caret = len(r)
+	if caret > n {
+		caret = n
 	}
 	lo, hi, hasSel := selectionRange(b)
 	multiline := strings.EqualFold(b.tagName, "textarea")
@@ -573,26 +609,26 @@ func onDocumentKeyDown(doc HTMLDocument, key int) bool {
 	switch key {
 	case KeyBackspace:
 		if hasSel {
-			b.SetAttribute("value", string(r[:lo])+string(r[hi:]))
+			b.SetAttribute("value", spliceValue(b, lo, hi, ""))
 			setCaret(doc, b, lo)
 			return true
 		}
 		if caret == 0 {
 			return false
 		}
-		b.SetAttribute("value", string(r[:caret-1])+string(r[caret:]))
+		b.SetAttribute("value", spliceValue(b, caret-1, caret, ""))
 		setCaret(doc, b, caret-1)
 		return true
 	case KeyDelete:
 		if hasSel {
-			b.SetAttribute("value", string(r[:lo])+string(r[hi:]))
+			b.SetAttribute("value", spliceValue(b, lo, hi, ""))
 			setCaret(doc, b, lo)
 			return true
 		}
-		if caret >= len(r) {
+		if caret >= n {
 			return false
 		}
-		b.SetAttribute("value", string(r[:caret])+string(r[caret+1:]))
+		b.SetAttribute("value", spliceValue(b, caret, caret+1, ""))
 		setCaret(doc, b, caret)
 		return true
 	case KeyEnter:
@@ -600,11 +636,11 @@ func onDocumentKeyDown(doc HTMLDocument, key int) bool {
 			return false
 		}
 		if hasSel {
-			b.SetAttribute("value", string(r[:lo])+"\n"+string(r[hi:]))
+			b.SetAttribute("value", spliceValue(b, lo, hi, "\n"))
 			setCaret(doc, b, lo+1)
 			return true
 		}
-		b.SetAttribute("value", string(r[:caret])+"\n"+string(r[caret:]))
+		b.SetAttribute("value", spliceValue(b, caret, caret, "\n"))
 		setCaret(doc, b, caret+1)
 		return true
 	case KeyLeft:
@@ -622,7 +658,7 @@ func onDocumentKeyDown(doc HTMLDocument, key int) bool {
 			setCaret(doc, b, hi)
 			return true
 		}
-		if caret >= len(r) {
+		if caret >= n {
 			return true
 		}
 		setCaret(doc, b, caret+1)
@@ -721,15 +757,22 @@ func controlLayout(doc HTMLDocument, b *htmlElement) textareaLayout {
 	// 编号，光标下标因此仍是完整值里的位置。
 	_, cut, tw, _ := inputVisibleWindow(g, b, px, weightNum, bold, family)
 	// 行区间 [cut, full) 编号在完整显示值的 rune 空间里（舍头保尾裁掉的
-	// 前缀仍是区间内坐标的一部分），lineText 按区间现切出可见窗口文本。
+	// 前缀仍是区间内坐标的一部分），字节区间供 lineText 零拷贝现切可见
+	// 窗口文本。
 	display := displayValue(b)
-	runes := []rune(display)
-	lines := []textareaLine{{start: cut, end: len(runes), w: tw}}
+	if !utf8.ValidString(display) {
+		// 非法 UTF-8：按旧口径消毒（inputVisibleWindow 里 []rune 出来的
+		// 文本就是消毒后的），保证行文本与渲染同源。
+		display = string([]rune(display))
+	}
+	n := runeLen(display)
+	lines := []textareaLine{{start: cut, end: n, w: tw,
+		bstart: runeByteIndex(display, cut), bend: len(display)}}
 	_, lh := measureTextW(g, "Mg", px, weightNum, bold, family)
 	if lh <= 0 {
 		lh = b.height
 	}
-	return textareaLayout{x: b.x, y: b.y, w: b.width, h: b.height, lh: lh, lines: lines, runes: runes}
+	return textareaLayout{x: b.x, y: b.y, w: b.width, h: b.height, lh: lh, lines: lines, value: display}
 }
 
 // caretLineEdgeTarget 返回光标所在行的行首/行尾下标（start=true 为行首）。

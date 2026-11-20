@@ -997,20 +997,23 @@ padding/opacity/overflow…），所以凡是「拿 computed 判盒」的地方�
 19.5MB 的 `LICENSES.chromium.html`（360,214 行）塞进一个 textarea，1024×720 无头
 视口，纯引擎探针实测：
 
-| 指标 | 修复前 | 修复后 |
-|---|---|---|
-| 首帧总分配 | **1,358 MB** | **119 MB** |
-| 后续 5 帧累计分配 | 6,497 MB（≈1.3 GB/帧） | — |
-| 后续 50 帧累计分配 | 63.5 GB（按 1.3 GB/帧 推算） | **504 KB**（≈10 KB/帧） |
-| 常驻堆（文档 + 缓存） | ~400 MB | **105 MB** |
+| 指标 | 修复前 | 第一阶段（折行缓存） | 第二阶段（输入路径 byte 化） |
+|---|---|---|---|
+| 首帧总分配 | **1,358 MB** | **119 MB** | 142 MB |
+| 后续 5 帧累计分配 | 6,497 MB（≈1.3 GB/帧） | — | — |
+| 后续 50 帧累计分配 | 63.5 GB（按 1.3 GB/帧 推算） | **504 KB**（≈10 KB/帧） | 同左 |
+| 常驻堆（文档 + 缓存） | ~400 MB | **105 MB** | **36 MB** |
+| 单键（输入 1 字 + 重排 + 绘制） | — | **145 ms / 235 MB** | **71 ms / 103 MB** |
+| 连敲 10 字后 `Sys` | — | 435 MB | **112 MB** |
 
 三处改动，彼此正交：
 
 1. **折行缓存** `htmlElement.wrap *textareaWrap`：键是「值 + 可用宽 + 字体 +
    度量后端」。值变化由 `SetAttribute("value")`/`RemoveAttribute` 把缓存置 `nil`
    失效，宽度/字体变化在取用时比签名。
-2. **行只存 rune 下标**（`{start,end,w}`），行文本按区间现切——绘制/导出时才落
-   成 string。行区间不存文本副本，19.5MB 的值不再被复制 8×。
+2. **行只存下标**（`{start,end,bstart,bend,w}`：rune 区间 + 字节区间），行文本按
+   字节区间现切——绘制/导出时才落成 string。行区间不存文本副本，19.5MB 的值
+   不再被复制 8×。
 3. **逐字宽度备忘**：ASCII 走 128 元素定长数组、其余走 map，度量次数从
    「字符总数」降到「不同字符数」。
 
@@ -1032,6 +1035,34 @@ padding/opacity/overflow…），所以凡是「拿 computed 判盒」的地方�
 代价与守卫：缓存把值的 rune 视图（80MB）从「每帧临时」变成「常驻」，这是
 105MB 常驻里的大头（值 19.5MB + runes 80MB + 行表 5.5MB）。行高/字体变化必须
 进签名，否则用新字体画旧行宽；SVG 导出的 `Graphics` 与真实后端不同，也参与比较。
+
+### 输入路径 byte 化：编辑不再转 `[]rune`
+
+第一阶段把「打开文档」的常驻内存压下来了，但**敲一个字**仍是 145ms / 235MB：
+编辑点 `insertTextAtCaret` 与 Backspace/Delete/Enter 六处都在 rune 空间拼接——
+`[]rune(value)` 一次 80MB，`string(r[:c])+s+string(r[c:])` 再复制 117MB。改为
+字节空间直接拼接（`value[:blo]+s+value[bhi:]`，实测 1.3ms / 19.5MB）后，单键
+降到 **71ms / 103MB**，常驻再降到 **36MB**（80MB 的常驻 rune 视图彻底没了）：
+
+- `textareaWrap.runes []rune` → `value string` + `n int`（末行 end）+ `exact bool`
+  （值未因非法 UTF-8 被改写）；`textareaLine` 增 `bstart/bend` 字节区间，rune
+  区间 `start/end` 口径不变（光标/选区/点击映射仍活在 rune 空间）。
+- `lineText` 返回 `value[bstart:bend]` 子串（零拷贝），不再先 materialize 整篇
+  `[]rune`。后端两个按字符串建键的缓存（`measureKey`/`texKey`）会多留一会儿旧值
+  的底层数组，但键只比内容、且再跑一遍全文（24 万行）就随缓存整体清空，不累积。
+- `runeByteIndex`/`byteIndexOf` 做 rune↔字节换算：以行表为锚二分定行 + 行内 walk
+  （一行最多几百 rune），纯 ASCII 一步一字节不碰 `DecodeRune`。
+- `wrapTextarea` 吃 string（ASCII 快路径逐字节走，同时记 rune/字节区间），CRLF
+  仍两字节一起消费、行文本收在 `\r` 之前；`wrapTextareaInto` 复用预分配行表容量
+  （24 万行 append 翻倍白扔约 10MB），行表每次新建防 `onChanged`→Refresh 重入
+  改花旧布局。
+- 非法 UTF-8 在 layout 时一次性 `string([]rune(value))` 消毒（保持旧 U+FFFD 口径），
+  记 `exact=false`，编辑路径据此回退旧的 `[]rune` 拼接。
+
+剩下的 71ms/键 是**每次编辑都要全量重折行**（值变了 → 缓存失效 → 下次布局从头
+折 19.5MB）。这属于「增量折行」范畴，不在本次范围；本次只把「一次重折行」和
+「一次编辑」本身的常数因子压下来。
+
 
 ### 内存：差异在原生侧，不在引擎侧
 

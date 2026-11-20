@@ -42,6 +42,39 @@
 - `htmlElement` 因含指针段多 1 个指针字段，尺寸不变量 624B → **632B**
   （`field_packing_internal_test.go` 同步；分段与空洞两条不变量不受影响）。
 
+**输入路径 byte 化：编辑不再把 19.5MB 全文转成 `[]rune`**。第一阶段把「打开
+文档」的常驻内存压下来了，但**敲一个字**仍要 145ms、分配 235MB——编辑点
+`insertTextAtCaret` 与 Backspace/Delete/Enter 六处都在 rune 空间拼接：光是
+`[]rune(value)` 就是 80MB 临时切片，再 `string(r[:c])+s+string(r[c:])` 又
+复制 117MB。改为字节空间直接拼接后，同样的按键降到 **71ms / 103MB**：
+
+- **`spliceValue`**：按 rune 下标 `[lo,hi)` 换文本，优先在字节空间切
+  （`value[:blo]+s+value[bhi:]`，实测 1.3ms/19.5MB）；缓存未建立或值含非法
+  UTF-8（缓存记的是消毒副本）时退回旧 `[]rune` 口径。六个键处理点统一改用它。
+- **折行缓存去 `[]rune`**：`textareaWrap` 的 `runes []rune` 换成
+  `value string` + `n int`（末行 end，光标/选区长度上界）+ `exact bool`
+  （值未因非法 UTF-8 被改写）。`textareaLine` 增 `bstart/bend` 字节区间，
+  rune 区间 `start/end` 口径不变（光标/选区/点击映射仍活在 rune 空间）。
+- **`lineText` 零拷贝**：返回 `value[bstart:bend]` 子串，不再先 materialize
+  整篇 `[]rune` 再 `string(...)`。后端两个按字符串建键的缓存
+  （`measureKey`/`texKey`）会因此多留一会儿旧值的底层数组，但键只比内容、
+  且再跑一遍全文（24 万行）就随缓存整体清空换到新值，不会累积。
+- **`runeByteIndex` / `byteIndexOf`**：rune 下标 ↔ 字节下标换算，以行表为锚
+  二分定行 + 行内 walk（一行最多几百 rune）；纯 ASCII 一步一字节不碰
+  `DecodeRune`。`byteIndexOf` 处理 `pos<行首`（落进 CRLF 空隙）与
+  `pos>=n`（返回全文尾）两处边界。
+- **`wrapTextarea` 吃 string**：ASCII 快路径逐字节走，同时记 rune 与字节
+  区间；CRLF 仍按两字节一起消费、行文本收在 `\r` 之前（口径与第一阶段一致）。
+  新增 `wrapTextareaInto` 复用预分配的行表容量（24 万行 append 翻倍会白扔
+  约 10MB）；行表每次新建而非 in-place 复用，避免 `onChanged`→Refresh 重入
+  时旧 `textareaLayout` 持有的行表被改花。
+- **非法 UTF-8 消毒**：layout 时 `string([]rune(value))` 一次性消毒（保持旧
+  U+FFFD 口径），记 `exact=false`，编辑路径据此回退。
+- 实测（19.5MB `LICENSES.chromium.html`，纯引擎探针，同口径对比第一阶段）：
+  常驻 **105MB → 36MB**；单键 **145ms/235MB → 71ms/103MB**；连敲 10 字后
+  `Sys` **435MB → 112MB**。正确性：`examples/ua` 与 `examples/notepad` 的
+  `-dump-svg` 输出与第一阶段提交**逐字节一致**（SHA256）。
+
 **应用层：notepad 的撤销栈与状态栏不再按全文拷贝**。引擎之外，notepad 自己
 也是这条内存曲线的一部分：
 

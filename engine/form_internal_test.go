@@ -49,15 +49,15 @@ func TestWrapTextareaRules(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			lines := wrapTextarea(g, []rune(c.value), c.maxW, px, 0, false, "")
+			lines := wrapTextarea(g, c.value, c.maxW, px, 0, false, "")
 			if len(lines) != len(c.wants) {
 				t.Fatalf("行数 = %d, want %d: %#v", len(lines), len(c.wants), lines)
 			}
-			runes := []rune(c.value)
 			for i, ln := range lines {
-				got := ""
-				if ln.start >= 0 && ln.end <= len(runes) && ln.end > ln.start {
-					got = string(runes[ln.start:ln.end])
+				// 行文本 = value 的字节子串（与旧 []rune 切片口径一致）
+				var got string
+				if ln.end > ln.start {
+					got = c.value[ln.bstart:ln.bend]
 				}
 				if got != c.wants[i] {
 					t.Errorf("行[%d] 文本 = %q, want %q", i, got, c.wants[i])
@@ -81,7 +81,7 @@ func TestWrapTextareaRules(t *testing.T) {
 
 func TestCaretRowEdges(t *testing.T) {
 	g := NewFakeGraphics()
-	lines := wrapTextarea(g, []rune("ab\ncd"), 1000, 10, 0, false, "")
+	lines := wrapTextarea(g, "ab\ncd", 1000, 10, 0, false, "")
 	if len(lines) != 2 {
 		t.Fatalf("行数 = %d, want 2", len(lines))
 	}
