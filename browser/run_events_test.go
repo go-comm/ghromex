@@ -171,6 +171,14 @@ func TestRunConsumesSelectionKeys(t *testing.T) {
 	}
 	// 从系统剪贴板读回，验证 Ctrl+C 的完整链路（含系统剪贴板写入）。
 	if clip := clipboard.Text(); clip != "hello world" {
+		// 同 TestRunConsumesInjectedPaste 的口径：剪贴板是全局独占资源，
+		// `go test ./...` 各包并发时别的进程可能正占着它，Ctrl+C 的写入会
+		// 静默失败（打不开剪贴板就什么都不做）。先自己写一次哨兵确认此刻
+		// 可写：写不进去就跳过；能写却仍是旧值，才是 Ctrl+C 链路真的断了。
+		clipboard.SetText("ctrl-c-clipboard-recheck")
+		if clipboard.Text() != "ctrl-c-clipboard-recheck" {
+			t.Skipf("系统剪贴板暂不可写（读回 = %q），跳过 Ctrl+C 读回断言", clip)
+		}
 		t.Fatalf("剪贴板 = %q, want %q（Ctrl+C 未写入或写入内容错误）", clip, "hello world")
 	}
 }

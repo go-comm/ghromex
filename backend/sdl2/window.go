@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"time"
 	"unsafe"
 
 	"github.com/go-comm/ghromex/core"
@@ -439,16 +440,34 @@ func (win *Window) Screenshot() ([]byte, uint32, int, int, error) {
 	return buf, format, w, h, nil
 }
 
+// clipboardWriteRetries 是写系统剪贴板的重试次数。
+//
+// Windows 的剪贴板是全局独占资源：别的程序（剪贴板历史、输入法、其它
+// 编辑器）随时可能正开着它，OpenClipboard 失败就整次写入失败——实测
+// 连续复制 8 轮里会丢 1~3 轮，用户看到的是「按了 Ctrl+C，粘出来还是
+// 旧内容」。SDL 自己会重试（Windows 平台约 10×10ms，见
+// SDL_windowsclipboard.c），但实测仍会漏，所以这一层再兜 5 轮、总共约
+// 20ms：复制是用户动作，多等一帧不可感知。
+const clipboardWriteRetries = 5
+
 // setClipboardText 把 UTF-8 文本写入系统剪贴板。SDL2 的接口是
-// int SDL_SetClipboardText(const char *text)，成功返回 0；失败不影响
-// 界面（复制是尽力而为，不打断事件循环）。cBytes 返回的切片必须
-// KeepAlive 到调用结束，否则 GC 可能在 SDL 读取前回收。
+// int SDL_SetClipboardText(const char *text)，成功返回 0，失败返回 -1
+// （x64 下经 uintptr 零扩展成 0xFFFFFFFF）。失败不影响界面（复制是
+// 尽力而为，不打断事件循环）。cBytes 返回的切片必须 KeepAlive 到调用
+// 结束，否则 GC 可能在 SDL 读取前回收。
 func setClipboardText(text string) {
 	if text == "" {
 		return
 	}
 	buf, ptr := cBytes(text)
-	sdlSetClipboardText(ptr)
+	for i := 0; i < clipboardWriteRetries; i++ {
+		if sdlSetClipboardText(ptr) == 0 {
+			break
+		}
+		if i+1 < clipboardWriteRetries {
+			time.Sleep(time.Duration(i+1) * 2 * time.Millisecond)
+		}
+	}
 	runtime.KeepAlive(buf)
 }
 
