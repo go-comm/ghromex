@@ -1144,6 +1144,43 @@ token 缓存」从根上消除「未变更子树整块重排」。行为口径�
 `examples/notepad` 的 `-dump-svg` 与上一提交逐字节一致（SHA256 全等）。
 
 
+### 字节游标零分配切词（阶段二）：重排分配 36 → 10.9MB
+
+阶段一之后 CPU profile 里 `slicerunetostring`+`encoderune` 合计约 31%——
+`addPreText` 每轮把 pre/pre-wrap 文本逐 token `[]rune` 累加再 `string(word)`
+编码一遍，同一段 19.5MB 文本每次重排都要重新走一遍。本阶段把 `word []rune`
+改成**字节区间**（`wordStart` 起点 + 落位时切 `raw[start:end]` 原语料子串），
+纯 ASCII 词不再新建字符串：
+
+- **ASCII 词零分配**：`addPreText` 循环 `for i < len(raw)` 按字节游标扫描；
+  ASCII 只记 `wordStart`，换行/空格/制表/CJK 边界时 `raw[wordStart:i]` 切片即
+  得 token。制表位固定 8 空格用包级 `preTabSpaces`（`strings.Repeat` 只算一次）。
+- **词内 `\r` 口径不变**：旧实现把词内的 `\r` **丢弃**（不入词、不算换行，
+  CRLF 归一在解析层做）。字节版本罕见路径用 `wordCR` 记录再拼一次，常见路径
+  仍是零分配切片。新增 `engine/whitespace_pre_test.go` 的
+  `TestPreTokenizationEdgeCases` 锁死这条口径（词内 CR 接成一个词、CR 在词与
+  空格之间拆开、非法 UTF-8 落 `U+FFFD`、CJK 逐字）。
+- **尝试过的更优方案已被否决**：全局「token 度量备忘」（进程级 `sync.Map`，
+  键 = Graphics+token+字体，跳过后端 `MeasureText`/`FontMetrics`）实测**更慢**
+  ——credits **328 → 727ms**、pre 1M **52 → 78ms**、p 1M **21 → 40ms**。单 token
+  的 `sync.Map` 查询（可比较 struct 键）比 `FakeGraphics` 的估算度量还贵，而
+  credits 页 450 万 token 的查询次数压过了省下的度量次数。已完全回退。
+
+同口径对比（无头探针，稳定态单次 `LayoutDocument` 的耗时 / 分配，阶段二列）：
+
+| 场景 | 阶段一（688c360） | 阶段二 |
+|---|---|---|
+| 真实 credits 页（19.5MB / 780 `<pre>`） | 328ms / 36MB | **250ms / 10.9MB** |
+| 单节点 `<p>` 1M 字符（可折行） | 21ms / 36MB | 21.8ms / 35.5MB |
+| 单节点 `<pre>` 1M 字符（不折行） | 52ms / 257MB | 49ms / 255.6MB |
+
+credits 页稳定态重排 **328 → 250ms（−24%）**、分配 **36 → 10.9MB（−70%）**；
+`<pre>` 不折行的单节点场景分配不变（一整行几十万项，`curLine` 超上限不保留，
+是该场景自身的账）。`<p>` 可折行路径不走 `addPreText`（走 `tokenizeText`），
+不受影响。行为口径不变：`examples/ua`、`examples/notepad` 的 `-dump-svg` 与
+`688c360` 基线逐字节一致（SHA256 全等）。
+
+
 ### 内存：差异在原生侧，不在引擎侧
 
 

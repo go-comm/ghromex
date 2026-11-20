@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -367,5 +368,43 @@ func TestBrInsidePreBreaksLine(t *testing.T) {
 	</body></html>`)
 	if n := len(distinctLines(runsOf(t, doc, "#p"))); n != 2 {
 		t.Errorf("<pre>a<br>b</pre> 排成 %d 行, want 2 行", n)
+	}
+}
+
+// TestPreTokenizationEdgeCases pre/pre-wrap 的分词口径（阶段二改成字节游标
+// 零分配切词后，仍须与旧口径逐字一致）：
+//   - '\r' 被**丢弃**（既不入词、也不算换行）：词内出现时把两段接成一个词；
+//   - 非法 UTF-8 字节按 U+FFFD 处理（与 range 解码一致）；
+//   - 非 ASCII 逐字成项。
+func TestPreTokenizationEdgeCases(t *testing.T) {
+	doc := openPreDoc(t, "<!doctype html><html><body style=\"margin:0\">\n"+
+		"<pre id=\"cr\" style=\"margin:0\">ab\rcd</pre>\n"+ // 词内 CR：接成一个词
+		"<pre id=\"crmid\" style=\"margin:0\">ab\r cd</pre>\n"+ // CR 在词与空格之间
+		"<pre id=\"bad\" style=\"margin:0\">a\xffb</pre>\n"+ // 非法 UTF-8
+		"<pre id=\"cjk\" style=\"margin:0\">a你b</pre>\n"+ // CJK 逐字
+		"</body></html>")
+	// run 文本按顺序即分词结果（空格 run 也是独立一项）。
+	textsOf := func(sel string) []string {
+		var out []string
+		for _, r := range runsOf(t, doc, sel) {
+			out = append(out, r.text)
+		}
+		return out
+	}
+
+	cases := []struct {
+		sel  string
+		want []string
+	}{
+		{"#cr", []string{"abcd"}},
+		{"#crmid", []string{"ab", " ", "cd"}},
+		{"#bad", []string{"a", "�", "b"}},
+		{"#cjk", []string{"a", "你", "b"}},
+	}
+	for _, c := range cases {
+		got := textsOf(c.sel)
+		if fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Errorf("%s 分词 = %q, want %q", c.sel, got, c.want)
+		}
 	}
 }

@@ -5,6 +5,10 @@ import (
 	"unicode/utf8"
 )
 
+// preTabSpaces 是 pre/pre-wrap 制表位的固定 8 空格 token。包级只算一次，
+// 免去每次制表位都 strings.Repeat 的小分配。
+var preTabSpaces = strings.Repeat(" ", 8)
+
 // MeasureNode 布局入口：对根节点在 (mw, mh) 可用空间内执行一次布局。
 // 若样式尚未级联（computed 为空），先以空样式表级联。
 func MeasureNode(g Graphics, node HTMLElement, mw, mh int) {
@@ -1103,42 +1107,84 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			raw = strings.TrimPrefix(raw, "\r\n")
 			raw = strings.TrimPrefix(raw, "\n")
 		}
-		var word []rune
-		flushWord := func() {
-			if len(word) > 0 {
-				addPreToken(tn, string(word), -1, wrap)
-				word = word[:0]
+		// 词按**字节区间**记在 wordStart，落位时切原语料的子串。ASCII 词天然是
+		// 连续字节（多字节 UTF-8 的字节都 ≥ 0x80，不会掺进 ASCII 词），切片即得，
+		// 不新建字符串——原来的 []rune 累加 + string(word) 每次重排都要把整段
+		// 词重新编码一遍，是 19.5MB 大 pre 页约 26% 的 CPU（profile 的
+		// slicerunetostring 热点）。非 ASCII 逐字成项，口径不变。
+		//
+		// '\r' 是唯一不能直接切片的字符：旧实现把它**丢弃**（既不入词、也不算
+		// 换行，CRLF 归一在解析层做），词内出现 '\r' 时要把两段接起来。
+		// 该情形罕见（CRLF 文档里 '\r' 紧跟 '\n'，落在词外），故另记位置、
+		// 仅在真出现时拼一次，常见路径仍是零分配切片。
+		wordStart := -1
+		var wordCR []int
+		flushWord := func(end int) {
+			if wordStart < 0 {
+				return
 			}
+			if len(wordCR) == 0 {
+				addPreToken(tn, raw[wordStart:end], -1, wrap)
+			} else {
+				var b strings.Builder
+				b.Grow(end - wordStart)
+				prev := wordStart
+				for _, cr := range wordCR {
+					b.WriteString(raw[prev:cr])
+					prev = cr + 1
+				}
+				b.WriteString(raw[prev:end])
+				addPreToken(tn, b.String(), -1, wrap)
+				wordCR = wordCR[:0]
+			}
+			wordStart = -1
 		}
-		for _, r := range raw {
+		for i := 0; i < len(raw); {
+			b := raw[i]
 			switch {
-			case r == '\r':
+			case b == '\r':
 				// CRLF 只算一次换行（与 parsing 的换行归一一致）
-			case r == '\n':
-				flushWord()
+				if wordStart >= 0 {
+					wordCR = append(wordCR, i)
+				}
+				i++
+			case b == '\n':
+				flushWord(i)
 				breakPreLine()
-			case r == '\t':
-				flushWord()
+				i++
+			case b == '\t':
+				flushWord(i)
 				if preSpaceW > 0 {
 					// 制表位：从行首起每 8 个空格宽对齐（Chrome pre 的 tab-size:8）
 					stop := preSpaceW * 8
 					w := stop - (cursorX-cx)%stop
-					addPreToken(tn, strings.Repeat(" ", 8), w, wrap)
+					addPreToken(tn, preTabSpaces, w, wrap)
 				}
-			case r == ' ':
-				flushWord()
+				i++
+			case b == ' ':
+				flushWord(i)
 				addPreToken(tn, " ", preSpaceW, wrap)
-			default:
-				if r < 0x80 {
-					word = append(word, r)
-				} else {
-					// CJK 逐字成项，与其他路径的宽度测量口径一致。
-					flushWord()
-					addPreToken(tn, string(r), -1, wrap)
+				i++
+			case b < 0x80:
+				// ASCII 词：只记起点，切到当前字节为止
+				if wordStart < 0 {
+					wordStart = i
 				}
+				i++
+			default:
+				// CJK 逐字成项，与其他路径的宽度测量口径一致。
+				flushWord(i)
+				r, size := utf8.DecodeRuneInString(raw[i:])
+				if r == utf8.RuneError && size == 1 {
+					// 非法 UTF-8 字节：range 会解成 U+FFFD，按同一口径替换
+					addPreToken(tn, string(utf8.RuneError), -1, wrap)
+				} else {
+					addPreToken(tn, raw[i:i+size], -1, wrap)
+				}
+				i += size
 			}
 		}
-		flushWord()
+		flushWord(len(raw))
 	}
 	addItem := func(it lineItem) {
 		_, right := lineBounds(it.y)
