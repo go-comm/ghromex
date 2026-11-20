@@ -1181,6 +1181,40 @@ credits 页稳定态重排 **328 → 250ms（−24%）**、分配 **36 → 10.9M
 `688c360` 基线逐字节一致（SHA256 全等）。
 
 
+### 收敛旁路 + 发射指针化（阶段二后续）：重排 250 → 231ms
+
+改完切词再看 profile，`flushLine`（行盒落位）成了头号热点（38% flat），而它耗时
+的大头对纯文本页来说是**白做的两趟扫描**：
+
+- **vertical-align 两轮收敛加旁路**：`flushLine` 会为 `vertical-align: top/bottom`
+  的原子盒迭代两轮收敛，但**每行都跑**，哪怕整行一个这样的盒都没有。跳过是严格
+  等价的：没有 top/bottom 项时循环既不改动任何项，第二趟重算的 `leadAsc/leadDesc`
+  最大值也必然等于 `lineAsc/lineDesc`（各项落位时已逐项累加进去，`asc/desc` 又取
+  过 strut 的最大）。用 `layoutChildren` 的局部标记 `lineHasVAlign` 旁路整趟——
+  置位在 `addItem` 的 `append` **之后**（软换行会先调一次 `flushLine` 把标记清掉，
+  放前面就漏掉「换行后紧跟的这项」），`flushLine` 末尾随 `curLine` 一起清零。
+- **发射循环按索引取指针**：行盒落位循环原来是 `for _, it := range curLine`，每
+  项整体拷贝一份 120B 的 `lineItem`；credits 页 450 万项就是每次重排约 540MB 的
+  纯拷贝流量。改成 `for i := range curLine { it := &curLine[i] }`，收敛循环里的
+  第二趟同样改掉。
+- 本轮**没有新增结构体字段**（`lineHasVAlign` 是局部变量），`htmlElement` 的 640B
+  尺寸不变量不受影响。
+
+同口径对比（无头探针，稳定态单次 `LayoutDocument` 的耗时 / 分配）：
+
+| 场景 | 阶段二（e119bfd） | + 收敛旁路 & 指针化 |
+|---|---|---|
+| 真实 credits 页（19.5MB / 780 `<pre>`） | 250ms / 10.9MB | **230.8ms / 10.9MB** |
+| 单节点 `<p>` 1M 字符（可折行） | 21.8ms / 35.5MB | **17.3ms / 35.5MB** |
+| 单节点 `<pre>` 1M 字符（不折行） | 49ms / 255.6MB | **41.7ms / 255.6MB** |
+
+credits 页累计 **503 → 230.8ms（−54%）**、分配 **1762 → 10.9MB（−99.4%）**。
+剩下的 profile 大头是 `addPreToken`（38.7% flat）——每 token 一次度量加一条 run
+的固有条目开销，不再是可跳过的空转。`vertical_align_test.go` 的 top/bottom/middle
+/超上下标用例全绿；行为口径不变：`examples/ua`、`examples/notepad` 的 `-dump-svg`
+与 `688c360` 基线逐字节一致（SHA256 全等）。
+
+
 ### 内存：差异在原生侧，不在引擎侧
 
 

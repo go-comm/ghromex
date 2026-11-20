@@ -909,6 +909,10 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	pendingSpace := false
 	pendingTN := (*textNode)(nil)
 	lastInline := false
+	// lineHasVAlign 记当前行里有没有 vertical-align: top/bottom 的原子盒。
+	// 只有这种盒的位移依赖行盒的最终 ascent/descent，flushLine 才需要跑
+	// 那趟两轮收敛；纯文本行（19.5MB credits 页全是）不需要。
+	lineHasVAlign := false
 
 	// flushPendingSpace 把待定空格落位到当前行（作为独立文本 run）。
 	// 必须在**下一个行内盒布局之前**调用：行内盒的位置由 layoutBox 按游标
@@ -974,37 +978,47 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			// （盒顶/盒底与行盒顶/底对齐），而行盒高度又依赖这些盒的贡献
 			// ——互相依赖。迭代两轮即收敛：第一轮按当前高度定位，第二轮
 			// 按收敛后的高度重新定位。
-			for iter := 0; iter < 2; iter++ {
-				for i := range curLine {
-					it := &curLine[i]
-					switch it.valign {
-					case VerticalAlignTop:
-						// 盒顶与行盒顶对齐：盒整体上移到行盒上沿。
-						it.shift = asc - it.asc
-						it.leadAsc = it.asc + it.shift
-						it.leadDesc = it.desc - it.shift
-					case VerticalAlignBottom:
-						// 盒底与行盒底对齐：盒整体下移到行盒下沿。
-						it.shift = it.desc - desc
-						it.leadAsc = it.asc + it.shift
-						it.leadDesc = it.desc - it.shift
-					default:
-						continue
+			//
+			// 只有行内**真有** top/bottom 原子盒时才需要这两轮：没有的话
+			// 循环既不改动任何项，重算的最大值也必然等于 lineAsc/lineDesc
+			// （各项 leadAsc/leadDesc 在 addItem/addPreToken 落位时已经累加进
+			// 去，asc 又取过 strut 的最大）。而这一趟要按 120B/项把整行读两
+			// 遍——纯文本页（19.5MB credits 全是 pre 文本）等于每次重排白扫
+			// 近 1GB 内存，profile 里 flushLine 的 38% 几乎全是它。
+			if lineHasVAlign {
+				for iter := 0; iter < 2; iter++ {
+					for i := range curLine {
+						it := &curLine[i]
+						switch it.valign {
+						case VerticalAlignTop:
+							// 盒顶与行盒顶对齐：盒整体上移到行盒上沿。
+							it.shift = asc - it.asc
+							it.leadAsc = it.asc + it.shift
+							it.leadDesc = it.desc - it.shift
+						case VerticalAlignBottom:
+							// 盒底与行盒底对齐：盒整体下移到行盒下沿。
+							it.shift = it.desc - desc
+							it.leadAsc = it.asc + it.shift
+							it.leadDesc = it.desc - it.shift
+						default:
+							continue
+						}
 					}
-				}
-				newAsc, newDesc := asc, desc
-				for _, it := range curLine {
-					if it.leadAsc > newAsc {
-						newAsc = it.leadAsc
+					newAsc, newDesc := asc, desc
+					for i := range curLine {
+						it := &curLine[i]
+						if it.leadAsc > newAsc {
+							newAsc = it.leadAsc
+						}
+						if it.leadDesc > newDesc {
+							newDesc = it.leadDesc
+						}
 					}
-					if it.leadDesc > newDesc {
-						newDesc = it.leadDesc
+					if newAsc == asc && newDesc == desc {
+						break
 					}
+					asc, desc = newAsc, newDesc
 				}
-				if newAsc == asc && newDesc == desc {
-					break
-				}
-				asc, desc = newAsc, newDesc
 			}
 		}
 		// <button> 的内容垂直居中（HTML 规范的 button 布局：内容盒里的行盒
@@ -1018,7 +1032,10 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				dy = (pctH - lineH) / 2
 			}
 		}
-		for _, it := range curLine {
+		// 按索引取指针，避免每行每项拷贝一份 120B 的 lineItem（行内内容多的
+		// 长 pre，一次重排就是几百万次拷贝）。
+		for i := range curLine {
+			it := &curLine[i]
 			// 基线对齐：各内联盒的顶边 = 行基线 − 自身 ascent，于是不同字号
 			// 的文字共享同一基线（浏览器的行盒语义）。原子盒另按
 			// vertical-align 的位移 shift 摆位（正=向上抬高）。
@@ -1044,6 +1061,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 		lineAsc, lineDesc = minInt(0, strutAsc), minInt(0, strutDesc)
 		curLine = curLine[:0]
+		lineHasVAlign = false
 		// 换行后游标回到行首；有左浮动时让到其右缘。
 		cursorX = cx
 		if l, _ := lineBounds(cursorY); l > cursorX {
@@ -1198,6 +1216,12 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			it.y = cursorY
 		}
 		curLine = append(curLine, it)
+		// 只有 top/bottom 的原子盒需要 flushLine 跑两轮收敛（位移依赖行盒
+		// 最终高度）。标记放在 append 之后：addItem 里的软换行可能先调
+		// flushLine（那里会把标记清掉），标记必须在换行之后重新置上。
+		if it.valign == VerticalAlignTop || it.valign == VerticalAlignBottom {
+			lineHasVAlign = true
+		}
 		cursorX += it.w
 		// 行盒高度取各项**贡献**的最大值（贡献含行距 leading 与
 		// vertical-align 位移，见 lineItem 的说明）。
