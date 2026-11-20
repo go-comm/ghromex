@@ -1309,21 +1309,23 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				pendingSpace = true
 				pendingTN = tn
 			}
-			toks := tokenizeText(seg)
-			if len(toks) > 0 {
-				flushPendingSpace()
-			}
-			for _, tok := range toks {
+			// tokenizeText 以回调逐词发射（零分配）。首个 token 前先落位待定空格。
+			flushed := false
+			tokenizeText(seg, func(tok string) {
+				if !flushed {
+					flushPendingSpace()
+					flushed = true
+				}
 				tw, _ := measureTextW(g, tok, fontPx, weightNum, bold, family)
 				if tw <= 0 {
-					continue
+					return
 				}
 				asc, desc := fontMetricsW(g, tok, fontPx, weightNum, bold, family)
 				leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
 				addItem(lineItem{tn: tn, token: tok, x: cursorX, y: cursorY, w: tw,
 					asc: asc, desc: desc, leadAsc: leadAsc, leadDesc: leadDesc})
-			}
-			if hasTrailingBlank(seg) && (len(toks) > 0 || lastInline) {
+			})
+			if hasTrailingBlank(seg) && (flushed || lastInline) {
 				pendingSpace = true
 				pendingTN = tn
 			}
@@ -1350,26 +1352,27 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				pendingSpace = true
 				pendingTN = tnc
 			}
-			toks := tokenizeText(raw)
-			if len(toks) > 0 {
-				// 待定空格必须**先落位**再取游标：否则空格的宽度被计入游标，
-				// 而字符仍按冲刷前的游标定位 → 首字与后续字之间凭空多出一段
-				// 空隙（"不接收" 渲染成 "不 接收"）。
-				flushPendingSpace()
-			}
-			for _, tok := range toks {
+			// tokenizeText 以回调逐词发射（零分配）。首个 token 前必须先落位
+			// 待定空格：否则空格的宽度被计入游标，而字符仍按冲刷前的游标定位
+			// → 首字与后续字之间凭空多出一段空隙（"不接收" 渲染成 "不 接收"）。
+			flushed := false
+			tokenizeText(raw, func(tok string) {
+				if !flushed {
+					flushPendingSpace()
+					flushed = true
+				}
 				tw, _ := measureTextW(g, tok, fontPx, weightNum, bold, family)
 				if tw <= 0 {
-					continue
+					return
 				}
 				asc, desc := fontMetricsW(g, tok, fontPx, weightNum, bold, family)
 				leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
 				addItem(lineItem{tn: tnc, token: tok, x: cursorX, y: cursorY, w: tw,
 					asc: asc, desc: desc, leadAsc: leadAsc, leadDesc: leadDesc})
-			}
+			})
 			// 尾随空白：其后若还有行内内容则保留为间隙空格；若后面是块级
 			// 子元素则丢弃（CSS 移除行尾空格）。
-			if hasTrailingBlank(raw) && (len(toks) > 0 || lastInline) {
+			if hasTrailingBlank(raw) && (flushed || lastInline) {
 				pendingSpace = true
 				pendingTN = tnc
 			}
@@ -1645,43 +1648,59 @@ func hasTrailingBlank(s string) bool {
 	return false
 }
 
-// tokenizeText 将文本切为可断行的词：
+// tokenizeText 将文本按可断行词逐词交给 emit 回调，零分配：
 // CJK 按单字、ASCII 连续串按整词、空白折叠为单个空格（首尾不产生空格）。
-func tokenizeText(s string) []string {
+// emit 收到的 ASCII 词是 s 的字节子串，其生命周期与 s 的底层数组一致——
+// 调用方须保证在持有 raw（即文本节点 Text()）期间消费/存储 token。
+// 采用回调形态避免为词表和每词新建字符串分配（<p> 路径 99% 分配热点）。
+func tokenizeText(s string, emit func(tok string)) {
 	if s == "" {
-		return nil
+		return
 	}
-	var out []string
-	var cur []rune
-	flush := func() {
-		if len(cur) > 0 {
-			out = append(out, string(cur))
-			cur = cur[:0]
-		}
-	}
+	// range s 直接给出每个 rune 的字节下标，据此把 ASCII 词切成 s 的子串
+	// （零分配），不必再攒 []rune 再 string(cur)。CJK 仍按单字发射。
+	wordStart := -1 // 当前 ASCII 词在 s 中的起始字节；-1 表示未开始
 	pendingSpace := false
-	for _, r := range s {
+	anyToken := false // 是否已发出过至少一个 token（对应原 len(out) > 0）
+	for i, r := range s {
 		switch {
 		case r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f' || r == '\u00a0':
-			flush()
-			if len(out) > 0 {
+			// 空白：冲刷当前词，并记下待定空格（仅在已有 token 时）
+			if wordStart >= 0 {
+				emit(s[wordStart:i])
+				wordStart = -1
+				anyToken = true
+			}
+			if anyToken {
 				pendingSpace = true
 			}
 		case r < 0x80:
+			// ASCII 可见字符：并入当前词（先消化待定空格）
 			if pendingSpace {
-				out = append(out, " ")
+				emit(" ")
 				pendingSpace = false
+				anyToken = true
 			}
-			cur = append(cur, r)
+			if wordStart < 0 {
+				wordStart = i
+			}
 		default:
+			// CJK 等：消化待定空格，冲刷当前词，按单字发射
 			if pendingSpace {
-				out = append(out, " ")
+				emit(" ")
 				pendingSpace = false
+				anyToken = true
 			}
-			flush()
-			out = append(out, string(r))
+			if wordStart >= 0 {
+				emit(s[wordStart:i])
+				wordStart = -1
+				anyToken = true
+			}
+			emit(string(r))
+			anyToken = true
 		}
 	}
-	flush()
-	return out
+	if wordStart >= 0 {
+		emit(s[wordStart:])
+	}
 }

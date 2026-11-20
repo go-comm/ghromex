@@ -164,6 +164,45 @@ credits 页累计 **503 → 187.8ms（−63%）**、分配 **1762 → 10.9MB（�
 不保留、每轮重新 grow 的 255MB 分配上）。行为口径不变：`examples/ua`、
 `examples/notepad` 的 `-dump-svg` 与 `688c360` 基线逐字节一致（SHA256 全等）。
 
+**`<p>` 路径分词零分配：`tokenizeText` 改回调 + 字节子串，单节点 `<p>` 1M 字符
+分配 35.5MB → 0，耗时 16.5 → 12.8ms**。布局缓冲复用、pre 分词零分配之后，
+`-alloc_objects` profile 显示剩余分配 **99.13% 集中在 `tokenizeText`**（单轮
+173,434 次，正好是词数）：原实现用 `[]rune` 累加每个词、`flush` 时 `string(cur)`
+新建一份字符串，另有一份 `[]string` 词表在 grow。ASCII 词本就是源串的连续字节，
+不需要新建——直接切子串即可：
+
+- **回调形态 + 字节子串**：签名 `tokenizeText(s string) []string` →
+  `tokenizeText(s string, emit func(string))`。保留 `for i, r := range s`（`range`
+  直接给出 rune 的字节下标），ASCII 词记 `wordStart`、遇边界 `emit(s[wordStart:i])`
+  零分配出词；不再攒 `[]rune`/`[]string`。CJK 仍按单字 `string(r)` 发射——与原口径
+  逐字节一致（含坏字节归一为 `U+FFFD`），且本就是原行为、非热点，未改动。
+- **token 生命周期**：ASCII 词是 `s` 的字节子串，调用方须在持有 `raw`
+  （= `textNode.Text()`，文本节点自身常驻的 `node.text`）期间消费/存储 token。
+  `lineItem.token` / `textRun.text` 存的就是这个子串，与文本节点同寿，安全。
+- **两个调用点**（`addPreLineText` 的 pre-line 路径、`layoutChildren` 的 normal 路径）
+  改为传入闭包。原语义「词表非空才先 `flushPendingSpace()`」用 `flushed` 标志在
+  回调**首次触发**时落位，顺序与旧版一致（否则空格宽度会被计入游标 → "不接收"
+  渲染成 "不 接收"，见该处注释）。
+
+同口径对比（无头探针，稳定态单次 `LayoutDocument` 的耗时 / 分配）：
+
+| 场景 | 就地写槽位 | + `tokenizeText` 零分配 |
+|---|---|---|
+| 单节点 `<p>` 1M 字符（可折行） | 16.5ms / 35.5MB | **12.8ms / ≈0MB（2KB）** |
+| 真实 credits 页（19.5MB / 780 `<pre>`） | 187.8ms / 10.9MB | 187.8ms / 10.9MB（不变） |
+| 单节点 `<pre>` 1M 字符（不折行） | 42ms / 255.6MB | 42ms / 255.6MB（不变） |
+
+credits 页 780 个 `<pre>`、0 个 `<p>`，`<pre>` 走 `addPreText`，两条路径都不经过
+`tokenizeText`，故后两行口径不变（实测在噪声内）。改后 `<p>` 路径**每轮分配从
+35.5MB 降到 2,056 字节（−99.994%）**。正确性由两件事钉住：与旧实现（原样拷贝为
+`tokenizeReference`）做**固定语料 + 5 万条随机串**差分（含各类空白、CJK、多字节、
+非法字节），分词结果逐项全等（`TestTokenizeTextMatchesReference`；一次性独立脚本
+另跑过 20 万条，差异 0 条）；`AllocsPerRun` 锁定纯 ASCII 路径 **0 分配/轮**
+（`TestTokenizeTextASCIIZeroAlloc`）。
+行为口径不变：`examples/ua`、`examples/notepad` 的 `-dump-svg` 与 `688c360`
+基线逐字节一致（SHA256 全等）。
+
+
 **修复：大文本 textarea 打开即涨到 400MB（实测常驻 400MB+ → 105MB）**。
 用 `examples/notepad` 打开 19.5MB 的 `LICENSES.chromium.html`（360,214 行），
 内存涨到 400MB 且编辑时继续上冲。纯引擎探针（不跑 notepad 代码，只
