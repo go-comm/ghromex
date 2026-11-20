@@ -3,7 +3,18 @@
 版本号即 git tag（Go module 语义：`v0.5.0` 可从
 `github.com/go-comm/ghromex@v0.5.0` 直接取用）。
 
-## 未发布
+## v0.6.0 — 2026-11-20
+
+**大文本编辑的内存与输入延迟**。以 19.5MB / 360,214 行的
+`LICENSES.chromium.html` 为同口径基线：首帧总分配 **1,358MB → 119MB**、
+常驻 **400MB+ → 105MB → 36MB**（两阶段），敲一个字 **145ms/235MB →
+71ms/103MB**，连敲 10 字后 Sys **435MB → 112MB**。折行缓存把一帧内约 8 次
+全文折行收成一次命中；输入路径改到字节空间拼接，不再把全文转 `[]rune`；
+应用层的撤销栈与状态栏也不再按全文拷贝。顺着这条线还修了 `input` / `select`
+可见窗口的每帧 O(n²)：20,000 字符的 input 从 **860ms / 201MB 每帧**降到
+**0.16ms / 0.003MB**，`select` 的 20 万字符 option 也从跑不完降到
+0.33ms/帧。新增公开 API `engine.SelectionLength`（只返回选区 rune 数、
+不复制文本）。无破坏性变更，按 minor 收口。
 
 **修复：大文本 textarea 打开即涨到 400MB（实测常驻 400MB+ → 105MB）**。
 用 `examples/notepad` 打开 19.5MB 的 `LICENSES.chromium.html`（360,214 行），
@@ -94,8 +105,26 @@
   `len([]rune(value))` 热路径统一改为零分配的 `runeLen` / 命中缓存的
   `valueRuneLen`。
 - `loadFile` 的 `string(data)` 由两次合并为一次（少一次 19.5MB 瞬时复制）。
-- 新增公开 API：`engine.SelectionLength`（`docs/ai/api-reference.md` 待重新
-  生成时纳入）。
+- 新增公开 API：`engine.SelectionLength`（`docs/ai/api-reference.md` 已重新
+  生成纳入）。
+
+**修复：写系统剪贴板偶发失败（连续复制 8 轮里会丢 1~3 轮）**。
+`SDL_SetClipboardText` 在 Windows 上打不开剪贴板就返回 -1，而 `browser`
+的 Ctrl+C 路径不看返回值——用户按了复制、粘出来还是旧内容，且无法稳定复现。
+根因是 Windows 剪贴板为全局独占资源（剪贴板历史、输入法、其它编辑器随时
+可能占着它），SDL 自带的重试（约 10×10ms）仍会漏。`backend/sdl2` 改为失败
+后重试 5 轮（间隔 2/4/6/8ms，共约 20ms）：修复后连续 40 轮「写探针 →
+写 hello world」0 失败，整包 `go test ./...` 下 `TestRunConsumesSelectionKeys`
+的随机假失败随之消失（该用例另补读回兜底：写探针仍写不进去就跳过，而不是
+误报成复制链路断裂）。
+
+**测试：每帧回调用例不再依赖系统计时粒度（假失败修复）**。
+`TestFrameHandlerKeepsLoopBusy` 原先用「200ms 内回调次数 ≥30」反推主循环的
+休眠档位。Windows 的 `Sleep(1)` 并不保证 1ms——默认计时器粒度 15.6ms，
+`go test ./...` 各包并发时实测只跑 12~14 次，整包必红而单跑必过。主循环
+新增未导出字段 `Window.delay`（默认 `sdl.Delay`），用例换成记录器后直接
+断言请求值：busy 期间全为 1ms、空闲期间全为 10ms。单次耗时也从 0.25s 降到
+0.08s；把 `idleDelay(true)` 改回 10ms 仍能稳定抓到（变异验证）。
 
 **修复：`input` / `select` 的可见窗口每帧 O(n²)**。顺着 textarea 的问题排查其它
 标签，`input` 的 `inputVisibleWindow`（`engine/text_input.go`）与 `select` 的
