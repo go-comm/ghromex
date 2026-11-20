@@ -619,6 +619,18 @@ type lineItem struct {
 	valign VerticalAlign
 }
 
+// lineRunSeg 记当前行写进某个文本节点 runs 尾部的区间 [start, end)。
+//
+// 文本项不再进 lineItem 缓冲暂存（见 layoutChildren 里 addTextRun 的说明），
+// 落位时就直接写 run，但行盒的最终 ascent 要等整行排完才知道，所以写进去的
+// y 是 provisional 值（游标示），行尾由 flushLine 按整行常量统一平移——被
+// 平移的区间就靠这张段表来定。段与段互不重叠，故平移时不必排序。
+type lineRunSeg struct {
+	tn    *textNode
+	start int
+	end   int
+}
+
 // inlineBoxBaseline 计算原子行内盒（inline-block 控件、行内元素等）的基线
 // 位置：返回基线以上的高度（自**外盒顶边**算起，含上外边距）与基线以下的
 // 高度。口径对齐 Chrome：
@@ -914,6 +926,85 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 	// 那趟两轮收敛；纯文本行（19.5MB credits 页全是）不需要。
 	lineHasVAlign := false
 
+	// 行内文本项不经过 curLine 暂存：落位时直接写进所属文本节点的 runs，
+	// 位置按整行常量落 provisional 值，行尾由 flushLine 一次性平移。这样
+	// 逐 token 的中间态就从 112B（lineItem）降到 0——超长不折行的行（pre /
+	// nowrap）每轮不再按项数重新 grow 几十万项的暂存缓冲。
+	//
+	// curLine 只留**原子盒**（行内盒 / inline-block）：它们的位置来自
+	// layoutBox 的副作用（图元记下命名盒坐标），算式改不了，仍需行尾的
+	// shiftBox/shiftInlineX；vertical-align 的收敛也只遍历它们。
+	//
+	// lineCount 是当前行的行内项数（文本项 + 原子盒）：判断「本行是否已有
+	// 内容」用。旧口径是 len(curLine) > 0，文本项不再进缓冲后要另计。
+	lineCount := 0
+	// lineSegs 记当前行写进各文本节点 runs 的区间：文本项落位即写 run，
+	// 行尾 flushLine 按整行常量（基线增量 + text-align 平移）统一平移，
+	// 不必逐项暂存行盒。
+	var lineSegs []lineRunSeg
+
+	// addSeg 为当前行记一段：该文本节点在本行的 run 区间 [start, end)。
+	// 同节点在同一行可能分成几段（中间夹了别的节点/原子盒的项），故与上一
+	// 段同节点时并上去，否则另起一段。
+	addSeg := func(tn *textNode, start, end int) {
+		if n := len(lineSegs); n > 0 {
+			if last := &lineSegs[n-1]; last.tn == tn && last.end == start {
+				last.end = end
+				return
+			}
+		}
+		lineSegs = append(lineSegs, lineRunSeg{tn: tn, start: start, end: end})
+	}
+
+	// addTextRun 把一个文本 token 写进 tn 的 runs，记下本行区间。
+	// y 先落**游标**值：行盒的最终 ascent 要等整行排完才知道，而基线对齐
+	// 的项一律是「y = 基线 − 自身 ascent」，故这些项在游标处就相同，行尾
+	// 统一加上（asc − 自身 ascent + baselineAdjust）即可——同一行的文本
+	// 项都满足这条，于是 flushLine 能把「整行公共增量」退化成「按区间
+	// 平移已有 runs」——每项落位的 y 再加（行盒 asc − 自身 asc +
+	// baselineAdjust），自身 asc 就在该项自己的字段里。
+	//
+	// runs 是布局结果、也是全页最大的一块内存：内容每轮照旧重写，但底层
+	// 数组跨轮复用（每个文本节点每轮从 [:0] 起写，只是换掉已存在的槽位），
+	// 不再每轮从 nil 重新 grow。这同时收掉了旧行盒暂存缓冲 curLine 的
+	// 整个来源——超长单行的峰值不再是一份 112B/项 的副本（pre 1M 字符一
+	// 行 40 万项 ≈ 45MB）。
+	addTextRun := func(tn *textNode, tok string, w, asc, desc, leadAsc, leadDesc int) {
+		runs := tn.node.runs
+		if len(runs) < cap(runs) {
+			runs = runs[:len(runs)+1]
+		} else {
+			runs = append(runs, textRun{})
+		}
+		r := &runs[len(runs)-1]
+		r.text = tok
+		r.x = cursorX
+		r.y = cursorY
+		r.w = w
+		r.h = asc + desc
+		r.asc = asc
+		tn.node.runs = runs
+		// 段表：同一文本节点在本行连续发射的 run 并成一段（runs 下标就是
+		// 该节点内部的序号）。normal 分词里 "a"、空格、"b" 是不同节点、
+		// 交替发射，同节点的项被打断后另起一段（新起点必然大于旧起点）。
+		if n := len(lineSegs); n > 0 && lineSegs[n-1].tn == tn {
+			lineSegs[n-1].end = len(runs)
+		} else {
+			addSeg(tn, len(runs)-1, len(runs))
+		}
+		lineCount++
+		cursorX += w
+		if leadAsc > lineAsc {
+			lineAsc = leadAsc
+		}
+		if leadDesc > lineDesc {
+			lineDesc = leadDesc
+		}
+		if cursorX > maxRight {
+			maxRight = cursorX
+		}
+	}
+
 	// flushPendingSpace 把待定空格落位到当前行（作为独立文本 run）。
 	// 必须在**下一个行内盒布局之前**调用：行内盒的位置由 layoutBox 按游标
 	// 决定，空格若在其后追加，盒子会落在空格之前。
@@ -927,49 +1018,23 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 		// 间隙空格也要参与换行判断：游标已排到右边界时把它丢弃（行首空格
 		// 按 CSS 折叠），下一项会触发换行。否则空格把游标顶出右界后，
-		// addItem 的 right >= it.x 恒为 false，整行都不再换行（行尾溢出）。
-		// nowrap / pre 不折行，空格照留。
+		// addTextItem 的 cursorX+w > right 一路成立，整行都在换行（行尾
+		// 溢出）。nowrap / pre 不折行，空格照留。
 		if softWrap {
-			if _, right := lineBounds(cursorY); len(curLine) > 0 && cursorX+spaceW > right {
+			if _, right := lineBounds(cursorY); lineCount > 0 && cursorX+spaceW > right {
 				return
 			}
 		}
-		// 间隙空格也写进槽位（见 addPreToken 的说明：逐字段写才避免整份拷贝）。
-		if len(curLine) < cap(curLine) {
-			curLine = curLine[:len(curLine)+1]
-		} else {
-			curLine = append(curLine, lineItem{})
-		}
-		it := &curLine[len(curLine)-1]
-		it.tn = pendingTN
-		it.el = nil
-		it.token = " "
-		it.x = cursorX
-		it.y = cursorY
-		it.w = spaceW
-		it.asc = spaceAsc
-		it.desc = spaceDesc
-		it.leadAsc = spaceLeadAsc
-		it.leadDesc = spaceLeadDesc
-		it.shift = 0
-		it.valign = VerticalAlignBaseline
-		cursorX += spaceW
-		if spaceLeadAsc > lineAsc {
-			lineAsc = spaceLeadAsc
-		}
-		if spaceLeadDesc > lineDesc {
-			lineDesc = spaceLeadDesc
-		}
-		if cursorX > maxRight {
-			maxRight = cursorX
-		}
+		// 空格也直接写成一个 run（与其他文本项同口径）。
+		addTextRun(pendingTN, " ", spaceW, spaceAsc, spaceDesc, spaceLeadAsc, spaceLeadDesc)
+		lineCount++
 	}
 
 	flushLine := func() {
 		// text-align：行宽不足可用行宽时整体平移（溢出时 dx 钳 0，左对齐语义
 		// 不变）。可用行宽按浮动收缩后的右边界算（见 lineBounds）。
 		dx := 0
-		if align != TextAlignLeft && len(curLine) > 0 {
+		if align != TextAlignLeft && lineCount > 0 {
 			_, right := lineBounds(cursorY)
 			if free := right - cursorX; free > 0 {
 				if align == TextAlignCenter {
@@ -983,7 +1048,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		// 行内盒比 strut 矮时行盒仍按 strut 计高。空行（无任何行内内容，
 		// 例如块级子元素前后）不计 strut——那种情形浏览器也不生成行盒。
 		asc, desc := lineAsc, lineDesc
-		if len(curLine) > 0 {
+		if lineCount > 0 {
 			if asc < strutAsc {
 				asc = strutAsc
 			}
@@ -997,12 +1062,19 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 			//
 			// 只有行内**真有** top/bottom 原子盒时才需要这两轮：没有的话
 			// 循环既不改动任何项，重算的最大值也必然等于 lineAsc/lineDesc
-			// （各项 leadAsc/leadDesc 在 addItem/addPreToken 落位时已经累加进
-			// 去，asc 又取过 strut 的最大）。而这一趟要按 120B/项把整行读两
-			// 遍——纯文本页（19.5MB credits 全是 pre 文本）等于每次重排白扫
-			// 近 1GB 内存，profile 里 flushLine 的 38% 几乎全是它。
+			// （各项贡献在落位时已经累加进去，asc 又取过 strut 的最大）。
+			// 而这一趟要按 112B/项把整行读两遍——纯文本页（19.5MB credits
+			// 全是 pre 文本）等于每次重排白扫近 1GB 内存。
+			//
+			// 文本项恒为基线对齐，其贡献在落位时已混进 lineAsc/lineDesc
+			// （再取过 strut 的最大，得到上面的 asc/desc），所以缓冲里
+			// 只剩原子盒，这两轮只遍历它们即可——不必再扫一遍整行。
+			//
+			// 收敛以 asc/desc 初值为底，只追加上盒的贡献（盒只会被抬得
+			// 更高、不会被压低），两轮即收敛。
 			if lineHasVAlign {
 				for iter := 0; iter < 2; iter++ {
+					newAsc, newDesc := asc, desc
 					for i := range curLine {
 						it := &curLine[i]
 						switch it.valign {
@@ -1019,10 +1091,6 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 						default:
 							continue
 						}
-					}
-					newAsc, newDesc := asc, desc
-					for i := range curLine {
-						it := &curLine[i]
 						if it.leadAsc > newAsc {
 							newAsc = it.leadAsc
 						}
@@ -1043,52 +1111,62 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		// 「立即抢购」等都是定高按钮）。行盒高度按 strut 估（单行按钮与
 		// Chrome 一致；多行按钮是近似）。
 		dy := 0
-		if len(curLine) > 0 && pctH > 0 && isButtonElement(el) {
+		if lineCount > 0 && pctH > 0 && isButtonElement(el) {
 			if lineH := asc + desc; lineH > 0 && pctH > lineH {
 				dy = (pctH - lineH) / 2
 			}
 		}
-		// 按索引取指针，避免每行每项拷贝一份 120B 的 lineItem（行内内容多的
-		// 长 pre，一次重排就是几百万次拷贝）。
+		// 按索引取指针，避免每行每项拷贝一份 112B 的 lineItem。现在缓冲里
+		// 只剩原子盒（文本项已在落位时直接写进 runs），行内盒多的行才有点
+		// 开销。
+		//
+		// 基线对齐：各内联盒的顶边 = 行基线 − 自身 ascent，于是不同字号
+		// 的文字共享同一基线（浏览器的行盒语义）。原子盒另按 vertical-align
+		// 的位移 shift 摆位（正=向上抬高）。baselineAdjust 是与 Chrome 对照
+		// 的全局微调（只挪基线，不动行盒高度，故不影响行距与盒尺寸）。
 		for i := range curLine {
 			it := &curLine[i]
-			// 基线对齐：各内联盒的顶边 = 行基线 − 自身 ascent，于是不同字号
-			// 的文字共享同一基线（浏览器的行盒语义）。原子盒另按
-			// vertical-align 的位移 shift 摆位（正=向上抬高）。
-			// baselineAdjust 是与 Chrome 对照的全局微调（只挪基线，不动
-			// 行盒高度，故不影响行距与盒尺寸）。
-			y := it.y + dy + (asc - it.asc - it.shift) + baselineAdjust
-			if it.tn != nil {
-				// 同 addPreToken：直接写进 runs 的槽位，避免 56B 的 textRun
-				// 先在栈上构造再拷进底层数组（每 token 一项，全页 450 万项）。
-				runs := it.tn.node.runs
-				if len(runs) < cap(runs) {
-					runs = runs[:len(runs)+1]
-				} else {
-					runs = append(runs, textRun{})
-				}
-				r := &runs[len(runs)-1]
-				r.text = it.token
-				r.x = it.x + dx
-				r.y = y
-				r.w = it.w
-				r.h = it.asc + it.desc
-				r.asc = it.asc
-				it.tn.node.runs = runs
-			} else if it.el != nil {
-				if dy := y - it.y; dy != 0 {
-					shiftBox(it.el, 0, dy)
-				}
-				if dx != 0 {
-					shiftInlineX(it.el, dx)
-				}
+			if it.el == nil {
+				continue
 			}
+			y := it.y + dy + (asc - it.asc - it.shift) + baselineAdjust
+			if shift := y - it.y; shift != 0 {
+				shiftBox(it.el, 0, shift)
+			}
+			if dx != 0 {
+				shiftInlineX(it.el, dx)
+			}
+		}
+		// 文本项的收尾平移：落位时 y 停在游标值，这里补上「整行公共的
+		// dy + asc + baselineAdjust − 自身 ascent」（dy 是定高 button 的
+		// 内容居中量；各文本项自身的 ascent 已经存在 asc 字段里，减去即得
+		// 文本顶边），x 补上 text-align 的平移。
+		//
+		// 除最后一段前，各段都已闭合（end 是切走时的 len），直接按区间平移；
+		// 最后一段未闭合（end=0），按「到当前尾」平移后闭合——沿路可能有别的
+		// 行盒往这里追加过（如后续文本项），切走后不会再追加。
+		offY := dy + asc + baselineAdjust
+		for i := range lineSegs {
+			seg := &lineSegs[i]
+			runs := seg.tn.node.runs
+			end := seg.end
+			if end == 0 {
+				end = len(runs)
+			}
+			for j := seg.start; j < end; j++ {
+				r := &runs[j]
+				r.x += dx
+				r.y += offY - r.asc
+			}
+			seg.end = end
 		}
 		if asc+desc > 0 {
 			cursorY += asc + desc
 		}
 		lineAsc, lineDesc = minInt(0, strutAsc), minInt(0, strutDesc)
 		curLine = curLine[:0]
+		lineSegs = lineSegs[:0]
+		lineCount = 0
 		lineHasVAlign = false
 		// 换行后游标回到行首；有左浮动时让到其右缘。
 		cursorX = cx
@@ -1097,7 +1175,6 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 	}
 
-	// ---- white-space：布局路径 ----
 	// 模式已在闭包之前统一算出（wsMode/preserveWS/softWrap），这里只排
 	// 版 pre / pre-wrap 的文本落位与制表位测量。
 	preSpaceW := 0
@@ -1114,56 +1191,26 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		if w < 0 {
 			w = 0
 		}
-		if wrap && len(curLine) > 0 {
+		if wrap && lineCount > 0 {
 			if _, right := lineBounds(cursorY); cursorX+w > right {
 				flushLine()
 			}
 		}
 		asc, desc := fontMetricsW(g, tok, fontPx, weightNum, bold, family)
 		leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
-		// 直接写进缓冲槽位：lineItem 有 120B，`append(curLine, lineItem{...})`
-		// 会先在栈上构造一份再整份拷进底层数组——每 token 两趟写内存，全页
-		// 450 万 token 就是 1GB 的纯搬运。这里手动扩容后逐字段写，**所有字段
-		// 都要写全**：缓冲跨轮复用，槽位里可能留着上一轮的旧值。用结构体字面量
-		// `*it = lineItem{...}` 会退化成同款栈上构造+整份拷贝（实测 credits
-		// 197 → 215ms），逐字段写才让编译器直接落进槽位。
-		if len(curLine) < cap(curLine) {
-			curLine = curLine[:len(curLine)+1]
-		} else {
-			curLine = append(curLine, lineItem{})
-		}
-		it := &curLine[len(curLine)-1]
-		it.tn = tn
-		it.el = nil
-		it.token = tok
-		it.x = cursorX
-		it.y = cursorY
-		it.w = w
-		it.asc = asc
-		it.desc = desc
-		it.leadAsc = leadAsc
-		it.leadDesc = leadDesc
-		it.shift = 0
-		it.valign = VerticalAlignBaseline
-		cursorX += w
-		if leadAsc > lineAsc {
-			lineAsc = leadAsc
-		}
-		if leadDesc > lineDesc {
-			lineDesc = leadDesc
-		}
-		if cursorX > maxRight {
-			maxRight = cursorX
-		}
+		addTextRun(tn, tok, w, asc, desc, leadAsc, leadDesc)
 		prevBlockMB = -1
 		lastInline = true
 	}
 	breakPreLine := func() {
 		// 连续换行之间的空行也要占一个 strut 高（浏览器 pre 的空行不是 0 高）。
-		if len(curLine) == 0 {
+		if lineCount == 0 {
 			lineAsc, lineDesc = strutAsc, strutDesc
 		}
 		flushLine()
+		// pre / pre-line 的源换行是硬断行：行内盒（atomic inline）不能跨它
+		// 衔接，换行后重置「上一个行内项」状态，下一项再算自己的盒顶。
+		lastInline = false
 	}
 	addPreText := func(tn *textNode, raw string, wrap bool) {
 		// HTML 规范：只有 <pre>（及 textarea/listing）在开标签后紧跟的
@@ -1253,36 +1300,17 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		}
 		flushWord(len(raw))
 	}
-	addItem := func(it lineItem) {
-		_, right := lineBounds(it.y)
-		// 放不下就换行。这里不排除「游标已在右界之外」的情形：上一项本身
-		// 超宽（长单词/原子盒）时，后续项必须回到新行，否则整段都会粘在
-		// 同一行溢出（游标一旦越过右界，right >= it.x 之类的守卫会永久
-		// 关闭换行）。nowrap / pre 不软换行：整行溢出而不是折回。
-		if softWrap && len(curLine) > 0 && it.x+it.w > right {
-			flushLine()
-			it.x = cursorX
-			it.y = cursorY
+	addTextItem := func(tn *textNode, tok string, tw, asc, desc, leadAsc, leadDesc int) {
+		// 放不下就换行。不排除「游标已在右界之外」的情形：上一项本身超宽
+		// （长单词/原子盒）时，后续项必须回到新行，否则整段都会粘在同一行
+		// 溢出。nowrap / pre 不软换行：整行溢出而不是折回。
+		if softWrap && lineCount > 0 {
+			if _, right := lineBounds(cursorY); cursorX+tw > right {
+				flushLine()
+			}
 		}
-		curLine = append(curLine, it)
-		// 只有 top/bottom 的原子盒需要 flushLine 跑两轮收敛（位移依赖行盒
-		// 最终高度）。标记放在 append 之后：addItem 里的软换行可能先调
-		// flushLine（那里会把标记清掉），标记必须在换行之后重新置上。
-		if it.valign == VerticalAlignTop || it.valign == VerticalAlignBottom {
-			lineHasVAlign = true
-		}
-		cursorX += it.w
-		// 行盒高度取各项**贡献**的最大值（贡献含行距 leading 与
-		// vertical-align 位移，见 lineItem 的说明）。
-		if it.leadAsc > lineAsc {
-			lineAsc = it.leadAsc
-		}
-		if it.leadDesc > lineDesc {
-			lineDesc = it.leadDesc
-		}
-		if cursorX > maxRight {
-			maxRight = cursorX
-		}
+		addTextRun(tn, tok, tw, asc, desc, leadAsc, leadDesc)
+		lineCount++
 		// 行内内容隔开两侧块盒：CSS 规定 margin 折叠仅发生在真正相邻的
 		// 块盒之间（行盒 / inline-block / 脱流盒不算分隔，但行内容算）。
 		prevBlockMB = -1
@@ -1317,13 +1345,11 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 					flushed = true
 				}
 				tw, _ := measureTextW(g, tok, fontPx, weightNum, bold, family)
-				if tw <= 0 {
-					return
+				if tw > 0 {
+					asc, desc := fontMetricsW(g, tok, fontPx, weightNum, bold, family)
+					leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
+					addTextItem(tn, tok, tw, asc, desc, leadAsc, leadDesc)
 				}
-				asc, desc := fontMetricsW(g, tok, fontPx, weightNum, bold, family)
-				leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
-				addItem(lineItem{tn: tn, token: tok, x: cursorX, y: cursorY, w: tw,
-					asc: asc, desc: desc, leadAsc: leadAsc, leadDesc: leadDesc})
 			})
 			if hasTrailingBlank(seg) && (flushed || lastInline) {
 				pendingSpace = true
@@ -1362,13 +1388,11 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 					flushed = true
 				}
 				tw, _ := measureTextW(g, tok, fontPx, weightNum, bold, family)
-				if tw <= 0 {
-					return
+				if tw > 0 {
+					asc, desc := fontMetricsW(g, tok, fontPx, weightNum, bold, family)
+					leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
+					addTextItem(tnc, tok, tw, asc, desc, leadAsc, leadDesc)
 				}
-				asc, desc := fontMetricsW(g, tok, fontPx, weightNum, bold, family)
-				leadAsc, leadDesc := applyLeading(asc, desc, lhPx)
-				addItem(lineItem{tn: tnc, token: tok, x: cursorX, y: cursorY, w: tw,
-					asc: asc, desc: desc, leadAsc: leadAsc, leadDesc: leadDesc})
 			})
 			// 尾随空白：其后若还有行内内容则保留为间隙空格；若后面是块级
 			// 子元素则丢弃（CSS 移除行尾空格）。
@@ -1554,7 +1578,7 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 		// 原子盒（行内盒/inline-block）放不下也折行——nowrap / pre 除外：
 		// 这两档不软换行，超宽盒直接溢出（Chrome 同款）。
 		if softWrap {
-			if _, right := lineBounds(cursorY); len(curLine) > 0 && cursorX+ow > right {
+			if _, right := lineBounds(cursorY); lineCount > 0 && cursorX+ow > right {
 				flushLine()
 				ow, oh = layoutBox(g, che, contentW, maxZero(contentH-(cursorY-cy)), cx, cursorY, contentW, pctH, childExcl)
 			}
@@ -1583,10 +1607,43 @@ func layoutChildren(g Graphics, el *htmlElement, contentW, contentH, pctH, cx, c
 				fontPx, verticalAlignRaise(che.computed, ownLineHeight(g, che.computed)))
 			leadAsc, leadDesc = asc+shift, desc-shift
 		}
-		it := lineItem{x: cursorX, y: cursorY, w: maxInt(ow, 1),
-			asc: asc, desc: desc, leadAsc: leadAsc, leadDesc: leadDesc,
-			shift: shift, valign: valign, el: che}
-		addItem(it)
+		// 原子盒只进 curLine 等行尾定位：它自己的位置来自 layoutBox 的副作用
+		// （图元记下命名盒坐标），改不了算式，行尾只能按盒的实际坐标补平移。
+		curLine = append(curLine, lineItem{})
+		it := &curLine[len(curLine)-1]
+		it.el = che
+		it.x = cursorX
+		it.y = cursorY
+		it.w = maxInt(ow, 1)
+		it.asc = asc
+		it.desc = desc
+		it.leadAsc = leadAsc
+		it.leadDesc = leadDesc
+		it.shift = shift
+		it.valign = valign
+		// 只有 top/bottom 的原子盒需要 flushLine 跑两轮收敛（位移依赖行盒
+		// 最终高度）。标记放在 append 之后：上面那次布局里的软换行可能先调
+		// 了 flushLine（那里会把标记清掉），标记必须在换行之后重新置上。
+		if valign == VerticalAlignTop || valign == VerticalAlignBottom {
+			lineHasVAlign = true
+		}
+		// 行盒高度取各项**贡献**的最大值（贡献含行距 leading 与
+		// vertical-align 位移，见 lineItem 的说明）。
+		if leadAsc > lineAsc {
+			lineAsc = leadAsc
+		}
+		if leadDesc > lineDesc {
+			lineDesc = leadDesc
+		}
+		cursorX += maxInt(ow, 1)
+		lineCount++
+		if cursorX > maxRight {
+			maxRight = cursorX
+		}
+		// 行内内容隔开两侧块盒：CSS 规定 margin 折叠仅发生在真正相邻的
+		// 块盒之间（行盒 / inline-block / 脱流盒不算分隔，但行内容算）。
+		prevBlockMB = -1
+		lastInline = true
 	}
 
 	flushLine()

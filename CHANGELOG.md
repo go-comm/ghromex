@@ -351,6 +351,47 @@ credits 页 780 个 `<pre>`、0 个 `<p>`，`<pre>` 走 `addPreText`，两条路
   `examples/ua` 与 `examples/notepad` 的 `-dump-svg` 与上一提交**逐字节一致**
   （SHA256）。
 
+**文本项直接落 `runs`，行盒不再暂存：不折行 `<pre>` 1M 字符 257MB → 2.6KB**。
+阶段一让行盒累加缓冲 `curLine` 跨轮复用，但**增长**照旧：不折行的行
+（`white-space:pre`、`nowrap`）一行几十万项，`maxLineScratch`（4096）之外的
+一律不留，于是每轮仍从零 grow——单节点 `<pre>` 1M 字符实测**每轮 257MB 分配 /
+52ms**，全在 `layoutChildren` 往 `curLine` 追加 112B 的 `lineItem` 上。可文本项
+终归只是写进所属文本节点 `runs` 的一项，这条中间缓冲本是白付的。
+
+- **落位即写 run**：新增 `addTextRun`，把 token / x / 宽 / ascent 直接写进
+  `tn.node.runs` 尾部（`len<cap` 走 `[:len+1]`）。`flushPendingSpace` 的间隙
+  空格、`addPreToken`、`tokenizeText` 的两个回调全改走它——`curLine` 此后
+  **只装原子盒**（行内元素的图元盒），文本行不再 grow 任何暂存缓冲。
+- **y 先落 provisional，行尾按区间批量平移**：基线要等整行排完才知道，故
+  文本项的 y 先落**游标**值，`flushLine` 再按整行常量补
+  `±(asc + baselineAdjust)`（`asc` = 行盒 ascent）、x 补 `text-align` 的 `dx`。
+  同一行的文本项增量完全一致，于是「逐项暂存、逐项回算」退化成按区间批量
+  相加——区间记在新增的段表 `lineRunSeg{tn, start, end}` 里，每轮每节点通常
+  只一段，平移只回读 `x`/`y`/`asc` 三个字段。
+- **`lineCount` 取代 `len(curLine)` 判「本行有无内容」**：软换行的
+  `lineCount > 0` 守卫、空行 / struts 判定、`<button>` 内容居中的 `dy` 都改用
+  它。文本项已不进缓冲，再按长度判会把整行误当空行。
+- **`vertical-align: top/bottom` 收敛以 `asc`/`desc` 初值为底**：文本与 strut
+  的贡献在落位时已并进 `lineAsc`/`lineDesc`，收敛循环只遍历剩余的原子盒，
+  每轮从当前 `asc`/`desc` 追加盒贡献，不再对整个 `curLine` 取 max（那会丢掉
+  文本与 strut 的贡献，`top` 盒的行盒塌成盒高）。
+- **`breakPreLine` 之后重置 `lastInline`**：pre / pre-line 的源换行是硬断行，
+  下一行的行内盒不该接着上一行算盒顶。
+
+同口径对比（无头探针，稳定态单次 `LayoutDocument` 的耗时 / 分配；基线
+`688c360`）：
+
+| 场景 | 基线 | 本阶段 |
+|---|---|---|
+| 真实 credits 页（19.5MB / 780 `<pre>`） | 327.6ms / 35.95MB | **178~190ms / 10.75~10.86MB** |
+| 单节点 `<p>` 1M 字符（可折行） | 21.0ms / 35.51MB | **9.4~12.4ms / 2,054~2,102 字节** |
+| 单节点 `<pre>` 1M 字符（不折行） | 52.1ms / 257.14MB | **7.8~10.3ms / 2,654~2,681 字节** |
+
+逐字节不变：`examples/ua`、`examples/notepad` 的 `-dump-svg` 与 `688c360` 基线
+SHA256 全等（`4a8d8a66…` / `364df932…`）；稳定态常驻堆 `HeapAlloc` 重排前后相等
+（credits 459.7 → 459.7MB，1M 单节点 26.0 → 26.0MB），重排不再净分配。`go build
+./...`、`go vet ./...`、`go test ./... -count=1` 全绿。
+
 ## v0.5.0 — 2026-10-28
 
 **大文档性能与交互响应**。以 714KB / 65,080 节点（27,501 元素 + 37,579 文本）
