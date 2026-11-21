@@ -125,9 +125,9 @@ type htmlDocument struct {
 	images     map[string]*imageEntry
 	imgReady   atomic.Int32
 	bgImgReady atomic.Int32
-	head     HTMLHeadElement
-	body      HTMLBodyElement
-	focus     HTMLElement // 当前聚焦的元素（可编辑输入、按钮、链接等），nil 无焦点
+	head       HTMLHeadElement
+	body       HTMLBodyElement
+	focus      HTMLElement // 当前聚焦的元素（可编辑输入、按钮、链接等），nil 无焦点
 	// hover 是鼠标当前悬停的元素（:hover 规则的依据），active 是鼠标
 	// 按下中的元素（:active 规则）。两者变化都会改样式，故与 focus 一样
 	// 走 markChanged → 重排重绘 → 级联重算。
@@ -172,11 +172,11 @@ type htmlDocument struct {
 	// 模型与级联，只需重平移，不必每帧全量重排。lastLayoutChange 是上次
 	// 全量布局时的 changed，lastAppliedScrollMark 是上次已平移到的滚动
 	// 标记——相等即无新滚动可平。
-	scrollMark          int64
-	lastLayoutChange    int64
+	scrollMark            int64
+	lastLayoutChange      int64
 	lastAppliedScrollMark int64
-	onChanged  func()
-	onNavigate func(href string)
+	onChanged             func()
+	onNavigate            func(href string)
 	// vpW/vpH 是上次布局时的视口尺寸。窗口缩放后后端只强制重排、并不
 	// 改文档内容（onChanged 不触发），应用层无从得知窗口变了——而
 	// 「编辑区铺满窗口剩余区域」这类 chrome 必须跟着窗口尺寸走。布局

@@ -100,14 +100,14 @@ func TestBackgroundRepeatTiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenBufferedDocument: %v", err)
 	}
-	assertPainted(t, buf, 0, 0, 255, 0, 0)   // 第一块左上：红
-	assertPainted(t, buf, 1, 0, 0, 255, 0)   // 绿
-	assertPainted(t, buf, 0, 1, 0, 0, 255)   // 蓝
+	assertPainted(t, buf, 0, 0, 255, 0, 0) // 第一块左上：红
+	assertPainted(t, buf, 1, 0, 0, 255, 0) // 绿
+	assertPainted(t, buf, 0, 1, 0, 0, 255) // 蓝
 	assertPainted(t, buf, 1, 1, 255, 255, 255)
-	assertPainted(t, buf, 2, 0, 255, 0, 0)   // 第二块起点 x=2
-	assertPainted(t, buf, 4, 0, 255, 0, 0)   // 第三块只露一列：源第 0 列
-	assertPainted(t, buf, 4, 1, 0, 0, 255)   // 源第 0 列第 1 行
-	assertPainted(t, buf, 0, 4, 255, 0, 0)   // 竖向第三块只露一行：源第 0 行
+	assertPainted(t, buf, 2, 0, 255, 0, 0) // 第二块起点 x=2
+	assertPainted(t, buf, 4, 0, 255, 0, 0) // 第三块只露一列：源第 0 列
+	assertPainted(t, buf, 4, 1, 0, 0, 255) // 源第 0 列第 1 行
+	assertPainted(t, buf, 0, 4, 255, 0, 0) // 竖向第三块只露一行：源第 0 行
 }
 
 // TestBackgroundPositionOffsets 断言 background-position：百分比与关键字
