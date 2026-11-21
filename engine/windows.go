@@ -81,6 +81,9 @@ func LayoutDocument(doc HTMLDocument) {
 		// 先收图片结果：worker 完成一次解码就给 changed 记一笔，本次必须走
 		// 全量布局（下面「只发生过滚动」的增量判据会因差额不等而失效）。
 		hd.drainImages()
+		// 背景图到货只算重绘账：这里加计数不影响本轮布局（背景不参与布局），
+		// 但必须收口，否则主循环比对 PaintCount 时漏掉这一笔，图永远不露。
+		hd.drainBackgroundImages()
 		// 把位图绑定到 <img> 上，并登记尚未加载的引用（异步 worker）。
 		resolveImages(hd)
 		// 先比对尺寸再判快路径：本次布局用的就是新尺寸，尺寸这笔账要落在

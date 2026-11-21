@@ -476,6 +476,10 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 			if bg := comp.BackgroundColor(); bg != nil {
 				fillRoundedRect(g, bx, by, bw, bh, r, bg)
 			}
+			// 背景图层画在背景**色**之上、边框之下（CSS 的层叠顺序：背景色
+			// → background-image 层 → 边框 → 内容）。图层里的 url 在绘制期
+			// 才绑定（级联期拿不到文档 BaseURL），到货后只触发重绘。
+			paintBackgroundImages(g, base, comp, bx, by, bw, bh, r, pd, bd)
 			if hasBorder && bw > 0 && bh > 0 {
 				strokeRoundedRectSides(g, bx, by, bw, bh, r, paintBD, borderColors)
 			}

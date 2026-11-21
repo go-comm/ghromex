@@ -18,6 +18,59 @@
 
 ## 未发布
 
+**CSS 背景图层：`background-image` 全套单层语义 + 多层叠放**。引擎此前只认
+`background-color`：作者写 `background-image: url(...)` 时整条声明被丢弃（`background`
+简写也只取颜色 token）。本轮把 CSS Backgrounds 3 的背景部分补齐到「能用的程度」——
+`background-image`（`url()` / `none`）、`background` 简写、`background-repeat`、
+`background-position`、`background-size`、`background-origin`、`background-clip`
+共七个属性，多层按 CSS 顺序叠放（**首层画在最上面**），背景色画在所有层之下。
+图片字节仍由宿主注入（`DocumentOptions.LoadImage`），引擎不读文件、不联网，
+纯 Go 无 CGO 的约束不变。
+
+- **图层存储**：样式对象新增 `background []backgroundLayer`（切片头 24B 落在指针段
+  末尾）。每层存：原始引用（未解析）、已绑定位图、`background-position` 的两轴、
+  `background-size` 的两轴与模式（auto/cover/contain）、平铺方式、定位盒
+  （origin）与裁剪盒（clip）口径。三个单字节口径（repeat / sizeMode /
+  origin+clip）打进一个 `backgroundKey`，由**共享字典**（intern）持有——全初始值
+  的图层不占字典项；改口径必须换指针（字典可能被多个元素共用，就地改会串味）。
+- **值表循环对齐**：CSS Backgrounds 3 §3 的背景长写是「循环表」——取值个数与
+  层数不等时按索引取模（`background-repeat: no-repeat` 作用到所有层；
+  `background-image: a, b, c` + `background-size: cover` 三层都是 cover）。
+  `background-image` 决定层数：新的列表更短就**截断**多余层（连它们的口径一起
+  消失），更长就补初始值层。声明顺序无关（`background-repeat` 写在
+  `background-image` 之前也对得上）。
+- **绑定在绘制期**：级联期拿不到文档 BaseURL（背景引用要按文档地址解析），
+  所以层里存**原始未解析引用**，绘制时用 `resolveURL(doc.baseURL, src)` 绑定
+  位图。加载复用 `<img>` 的异步通路（同一 `src` 只加载一次、worker goroutine
+  加载 + 解码、失败按空图处理）。
+- **到货只重绘**：背景图不影响盒模型，到货后只涨**重绘**计数
+  （`ChangePaintOnly`），不触发重排——42 万元素的页面不该为一张背景图付整树
+  重排的钱。`imageEntry` 因此拆出 `usedByLayout` / `usedByBackground` 两个标记，
+  `<img>` 与背景图各自记账。
+- **绘制**：背景图层画在背景**色**之上、边框之下（CSS 的层叠顺序）。平铺用
+  `pushClip`（裁剪盒）+ 网格起点计算（`floorDiv` 对齐，越界瓦片保留、靠裁剪切
+  边），瓦片数封顶 4096（1px 的图铺满超宽裁剪区不该把一帧吃满）。边缘那一块
+  只画**可见的子矩形**——为此新增 `core.ImageBlitter`（可选扩展接口，
+  `BlitImage(dst, src)`）：后端实现它时按源子矩形回源子块采样，未实现的回落到
+  `Graphics.DrawImage`（整图缩放；背景图路径下源矩形恒为整图，结果一致）。
+  SDL2 后端把位图上传成纹理后按源矩形 `SDL_RenderCopy`；`BufferGraphics` 是
+  最近邻采样。
+- **公开 API**：`BackgroundImage()` / `SetBackgroundImage()` 保留。语义收敛为
+  「单层、铺满、不平铺、边框盒」，与旧的 `DrawImage` 行为兼容；传 `nil` 清空。
+  `copyStyle` 对引擎实现深拷贝图层表（外部实现退回 `SetBackgroundImage`）。
+- **SVG 导出**：平铺用 `<pattern patternUnits="userSpaceOnUse">` + 填充
+  `<rect>` 表达，圆角用 `rx`。
+- **结构体尺寸**：`cssStyleDeclaration` 新增 `background []backgroundLayer`，
+  尺寸不变量 **400B → 408B**（`field_packing_internal_test.go` 同步）。
+- **回归**：新增 `engine/background_internal_test.go`（解析：长写/简写/非法/
+  循环表/字典/几何）与 `engine/background_test.go`（像素落点、平铺瓦片、
+  position 偏移与边偏移、cover/contain、多层叠放、clip/origin 盒、简写、
+  不继承、SVG pattern、异步到货只涨重绘计数、不影响布局、公开 API 往返）。
+  `go build ./...`、`go vet ./...`、`go test ./... -count=1` 全绿；
+  `examples/ua` 与 `examples/notepad` 的 `-dump-svg` 与 `688c360` 基线逐字节一致。
+- 本轮**不做**渐变 `<image>`、`background-attachment: fixed`、`background-repeat`
+  的 `space`/`round` 两种铺法（退化为普通平铺）、圆角遮罩（仍按「角标补盖」近似）。
+
 **`<img>` 图片链路：替换元素布局 + 异步加载 + 解码绘制（PNG / JPEG / GIF）**。
 引擎此前把 `<img>` 当普通空盒：不加载、不解码、`DrawImage` 是空实现（SDL2 侧）或
 洋红占位（软件光栅）。本轮补上完整通路——**字节来源仍由宿主注入**（引擎不读文件、

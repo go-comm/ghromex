@@ -924,6 +924,9 @@ func validSpacingSize(s Size) bool {
 // applyDecl 将单条声明写入样式对象。未识别的属性被忽略。
 func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 	v := strings.ToLower(strings.TrimSpace(value))
+	// raw 保留原始大小写：url() 里的引用与 data: URL 的 base64 载荷是大小写
+	// 敏感的，只有关键字类属性才用降过大小写的 v。
+	raw := strings.TrimSpace(value)
 	switch prop {
 	case "display":
 		switch v {
@@ -1158,11 +1161,44 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 			comp.SetBackgroundColor(c)
 		}
 	case "background":
-		for _, part := range strings.Split(value, " ") {
-			if c := parseColor(part); c != nil {
-				comp.SetBackgroundColor(c)
-				break
+		// 简写：重置整张图层表并取背景色。解析失败（非法取值）时整条声明
+		// 忽略——CSS 的语义是「声明要么全部生效要么全部无效」。
+		//
+		// 传 **raw**（只 trim 不降大小写）：url() 里的引用是大小写敏感的，
+		// data: URL 的 base64 载荷降一位就解不开。
+		if cs, ok := comp.(*cssStyleDeclaration); ok {
+			if layers, bg, ok := applyBackgroundShorthand(raw); ok {
+				cs.background = layers
+				// 简写里的颜色只属于最后一层；没写颜色时背景色回到透明
+				// （CSS：background 简写重置 background-color）。
+				cs.backgroundColor = bg
 			}
+		} else if c := parseColor(v); c != nil {
+			comp.SetBackgroundColor(c)
+		}
+	case "background-image":
+		if cs, ok := comp.(*cssStyleDeclaration); ok {
+			applyBackgroundImageDecl(cs, raw)
+		}
+	case "background-repeat":
+		if cs, ok := comp.(*cssStyleDeclaration); ok {
+			applyBackgroundRepeatDecl(cs, v)
+		}
+	case "background-position":
+		if cs, ok := comp.(*cssStyleDeclaration); ok {
+			applyBackgroundPositionDecl(cs, v)
+		}
+	case "background-size":
+		if cs, ok := comp.(*cssStyleDeclaration); ok {
+			applyBackgroundSizeDecl(cs, v)
+		}
+	case "background-origin":
+		if cs, ok := comp.(*cssStyleDeclaration); ok {
+			applyBackgroundBoxDecl(cs, v, true)
+		}
+	case "background-clip":
+		if cs, ok := comp.(*cssStyleDeclaration); ok {
+			applyBackgroundBoxDecl(cs, v, false)
 		}
 	case "color":
 		if c := parseColor(v); c != nil {
@@ -1297,7 +1333,6 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		if sz := parseLength(s); sz != nil {
 			comp.SetBorderRadius(sz)
 		}
-		// background-image 等暂未实现，解析容忍、渲染忽略
 	}
 }
 

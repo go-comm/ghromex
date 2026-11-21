@@ -98,6 +98,23 @@ func (o *opacityGraphics) scaledBitmap(bmp *Bitmap) *Bitmap {
 	return cp
 }
 
+// BlitImage 转发子矩形 blit（背景图平铺用）。缩放 alpha 的口径与 DrawImage
+// 一致；底层后端不支持 ImageBlitter 时退回整图 DrawImage。
+func (o *opacityGraphics) BlitImage(dstX, dstY, dstW, dstH int, img Image, srcX, srcY, srcW, srcH int) {
+	bmp, ok := img.(*Bitmap)
+	if !ok || bmp == nil {
+		return
+	}
+	if o.k < 1 {
+		bmp = o.scaledBitmap(bmp)
+	}
+	if bl, ok := o.Graphics.(ImageBlitter); ok {
+		bl.BlitImage(dstX, dstY, dstW, dstH, bmp, srcX, srcY, srcW, srcH)
+		return
+	}
+	o.Graphics.DrawImage(dstX, dstY, dstW, dstH, bmp)
+}
+
 // PushClip/PopClip 委托给底层后端的裁剪栈；底层不支持时静默忽略
 // （与 pushClip/popClip 的配对语义一致：包装层永远成对调用）。
 func (o *opacityGraphics) PushClip(x, y, w, h int) {

@@ -205,7 +205,7 @@ type Image interface {
 // 不再修改，后端可以按指针缓存纹理。
 //
 // 具体类型放在 core 而 Image 仍是空接口：新增实现不必改动既有的
-// BackgroundImage()/DrawImage 签名，后端用类型断言识别（与 Sprite 的
+// DrawImage/BlitImage 签名，后端用类型断言识别（与 Sprite 的
 // 「可选扩展 + 回退」同一惯例）。
 type Bitmap struct {
 	W, H int
@@ -259,6 +259,19 @@ type Graphics interface {
 type Clipper interface {
 	PushClip(x, y, w, h int)
 	PopClip()
+}
+
+// ImageBlitter 是 Graphics 的可选扩展：按**源矩形**把一张位图拷到目标矩形。
+//
+// 源矩形以源图的像素计（srcX/srcY 为左上角，srcW/srcH 为宽高）；目标矩形
+// 与源矩形尺寸不同时由后端缩放（CSS background-size 的 cover/contain/
+// 百分比都靠它实现）。源矩形让调用方只取图片的一部分。
+//
+// 不实现本接口的后端回落到 Graphics.DrawImage（整图缩放到目标矩形）——
+// 背景图的源矩形恒为整张图，回落路径与实现路径的结果一致，只是缩放由
+// 各后端各自的采样口径决定（软件光栅是最近邻，SDL 是渲染器自带缩放）。
+type ImageBlitter interface {
+	BlitImage(dstX, dstY, dstW, dstH int, image Image, srcX, srcY, srcW, srcH int)
 }
 
 // WeightedMeasurer 是 Graphics 的可选扩展：带**数值** font-weight 的

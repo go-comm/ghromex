@@ -654,6 +654,25 @@ td.va-bot {
 	background-color: rgba(176, 122, 18, 0.35);
 }
 
+/* 背景图：引用一律内联 data: URL——引擎内建解码（不需要宿主 LoadImage），
+   同一份文件用 Chrome 打开也是同一张图，逐项对照才有意义。 */
+.bg-tile {
+	background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAMklEQVR4nGLhDr/AQApgYWBgWKrsBOHYVb0mqIGJJOPJ0cBCpEvIt2FUw0jRAAgAAP//OkMFqdtKYoQAAAAASUVORK5CYII=);
+}
+
+/* 不平铺 + 定位：单张贴右下角（position 的「贴边再偏移」写法） */
+.bg-single {
+	background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAMklEQVR4nGLhDr/AQApgYWBgWKrsBOHYVb0mqIGJJOPJ0cBCpEvIt2FUw0jRAAgAAP//OkMFqdtKYoQAAAAASUVORK5CYII=);
+	background-repeat: no-repeat;
+	background-position: right 8px bottom 8px;
+}
+
+/* size：指定尺寸后按该尺寸平铺（16px 的图放成 32px） */
+.bg-size {
+	background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAMklEQVR4nGLhDr/AQApgYWBgWKrsBOHYVb0mqIGJJOPJ0cBCpEvIt2FUw0jRAAgAAP//OkMFqdtKYoQAAAAASUVORK5CYII=);
+	background-size: 32px 32px;
+}
+
 .sh {
 	display: inline-block;
 	background-color: #ffffff;

@@ -310,6 +310,9 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 						bx, by, bw, bh, hexColor(r, g, bl), float64(al)/255, rxAttr)
 				}
 			}
+			// 背景图层画在背景色之上、边框之下（与渲染路径同序）。层里的
+			// url 在绘制期才绑定，这里导出前先对齐一次，导出结果与屏幕一致。
+			dumpSVGBackgroundImages(b, base, comp, bx, by, bw, bh, br, pd, bd, ctr)
 		}
 		// 内阴影画在背景之上（与渲染路径同序）：mask 挖出「不投影形状」，
 		// 模糊后按 padding 盒（含圆角）裁切。
@@ -448,9 +451,90 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 // dumpSVGImage 把已解码的位图编码成 data URI 的 <image>。未加载（nil）或
 // 尺寸非正的图片不导出——与渲染路径「没有位图就不落墨」同口径。
 func dumpSVGImage(b *strings.Builder, x, y, w, h int, bmp *Bitmap) {
-	if bmp == nil || bmp.W <= 0 || bmp.H <= 0 || w <= 0 || h <= 0 ||
-		len(bmp.Pix) < bmp.W*bmp.H*4 {
+	if w <= 0 || h <= 0 {
 		return
+	}
+	href, ok := svgImageHref(bmp)
+	if !ok {
+		return
+	}
+	fmt.Fprintf(b, `<image x="%d" y="%d" width="%d" height="%d" preserveAspectRatio="none" href="%s"/>`+"\n",
+		x, y, w, h, href)
+}
+
+func hexColor(r, g, b uint8) string {
+	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+}
+
+// dumpSVGBackgroundImages 导出背景图层，层序与渲染路径一致（首层在最上面，
+// 所以倒序输出），位置在背景色之后、边框之前。
+//
+// 平铺用 SVG `<pattern>` 表达：pattern 的瓦片尺寸取图片绘制尺寸，重复轴
+// 的原点是第一块瓦片的起点，不重复的那一轴把瓦片撑满裁剪盒（于是那个方向
+// 天然只有一块）。裁剪盒本身就是填充矩形，不需要额外的 clipPath。
+func dumpSVGBackgroundImages(b *strings.Builder, base *htmlElement, comp CSSStyleDeclaration,
+	bx, by, bw, bh, br int, pd, bd edges, ctr *int) {
+	cs, ok := comp.(*cssStyleDeclaration)
+	if !ok || len(cs.background) == 0 {
+		return
+	}
+	bindBackgroundImages(base, cs.background)
+	layers := cs.background
+	for i := len(layers) - 1; i >= 0; i-- {
+		dumpSVGBackgroundLayer(b, &layers[i], bx, by, bw, bh, br, pd, bd, ctr)
+	}
+}
+
+func dumpSVGBackgroundLayer(b *strings.Builder, l *backgroundLayer,
+	bx, by, bw, bh, br int, pd, bd edges, ctr *int) {
+	if l.bitmap == nil || bw <= 0 || bh <= 0 {
+		return
+	}
+	bmp := l.bitmap
+	repeat, sizeMode, clip := backgroundKeyOf(l)
+	ax, ay, aw, ah := backgroundBoxRect(l.originBox(), bx, by, bw, bh, pd, bd)
+	cx, cy, cw, ch := backgroundBoxRect(clipBoxToOrigin(clip), bx, by, bw, bh, pd, bd)
+	if aw <= 0 || ah <= 0 || cw <= 0 || ch <= 0 {
+		return
+	}
+	tw, th := l.imageSize(bmp, aw, ah, sizeMode)
+	if tw <= 0 || th <= 0 {
+		return
+	}
+	href, ok := svgImageHref(bmp)
+	if !ok {
+		return
+	}
+	repeatX := repeat == bgRepeatRepeat || repeat == bgRepeatX
+	repeatY := repeat == bgRepeatRepeat || repeat == bgRepeatY
+	ox, oy := l.imageOffset(aw, ah, tw, th)
+	startX, startY := ax+ox, ay+oy
+	// 不重复的那一轴：瓦片撑满裁剪盒，图片按起点偏移落在里面。
+	px, py, pw, ph := startX, startY, tw, th
+	ix, iy := 0, 0
+	if !repeatX {
+		px, pw, ix = cx, cw, startX-cx
+	}
+	if !repeatY {
+		py, ph, iy = cy, ch, startY-cy
+	}
+	pid := fmt.Sprintf("bgs%d", *ctr)
+	*ctr++
+	fmt.Fprintf(b, `<pattern id="%s" patternUnits="userSpaceOnUse" x="%d" y="%d" width="%d" height="%d">`+
+		`<image x="%d" y="%d" width="%d" height="%d" preserveAspectRatio="none" href="%s"/></pattern>`+"\n",
+		pid, px, py, pw, ph, ix, iy, tw, th, href)
+	rxAttr := ""
+	if br > 0 {
+		rxAttr = fmt.Sprintf(` rx="%d"`, br)
+	}
+	fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="url(#%s)"%s/>`+"\n",
+		cx, cy, cw, ch, pid, rxAttr)
+}
+
+// svgImageHref 把位图编码成 data URI（与 dumpSVGImage 同一口径）。
+func svgImageHref(bmp *Bitmap) (string, bool) {
+	if bmp == nil || bmp.W <= 0 || bmp.H <= 0 || len(bmp.Pix) < bmp.W*bmp.H*4 {
+		return "", false
 	}
 	nrgba := &image.NRGBA{
 		Pix:    bmp.Pix,
@@ -459,14 +543,9 @@ func dumpSVGImage(b *strings.Builder, x, y, w, h int, bmp *Bitmap) {
 	}
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, nrgba); err != nil {
-		return
+		return "", false
 	}
-	fmt.Fprintf(b, `<image x="%d" y="%d" width="%d" height="%d" preserveAspectRatio="none" href="data:image/png;base64,%s"/>`+"\n",
-		x, y, w, h, base64.StdEncoding.EncodeToString(buf.Bytes()))
-}
-
-func hexColor(r, g, b uint8) string {
-	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes()), true
 }
 
 // dumpSVGInsetShadow 导出一条内阴影（box-shadow 带 inset）。

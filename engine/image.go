@@ -33,8 +33,14 @@ type ImageLoader func(src string) ([]byte, error)
 // imageEntry 是一张图片的缓存状态（images map 的值，受 htmlDocument.imgMu
 // 保护）。bitmap 为 nil 表示尚未到货或加载失败——失败不重试（缓存项存在即
 // 「已登记过」），否则每轮布局都会把坏地址再打一遍。
+//
+// 两个 usedBy* 标记记的是「谁在等这张图」：<img> 等它定盒子尺寸（到货必须
+// 重排），背景图层只等它露面（到货只需重画）。同一地址被两边用到就两个都
+// 置位，到货时两笔账各记一次——两套账本互不干扰（见 change_level.go）。
 type imageEntry struct {
-	bitmap *Bitmap
+	bitmap           *Bitmap
+	usedByLayout     bool
+	usedByBackground bool
 }
 
 // isImageElement 判断元素是否为 <img> 替换元素。
@@ -86,7 +92,32 @@ func bindImage(base *htmlElement, doc *htmlDocument) {
 }
 
 // imageFor 返回 src 对应的已解码位图；未加载则登记加载并返回 nil。
+//
+// 登记的是「布局期要用这张图定盒子尺寸」的来源（<img>）：到货后必须重排，
+// 所以记进 imgReady。背景图走 imageForBackground。
 func (doc *htmlDocument) imageFor(src string) *Bitmap {
+	return doc.lookupImage(src, false)
+}
+
+// imageForBackground 与 imageFor 共用同一份缓存，区别只在「到货算哪笔账」：
+// 背景不影响盒模型，到货只需重画，所以记进 bgImgReady，由
+// drainBackgroundImages 换算成一次**重绘级**变更。
+//
+// 登记发生在绘制期（那一刻这一帧的绘制正在进行），本帧就能拿到返回值：
+// 已到货直接返回，尚未到货返回 nil。
+func (doc *htmlDocument) imageForBackground(src string) *Bitmap {
+	return doc.lookupImage(src, true)
+}
+
+// lookupImage 取缓存项，没有则建项并按来源登记加载。
+//
+// data: URL 是内建的「无 I/O」来源（测试与自包含页面用），同步解码，首帧
+// 就能看到图，不需要等异步投递。没有加载器时按空图处理：不打印也不重试
+// （缓存项存在即「已登记过」，否则每帧都会把坏地址再打一遍）。
+//
+// 同一地址被两种来源用到时两笔账都记（到货时 fetchImage 按标记分别递增），
+// 只起一个 worker。
+func (doc *htmlDocument) lookupImage(src string, background bool) *Bitmap {
 	if src == "" {
 		return nil
 	}
@@ -100,18 +131,36 @@ func (doc *htmlDocument) imageFor(src string) *Bitmap {
 		doc.images[src] = entry
 		switch {
 		case isDataURL(src):
-			// data: 是内建的「无 I/O」来源（测试与自包含页面用），同步解码，
-			// 打开文档后的首帧就能看到图，不需要等异步投递。
 			entry.bitmap, _ = decodeDataURL(src)
 		case doc.loadImage != nil:
 			go doc.fetchImage(src)
-		default:
-			// 没有加载器：按空图处理（盒子 0×0），不打印也不重试。
 		}
+	}
+	if background {
+		entry.usedByBackground = true
+	} else {
+		entry.usedByLayout = true
 	}
 	bitmap := entry.bitmap
 	doc.imgMu.Unlock()
 	return bitmap
+}
+
+// drainBackgroundImages 把「新到货的背景图」记成一次重绘级变更。
+//
+// 背景图不影响盒模型（元素尺寸与背景图无关），到货只需重画；与 <img> 的
+// drainImages 区分开，后者到货必须重排。
+//
+// 这里**不**调 onChanged（理由与 drainImages 相同：LayoutDocument 开头也
+// 会 drain，回调里重入布局会踩坏本轮状态），只加计数——主循环比对
+// PaintCount 就知道要重画一帧。只由主 goroutine 调用。
+func (doc *htmlDocument) drainBackgroundImages() {
+	if doc == nil {
+		return
+	}
+	if n := doc.bgImgReady.Swap(0); n > 0 {
+		doc.paintChanged += int64(n)
+	}
 }
 
 // fetchImage 在 worker goroutine 里读字节并解码，最后把位图写回缓存并给
@@ -131,11 +180,21 @@ func (doc *htmlDocument) fetchImage(src string) {
 		bitmap = nil // 失败按空图处理
 	}
 	doc.imgMu.Lock()
+	wantReflow, wantPaint := false, false
 	if entry := doc.images[src]; entry != nil {
 		entry.bitmap = bitmap
+		wantReflow = entry.usedByLayout
+		wantPaint = entry.usedByBackground
 	}
 	doc.imgMu.Unlock()
-	doc.imgReady.Add(1)
+	// 背景图到货只记重绘账（背景不参与布局）；被 <img> 用到过的图照常记
+	// 重排账。两个来源都用过时两笔都记——谁在等谁就被叫醒。
+	if wantPaint {
+		doc.bgImgReady.Add(1)
+	}
+	if wantReflow {
+		doc.imgReady.Add(1)
+	}
 }
 
 // drainImages 把「新到货的图片数」换算成一次重排级变更（主循环据此触发

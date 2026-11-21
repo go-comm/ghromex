@@ -1241,6 +1241,69 @@ func (g *Graphics) DrawImage(x, y, w, h int, image core.Image) {
 	checkDraw("SDL_RenderCopy", sdlRenderCopy(g.renderer, entry.tex, 0, uintptr(unsafe.Pointer(&dst))))
 }
 
+// BlitImage 实现 core.ImageBlitter：按源矩形把位图 blit 到目标矩形（缩放
+// 由 SDL 渲染器完成）。
+//
+// 源矩形是整图时走 DrawImage 的纹理缓存（同一张图只上传一次，纹理按位图
+// 指针复用）。局部源矩形另裁一张小纹理：SDL2 的 SDL_RenderCopy 不带源
+// 矩形，而带源矩形的 SDL_RenderCopyEx 的角度参数是 double（x64 走 XMM
+// 寄存器，本包的 uintptr 调用约定传不了），只能自己裁一张。背景图的源
+// 矩形恒为整图，这条慢路径平时走不到。
+func (g *Graphics) BlitImage(dstX, dstY, dstW, dstH int, image core.Image,
+	srcX, srcY, srcW, srcH int) {
+	bmp, ok := image.(*core.Bitmap)
+	if !ok || bmp == nil || dstW <= 0 || dstH <= 0 || g.renderer == 0 ||
+		bmp.W <= 0 || bmp.H <= 0 || len(bmp.Pix) < bmp.W*bmp.H*4 {
+		return
+	}
+	if srcW <= 0 || srcH <= 0 {
+		srcX, srcY, srcW, srcH = 0, 0, bmp.W, bmp.H
+	}
+	// 源矩形裁到图内：越界部分不参与采样。
+	if srcX < 0 {
+		srcW += srcX
+		srcX = 0
+	}
+	if srcY < 0 {
+		srcH += srcY
+		srcY = 0
+	}
+	if srcX+srcW > bmp.W {
+		srcW = bmp.W - srcX
+	}
+	if srcY+srcH > bmp.H {
+		srcH = bmp.H - srcY
+	}
+	if srcW <= 0 || srcH <= 0 {
+		return
+	}
+	if srcX == 0 && srcY == 0 && srcW == bmp.W && srcH == bmp.H {
+		g.DrawImage(dstX, dstY, dstW, dstH, bmp)
+		return
+	}
+	tex := sdlCreateTexture(g.renderer, uintptr(pixelFormatRGBA32),
+		uintptr(textureAccessStreaming), uintptr(srcW), uintptr(srcH))
+	if tex == 0 {
+		checkDraw("SDL_CreateTexture", 0)
+		return
+	}
+	defer sdlDestroyTexture(g.renderer, tex)
+	sdlSetTextureBlendMode(tex, uintptr(blendModeBlend))
+	buf := make([]byte, srcW*srcH*4)
+	for y := 0; y < srcH; y++ {
+		src := (srcY+y)*bmp.W*4 + srcX*4
+		copy(buf[y*srcW*4:(y+1)*srcW*4], bmp.Pix[src:src+srcW*4])
+	}
+	rect := sdlRect{0, 0, int32(srcW), int32(srcH)}
+	if sdlUpdateTexture(tex, uintptr(unsafe.Pointer(&rect)),
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(srcW*4)) != 0 {
+		checkDraw("SDL_UpdateTexture", 0)
+		return
+	}
+	dst := sdlRect{int32(dstX), int32(dstY), int32(dstW), int32(dstH)}
+	checkDraw("SDL_RenderCopy", sdlRenderCopy(g.renderer, tex, 0, uintptr(unsafe.Pointer(&dst))))
+}
+
 // pixelFormatRGBA32 是 SDL_PIXELFORMAT_RGBA32（0x16762004）：小端下内存
 // 字节序恰为 R,G,B,A —— 引擎的精灵像素可直接灌入，无需逐像素换序。
 //

@@ -18,7 +18,7 @@
 
 | 包 | 职责 | 关键约束 |
 |---|---|---|
-| `core` | 引擎与后端之间的契约：`Graphics`、`Viewport`、`Color`/`Size`/`Paint`/`Sprite`/`Bitmap` | 叶子包，谁都不依赖；可选扩展 `Clipper`、`SpriteDrawer` 靠类型断言启用；`Image` 是空接口，`Bitmap` 是 `<img>` 的载荷 |
+| `core` | 引擎与后端之间的契约：`Graphics`、`Viewport`、`Color`/`Size`/`Paint`/`Sprite`/`Bitmap` | 叶子包，谁都不依赖；可选扩展 `Clipper`、`SpriteDrawer`、`ImageBlitter` 靠类型断言启用；`Image` 是空接口，`Bitmap` 是 `<img>` 与背景图的载荷 |
 | `engine` | 解析 HTML/CSS → 级联 → 布局 → 绘制 → 命中测试/事件 | **纯 Go**，不 import 平台包；`Graphics = core.Graphics` 用类型别名保持 API（`engine/graphics.go`） |
 | `engine/element_registry.go` | 元素注册表：`CustomElements().Define(tag, proto)`；内置标签走 `SystemElements()`（`html_elements.go`） | 解析时克隆原型（`CloneElement`）生成独立实例 |
 | `backend/sdl2` | Windows SDL2 窗口/渲染器/字体纹理/事件解码 | **不认识 engine**；动态加载 DLL，无 CGO；`NewWindow → Run → Close` 同一 OS 线程（`LockOSThread`） |
@@ -51,7 +51,7 @@ type Viewport interface {
 
 - 引擎只认这两个接口 → SDL2、软件光栅化（`BufferGraphics`）、无头（`FakeGraphics`）跑同一套布局。
 - `MeasureText` 与 `DrawText` **必须同一字体解析规则**，否则混排宽度错位。
-- 可选扩展（实现了就用，没实现回退到等价但更慢的路径）：`Clipper` 裁剪栈、`SpriteDrawer` 位图 blit。
+- 可选扩展（实现了就用，没实现回退到等价但更慢的路径）：`Clipper` 裁剪栈、`SpriteDrawer` 位图 blit、`ImageBlitter` **按源矩形** blit（`BlitImage(dst, src)`，背景图平铺时只画可见的那一块）。
 - `DrawImage` 的载荷是 `core.Image`（空接口）：引擎传 `*core.Bitmap`（RGBA8888、非预乘 alpha、`Pix` 解码后不再改），后端用类型断言识别；不认识的值（含 `nil`）按占位/跳过处理——新增图片类型不必改接口。
 
 ## 主循环与事件模型
@@ -86,7 +86,7 @@ doc, _ := win.OpenDocumentWith(src, engine.DocumentOptions{
 })
 ```
 
-**图片（`<img>`）**——同一个选项结构，但加载是异步的；`src` 到加载器时已是绝对地址，`data:` URL 由引擎自解：
+**图片（`<img>` 与 `background-image`）**——同一个选项结构，但加载是异步的；`src` 到加载器时已是绝对地址，`data:` URL 由引擎自解：
 
 ```go
 doc, _ := win.OpenDocumentWith(src, engine.DocumentOptions{
@@ -101,6 +101,13 @@ worker 调加载器 + `image.Decode`（PNG/JPEG/GIF 首帧），在 `imgMu` 内�
 `PendingChange`/`LayoutDocument` 用 `drainImages` 把计数换算成一次 `changed` 增长 →
 重排按固有尺寸定盒、`renderNode` 调 `DrawImage`。**worker 绝不碰文档/Graphics**
 （SDL 要求渲染状态单线程），也不向 channel 投递（见取舍 6）。
+
+**背景图**（`engine/background.go`）复用同一条加载通路，但记账不同：层里存的是
+**未解析的原始引用**，绘制期才按文档 BaseURL 解析并绑定位图（级联期拿不到
+BaseURL）。背景图不影响盒模型，因此到货只涨**重绘**计数（`drainBackgroundImages`
+只加 `paintChanged`），不触发重排；`imageEntry` 用 `usedByLayout` / `usedByBackground`
+两个标记把 `<img>` 与背景图的到货分别记账。绘制顺序是「背景色 → 背景图层 → 边框
+→ 内容」，多层按 CSS 顺序叠放（首层在最上面）。
 
 **应用工作台（菜单/工具栏/状态栏/主题）**：
 
@@ -132,7 +139,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 2. **变更计数驱动重排**：`doc.ChangeCount()` 变了才布局；`markChanged` 是唯一入口，布局期禁止调用。
 3. **命中测试与绘制同口径**：`ElementAt` 和 `renderNode` 必须一致（裁剪、定位层、select 浮层两侧都算），否则「看得见点不到」。
 4. **行盒只有一处口径**：行盒高 = max(ascent) + max(descent)，`Leading` 与 `vertical-align` 由 `line_box.go` 统一算，绘制/命中/SVG 同一份取数。
-5. **后端可选扩展**：`Clipper` / `SpriteDrawer` 接口检测，不实现就走等价但更慢的回退。
+5. **后端可选扩展**：`Clipper` / `SpriteDrawer` / `ImageBlitter` 接口检测，不实现就走等价但更慢的回退。
 6. **异步图片只写缓存 + 原子计数回主线程**：`<img>` 的解码在 worker goroutine，结果在 `imgMu` 内写回 `images[src]` 并给 `imgReady` +1，由主循环的 `drainImages` 把计数换算成一次 `ChangeCount` 增长——文档状态与渲染状态仍然只有一个线程在碰（`PendingChange`/`LayoutDocument` 两个入口都会 drain）。刻意不用 channel 投递结果：宿主换文档又漏 `Close` 时，投递式 worker 会永久阻塞在发送上，把整份文档钉在内存里。
 7. **平台能力下沉**：剪贴板、对话框、抓屏在 `runtime/*` 收口，`engine` 保持纯 Go（读剪贴板靠后端读出后调 `OnDocumentPaste`，写靠引擎给 `SelectedText` 后端去写）。图片同理：引擎只解码，字节由宿主注入的 `LoadImage` 提供，不读文件、不联网。
 8. **UI 是文档内自绘**：`position:fixed` 压页面上、body 首尾插占位块；换文档重装。代价是页面 `z-index` 更高的元素会盖住工作台。
@@ -141,7 +148,8 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 
 - **仅 Windows**：SDL2 后端、原生对话框、剪贴板、抓屏都是 Windows 实现，其它平台返回 `ErrUnsupported`（`browser` 与 `examples/` 不带构建标签，任意平台 `go build ./...` / `go test ./...` 都过，非 Windows 启动窗口时打印提示）。
 - **线程**：`NewWindow → OpenDocument → Run → Close` 必须同一 goroutine（SDL `LockOSThread` 要求，见 `backend/sdl2/doc.go`）。唯一的例外是 `<img>` 的加载 worker：它只调 `LoadImage`、解码、把位图写回缓存并给原子计数 +1——`LoadImage` 因此必须线程安全。
-- **`<img>` 的两个「到货」时点**：`data:` URL 同步解码（首帧可见），其余异步（首帧 0×0，解码完成后自动重排一次）；没有加载器时非 `data:` 图片按空图处理，不会报错也不会重试（改了 `src` 才会重新登记）。无动画 GIF、无 `alt` 回退、无 `background-image`。
+- **`<img>` 的两个「到货」时点**：`data:` URL 同步解码（首帧可见），其余异步（首帧 0×0，解码完成后自动重排一次）；没有加载器时非 `data:` 图片按空图处理，不会报错也不会重试（改了 `src` 才会重新登记）。无动画 GIF、无 `alt` 回退。
+- **背景图只做 `url()`/`none`**：渐变等 `<image>`、`background-attachment: fixed`、`background-repeat` 的 `space`/`round` 铺法未实现（按 CSS 语义整条声明忽略）；圆角元素上的背景图仍是「角标补盖」近似，不是真正的圆角遮罩。
 - **无 flex / grid / 过渡动画**，布局只有 block / inline / inline-block + relative/absolute/fixed；UI 主题靠 `inline-block` 和 1px 实体分隔线拼。
 - **没有实时 `input` 事件**：实时联动用 `OnKeyDown`（元素级按键处理器，返回 true = 已消费，等价 preventDefault）或在命令执行时读 `Value`。
 - **多窗口未实现**：API 塑形成「可多次 New」，底层基础待真实需求再补。
@@ -156,10 +164,11 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 |---|---|---|
 | 新增自定义标签 | `engine.CustomElements().Define(tag, proto)`，解析时 `CloneElement` 克隆原型 | `engine/element_registry.go`, `engine/custom_elements.go` |
 | 新增 CSS 属性 | 属性解析（css 解析器）→ 样式级联字段 → 布局/绘制消费处，三处都要改 | `engine/`（css_*.go、style/cascade、layout、paint） |
-| 新渲染后端 | 实现 `core.Graphics` + `core.Viewport`（可选 `Clipper`/`SpriteDrawer`），不 import engine | 参照 `backend/sdl2`、`engine` 内 `BufferGraphics`/`FakeGraphics` |
+| 新渲染后端 | 实现 `core.Graphics` + `core.Viewport`（可选 `Clipper`/`SpriteDrawer`/`ImageBlitter`），不 import engine | 参照 `backend/sdl2`、`engine` 内 `BufferGraphics`/`FakeGraphics` |
 | 新平台能力 | `runtime/xxx` 收口 + `backend/xxx` 平台实现，非本平台返回 `ErrUnsupported` | 参照 `runtime/dialog` + `backend/dialog` |
 | 新图片字节来源（网络/资源包） | 打开文档时传 `DocumentOptions.LoadImage`（`func(src string) ([]byte, error)`，`src` 已按 `BaseURL` 解析；worker 并发调用，需线程安全） | `engine/image.go`, `engine/document.go` |
 | 新图片格式 | 在 `engine/image.go` 里给 `image.Decode` 注册新解码器（`image.RegisterFormat` / 空白 import） | `engine/image.go` |
+| 新的背景图层能力 | 在 `engine/background.go` 加属性解析（`applyBackground*Decl`）+ 几何（`imageSize`/`backgroundAxisOffset`/`backgroundBoxRect`）+ 绘制（`paintBackgroundImages`）；口径字节打进 `backgroundKey` 时记得换字典指针 | `engine/background.go` |
 | 页面导航回调 | `SetOnNavigate`（导航在 click 冒泡之后执行） | `engine` 文档 API |
 | 应用层变更信号 | `SetOnChanged`（内容**或视口尺寸**变化都通知） | `engine` 文档 API |
 | 高频输入按帧合并（拖动窗口等） | `browser.Window.SetFrameHandler`：事件排空后每帧调一次，返回 true 时主循环改用 1ms 轮询（空闲 10ms） | `browser/window.go`、`examples/snip/preview.go` |

@@ -21,7 +21,7 @@
     section 等）、表单、表格、列表、媒体空盒
   · CSS 属性：display、position+偏移+z-index、box-sizing、width/height、
     margin/padding、border 全套、border-radius、border-collapse、
-    background-color/background（颜色）、color、box-shadow、
+    background-color/background（颜色 + background-image 图层）、color、box-shadow、
     font-size/family/weight/style、line-height、text-align、text-decoration、
     vertical-align、overflow、white-space、pointer-events、
     float/clear、opacity、visibility、cursor
@@ -31,7 +31,7 @@
   · 值：#3/#4/#6/#8、rgb()/rgba()、具名色、transparent；
     px/pt/dp/%/0/无单位
   · 末节「不支持清单」：flex/grid、transform/transition、
-    background-image、em/rem/vh、calc()/var()、伪元素、:is()、
+    渐变 <image>/attachment:fixed/空格铺法、em/rem/vh、calc()/var()、伪元素、:is()、
     + ~ 组合器、通配 *、@media/@font-face 等——Chrome 对照到这些差异属预期。
 
   已知分叉（与 ua 页同源，详见 examples/ua/index.html 头注释）：
@@ -42,7 +42,10 @@
     colspan/rowspan、border-spacing、col 宽度、caption-side、empty-cells
   · 斜体为 SDL_ttf 合成斜体（不改变字形前进宽度）；无 webfont/@font-face
   · svg/canvas/iframe/video 无渲染链路，只有 CSS 盒（img 已支持：宿主
-    注入 ImageLoader 或内建 data: URL，见「媒体与嵌入标签」一节）
+    注入 ImageLoader 或内建 data: URL，见「媒体与嵌入标签」一节；
+    背景图 background-image: url() 同理，见「背景与阴影」一节）
+  · 未实现：渐变等 &lt;image&gt; 函数、background-attachment: fixed、
+    repeat 的 space/round 铺法（均按 CSS 语义降级或整条忽略，属预期）
   · 悬停/按下默认反馈是引擎有意分歧（Chrome UA 无 hover 规则）
 -->
 <html>
@@ -476,10 +479,15 @@ a  b   c    d</pre>
 <!-- ===== 背景与阴影 ===== -->
 <div class="sec" id="sec-bg">
 	<h2>背景与阴影 <span class="badge b-part">部分</span></h2>
-	<p class="cap"><span class="code">background-color</span> / <span class="code">background</span> 简写（只取颜色）：</p>
+	<p class="cap"><span class="code">background-color</span> / <span class="code">background</span> 简写（颜色 token）：</p>
 	<span class="swatch bg-blue">#0b57d0 派生底色</span>
 	<span class="swatch bg-short">background: rgba(...)</span>
 	<span class="swatch bg-amber">rgba 底色 35%</span>
+
+	<p class="cap"><span class="code">background-image</span>（平铺 / 不平铺贴边 / size 放大后再平铺）：</p>
+	<span class="swatch bg-tile">repeat（默认，16px 网格）</span>
+	<span class="swatch bg-single">no-repeat，贴右下角再偏移 8px</span>
+	<span class="swatch bg-size">size: 32px，放大后平铺</span>
 
 	<p class="cap"><span class="code">box-shadow</span>（单条 / 模糊+扩散 / 多条 / inset）：</p>
 	<span class="sh sh1">0 2px 6px 淡影</span>
@@ -488,10 +496,15 @@ a  b   c    d</pre>
 	<span class="sh sh-in">inset 0 3px 8px 内阴影（顶部凹槽）</span>
 	<span class="sh sh-in2">inset 0 0 0 2px 内描边</span>
 
-	<p class="note">支持颜色背景、外阴影与内阴影（x y blur spread 颜色，逗号多条，
-		位置不限，第一条在最上层）。内阴影以 padding 盒为边界：偏移 + spread 收缩后的
-		形状之外为阴影，模糊后按 padding 盒（含圆角）裁切，因此边缘最深、向内容淡出。
-		<b>不支持</b> background-image / 渐变 / url() / position / size / repeat（末节清单）。</p>
+	<p class="note">支持颜色背景、<span class="code">url()</span> 图片背景（多层逗号叠放，首层在最上面）
+		及 repeat / position / size / origin / clip 全套长写（见上面三块），
+		外阴影与内阴影（x y blur spread 颜色，逗号多条，位置不限，第一条在最上层）。
+		内阴影以 padding 盒为边界：偏移 + spread 收缩后的形状之外为阴影，模糊后按
+		padding 盒（含圆角）裁切，因此边缘最深、向内容淡出。
+		<b>不支持</b> 渐变 <span class="code">linear-gradient()</span> 等 &lt;image&gt; 函数、
+		<span class="code">background-attachment: fixed</span>、repeat 的
+		<span class="code">space</span>/<span class="code">round</span> 铺法（退化为普通平铺）；
+		圆角元素上的背景图用「角标补盖」近似（不是真正的圆角遮罩）。见末节清单。</p>
 </div>
 
 <!-- ===== 文字与排版 ===== -->
@@ -723,7 +736,7 @@ a  b   c    d</pre>
 			<tr><td><code class="inl">display: flex / grid</code> 及 flex*/grid*</td><td>弹性/网格布局</td><td class="x">display 只认 none/inline/inline-block/block 与表格家族，其余忽略</td></tr>
 			<tr><td><code class="inl">opacity</code> 分组合成 / 自定义 <code class="inl">cursor: url()</code></td><td>整棵子树先合成再混合 / 图片光标</td><td class="x">opacity 按逐动作 alpha 近似；url() 退回 auto</td></tr>
 			<tr><td><code class="inl">transform</code> / <code class="inl">transition</code> / <code class="inl">animation</code> / <code class="inl">filter</code></td><td>变换/过渡/动画/滤镜</td><td class="x">忽略</td></tr>
-			<tr><td><code class="inl">background-image</code> / 渐变 / <code class="inl">url()</code> / background-position/size/repeat</td><td>图片与渐变背景</td><td class="x">background 简写只取颜色 token</td></tr>
+			<tr><td><code class="inl">linear-gradient()</code> 等渐变 <code class="inl">&lt;image&gt;</code> / <code class="inl">background-attachment: fixed</code> / repeat 的 <code class="inl">space</code>·<code class="inl">round</code></td><td>渐变背景/视口固定/等距铺开</td><td class="x">渐变等未实现 <code class="inl">&lt;image&gt;</code> 整条声明忽略；fixed 按 scroll；space/round 按普通平铺（<code class="inl">url()</code> 图片背景与其 position/size/repeat/origin/clip 已支持）</td></tr>
 			<tr><td><code class="inl">list-style-image</code></td><td>图片标记</td><td class="x">解析但忽略（标记按 type 画）</td></tr>
 			<tr><td><code class="inl">letter-spacing</code> / <code class="inl">word-spacing</code> / <code class="inl">text-transform</code> / <code class="inl">text-shadow</code></td><td>字距/大小写/文字阴影</td><td class="x">忽略</td></tr>
 			<tr><td><code class="inl">min/max-width</code> / <code class="inl">min/max-height</code></td><td>尺寸钳制</td><td class="x">忽略</td></tr>

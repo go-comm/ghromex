@@ -29,6 +29,8 @@ type (
 	Sprite = core.Sprite
 	// SpriteDrawer 是 Graphics 的可选扩展：支持位图 blit。
 	SpriteDrawer = core.SpriteDrawer
+	// ImageBlitter 是 Graphics 的可选扩展：按源矩形 blit 位图（背景图平铺）。
+	ImageBlitter = core.ImageBlitter
 	// Graphics 是渲染后端的抽象。
 	Graphics = core.Graphics
 	// Clipper 是 Graphics 的可选扩展：矩形裁剪栈。
@@ -217,6 +219,18 @@ func popClip(g Graphics) {
 	if c, ok := g.(Clipper); ok {
 		c.PopClip()
 	}
+}
+
+// blitImage 把位图的源矩形拷到目标矩形：后端实现 ImageBlitter 时交给它
+// （SDL 用渲染器缩放、软件光栅逐像素采样），否则回落到 DrawImage——
+// 整图缩放到目标矩形。背景图的源矩形恒为整张图（CSS 的 background-size
+// 只缩放不裁剪），两条路径结果一致。
+func blitImage(g Graphics, dstX, dstY, dstW, dstH int, bmp *Bitmap, srcX, srcY, srcW, srcH int) {
+	if b, ok := g.(ImageBlitter); ok {
+		b.BlitImage(dstX, dstY, dstW, dstH, bmp, srcX, srcY, srcW, srcH)
+		return
+	}
+	g.DrawImage(dstX, dstY, dstW, dstH, bmp)
 }
 
 var (
@@ -475,21 +489,99 @@ func (g *BufferGraphics) DrawText(x, y, w, h int, paint Paint, text string) {
 func (g *BufferGraphics) DrawImage(x, y, w, h int, image Image) {
 	g.DrawCalls++
 	bmp, ok := image.(*Bitmap)
-	if !ok || bmp == nil || bmp.W <= 0 || bmp.H <= 0 || w <= 0 || h <= 0 ||
-		len(bmp.Pix) < bmp.W*bmp.H*4 {
+	if !ok || bmp == nil || !validBitmap(bmp) || w <= 0 || h <= 0 {
 		g.FillRect(x, y, w, h, 255, 0, 255, 255)
 		return
 	}
-	for dy := 0; dy < h; dy++ {
-		sy := dy * bmp.H / h
-		for dx := 0; dx < w; dx++ {
-			sx := dx * bmp.W / w
-			i := (sy*bmp.W + sx) * 4
+	g.blitBitmap(x, y, w, h, bmp, 0, 0, bmp.W, bmp.H)
+}
+
+// BlitImage 实现 core.ImageBlitter：按源矩形把位图最近邻缩放混合到目标
+// 矩形。源矩形是整图时与 DrawImage 同口径（背景图的平铺就走这条路）。
+func (g *BufferGraphics) BlitImage(dstX, dstY, dstW, dstH int, image Image,
+	srcX, srcY, srcW, srcH int) {
+	g.DrawCalls++
+	bmp, ok := image.(*Bitmap)
+	if !ok || bmp == nil || !validBitmap(bmp) || dstW <= 0 || dstH <= 0 {
+		g.FillRect(dstX, dstY, dstW, dstH, 255, 0, 255, 255)
+		return
+	}
+	if srcW <= 0 || srcH <= 0 {
+		srcX, srcY, srcW, srcH = 0, 0, bmp.W, bmp.H
+	}
+	// 源矩形裁到图内：越界的部分不参与采样（宁可不画，也不越界读像素）。
+	if srcX < 0 {
+		srcW += srcX
+		srcX = 0
+	}
+	if srcY < 0 {
+		srcH += srcY
+		srcY = 0
+	}
+	if srcX+srcW > bmp.W {
+		srcW = bmp.W - srcX
+	}
+	if srcY+srcH > bmp.H {
+		srcH = bmp.H - srcY
+	}
+	if srcW <= 0 || srcH <= 0 {
+		return
+	}
+	g.blitBitmap(dstX, dstY, dstW, dstH, bmp, srcX, srcY, srcW, srcH)
+}
+
+// validBitmap 判断位图数据是否完整（像素长度够 W*H*4）。
+func validBitmap(bmp *Bitmap) bool {
+	return bmp.W > 0 && bmp.H > 0 && len(bmp.Pix) >= bmp.W*bmp.H*4
+}
+
+// blitBitmap 把位图源矩形按最近邻缩放混合到目标矩形（裁剪到缓冲区与当前
+// 裁剪栈）。取整口径：目标第 i 个像素取源矩形的第 i*srcW/dstW 个像素。
+func (g *BufferGraphics) blitBitmap(dstX, dstY, dstW, dstH int, bmp *Bitmap,
+	srcX, srcY, srcW, srcH int) {
+	x0, y0 := maxInt(dstX, 0), maxInt(dstY, 0)
+	x1, y1 := minInt(dstX+dstW, g.W), minInt(dstY+dstH, g.H)
+	if cl := g.clipBounds(); len(g.clips) > 0 {
+		if cl.w <= 0 || cl.h <= 0 {
+			return
+		}
+		x0, y0 = maxInt(x0, cl.x), maxInt(y0, cl.y)
+		x1, y1 = minInt(x1, cl.x+cl.w), minInt(y1, cl.y+cl.h)
+	}
+	if x1 <= x0 || y1 <= y0 {
+		return
+	}
+	for dy := y0; dy < y1; dy++ {
+		sy := srcY + (dy-dstY)*srcH/dstH
+		if sy < 0 {
+			sy = 0
+		} else if sy >= bmp.H {
+			sy = bmp.H - 1
+		}
+		row := sy * bmp.W * 4
+		for dx := x0; dx < x1; dx++ {
+			sx := srcX + (dx-dstX)*srcW/dstW
+			if sx < 0 {
+				sx = 0
+			} else if sx >= bmp.W {
+				sx = bmp.W - 1
+			}
+			i := row + sx*4
 			a := bmp.Pix[i+3]
 			if a == 0 {
 				continue
 			}
-			g.FillRect(x+dx, y+dy, 1, 1, bmp.Pix[i], bmp.Pix[i+1], bmp.Pix[i+2], a)
+			o := (dy*g.W + dx) * 4
+			if a == 255 {
+				g.pix[o], g.pix[o+1], g.pix[o+2], g.pix[o+3] = bmp.Pix[i], bmp.Pix[i+1], bmp.Pix[i+2], 255
+				continue
+			}
+			sa := uint32(a)
+			da := uint32(255 - a)
+			g.pix[o] = uint8((uint32(bmp.Pix[i])*sa + uint32(g.pix[o])*da) / 255)
+			g.pix[o+1] = uint8((uint32(bmp.Pix[i+1])*sa + uint32(g.pix[o+1])*da) / 255)
+			g.pix[o+2] = uint8((uint32(bmp.Pix[i+2])*sa + uint32(g.pix[o+2])*da) / 255)
+			g.pix[o+3] = uint8(sa + uint32(g.pix[o+3])*da/255)
 		}
 	}
 }

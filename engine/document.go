@@ -117,11 +117,14 @@ type htmlDocument struct {
 	loadSheet StylesheetLoader
 	loadImage ImageLoader
 	// images 是图片缓存（解析后的绝对地址 → 状态），受 imgMu 保护：worker
-	// 解码完在锁内写回位图，再给 imgReady +1；主 goroutine 在 drainImages
-	// 里把计数换算成一次重排级变更（不向 channel 投递，见 fetchImage 说明）。
-	imgMu    sync.Mutex
-	images   map[string]*imageEntry
-	imgReady atomic.Int32
+	// 解码完在锁内写回位图，再按「谁在等这张图」给 imgReady（重排级，<img>）
+	// 或 bgImgReady（重绘级，背景图层）+1；主 goroutine 在 drainImages /
+	// drainBackgroundImages 里把计数换算成对应档位的变更（不向 channel 投递，
+	// 见 fetchImage 说明）。
+	imgMu      sync.Mutex
+	images     map[string]*imageEntry
+	imgReady   atomic.Int32
+	bgImgReady atomic.Int32
 	head     HTMLHeadElement
 	body      HTMLBodyElement
 	focus     HTMLElement // 当前聚焦的元素（可编辑输入、按钮、链接等），nil 无焦点

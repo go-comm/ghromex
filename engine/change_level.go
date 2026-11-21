@@ -72,6 +72,10 @@ func PendingChange(doc HTMLDocument, reflowBase, paintBase int64) (ChangeLevel, 
 		// changed 增长，下面的档位判定即返回 ChangeReflow。放在读计数之前，
 		// 本轮就能看到这一笔。
 		d.drainImages()
+		// 背景图到货只涨重绘计数（盒模型与背景图无关）：没有 <img> 在等的
+		// 那一笔时，这一档就是 ChangePaintOnly——42 万元素页面不该为一张
+		// 背景图付整树重排的钱。
+		d.drainBackgroundImages()
 		reflow, paint := d.changed, d.paintChanged
 		switch {
 		case reflow != reflowBase:

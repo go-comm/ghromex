@@ -539,16 +539,21 @@ func newAutoRect() Rect {
 type cssStyleDeclaration struct {
 	// —— 第一段：含指针
 	CSSStyleDeclaration
-	width            Size
-	height           Size
-	margin           Rect
-	padding          Rect
-	borderW          Rect
-	inset            Rect
-	borderColors     [4]Color
-	boxShadow        []Shadow
-	backgroundColor  Color
-	backgroundImage  Image
+	width           Size
+	height          Size
+	margin          Rect
+	padding         Rect
+	borderW         Rect
+	inset           Rect
+	borderColors    [4]Color
+	boxShadow       []Shadow
+	backgroundColor Color
+	// background 是解析后的背景图层表（CSS background-image 及其配套长写
+	// 属性按层对齐的结果；列表顺序即 CSS 声明顺序，首层画在最上面）。
+	//
+	// 用切片而不是单张 Image：CSS 允许多层背景（background-image: a, b），
+	// 每层各有自己的位置/尺寸/平铺方式。切片头 24B 落在指针段末尾。
+	background       []backgroundLayer
 	color            Color
 	fontSize         Size
 	borderRadius     Size
@@ -611,7 +616,15 @@ func copyStyle(s CSSStyleDeclaration) CSSStyleDeclaration {
 	}
 	c.SetBoxShadow(s.BoxShadow())
 	c.SetBackgroundColor(s.BackgroundColor())
-	c.SetBackgroundImage(s.BackgroundImage())
+	// 背景图层：引擎实现直接深拷贝图层表（含 position/size/repeat/origin/
+	// clip 与多层顺序）；外部实现只有一张 Image，退回 SetBackgroundImage。
+	cs, srcOK := s.(*cssStyleDeclaration)
+	dst, dstOK := c.(*cssStyleDeclaration)
+	if srcOK && dstOK {
+		dst.background = copyBackgroundLayers(cs.background)
+	} else {
+		c.SetBackgroundImage(s.BackgroundImage())
+	}
 	c.SetColor(s.Color())
 	c.SetFontSize(s.FontSize())
 	c.SetFontFamily(s.FontFamily())
@@ -796,12 +809,34 @@ func (style *cssStyleDeclaration) SetBackgroundColor(color Color) CSSStyleDeclar
 	return style
 }
 
+// BackgroundImage 实现 CSSStyleDeclaration：返回首层背景图的位图。
+//
+// 图层表里第一个「已经拿到位图」的层（CSS 的 background-image 到货后由
+// 绘制层绑定，级联每轮重新绑定一次）；没有背景图时返回 nil。
+//
+// 这是「一张图铺满元素」的简化出口，完整的多层背景与 position/size/repeat
+// 语义走 CSS（见 backgroundLayer）。
 func (style *cssStyleDeclaration) BackgroundImage() Image {
-	return style.backgroundImage
+	for i := range style.background {
+		if bmp := style.background[i].bitmap; bmp != nil {
+			return bmp
+		}
+	}
+	return nil
 }
 
+// SetBackgroundImage 实现 CSSStyleDeclaration：用给定位图当元素的背景。
+//
+// 语义等价于 `background-image: url(...); background-size: 100% 100%`
+// ——单层、铺满 padding 盒、不平铺、居中。传 nil（或非 *Bitmap 的值）清空
+// 背景图层表。
 func (style *cssStyleDeclaration) SetBackgroundImage(image Image) CSSStyleDeclaration {
-	style.backgroundImage = image
+	bmp, _ := image.(*Bitmap)
+	if bmp == nil {
+		style.background = nil
+		return style
+	}
+	style.background = []backgroundLayer{newBackgroundLayer(bmp, 100, 100)}
 	return style
 }
 

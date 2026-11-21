@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-11-21 09:35
+> 生成时间: 2026-11-21 19:14
 
 ---
 
@@ -372,6 +372,14 @@ type Graphics struct {
 func NewGraphics(renderer uintptr, fontPath string) *Graphics
     NewGraphics 创建渲染上下文。renderer 为 SDL_Renderer 句柄； fontPath 非空时作为 standard
     字体（测试/定制用）。
+
+func (g *Graphics) BlitImage(dstX, dstY, dstW, dstH int, image core.Image,
+	srcX, srcY, srcW, srcH int)
+    BlitImage 实现 core.ImageBlitter：按源矩形把位图 blit 到目标矩形（缩放 由 SDL 渲染器完成）。
+
+    源矩形是整图时走 DrawImage 的纹理缓存（同一张图只上传一次，纹理按位图 指针复用）。局部源矩形另裁一张小纹理：SDL2 的
+    SDL_RenderCopy 不带源 矩形，而带源矩形的 SDL_RenderCopyEx 的角度参数是 double（x64 走 XMM
+    寄存器，本包的 uintptr 调用约定传不了），只能自己裁一张。背景图的源 矩形恒为整图，这条慢路径平时走不到。
 
 func (g *Graphics) Clear(r, gr, b, a uint8)
     Clear 清屏。同时把裁剪栈清空并关闭 SDL 裁剪（SDL_RenderClear 本身无视 裁剪区，这里仅为让 Go 侧栈与 SDL
@@ -947,8 +955,8 @@ type Bitmap struct {
     Pix 是**非预乘** alpha：每个像素字节序为 R,G,B,A，A=0 表示完全透明。 DrawImage 的 w/h 可以与 W/H
     不同（缩放由后端完成）；图片像素在解码后 不再修改，后端可以按指针缓存纹理。
 
-    具体类型放在 core 而 Image 仍是空接口：新增实现不必改动既有的 BackgroundImage()/DrawImage
-    签名，后端用类型断言识别（与 Sprite 的 「可选扩展 + 回退」同一惯例）。
+    具体类型放在 core 而 Image 仍是空接口：新增实现不必改动既有的 DrawImage/BlitImage 签名，后端用类型断言识别（与
+    Sprite 的 「可选扩展 + 回退」同一惯例）。
 
 type Clipper interface {
 	PushClip(x, y, w, h int)
@@ -1019,6 +1027,17 @@ type Graphics interface {
 type Image interface {
 }
     Image 是绘制目标里的一张位图。
+
+type ImageBlitter interface {
+	BlitImage(dstX, dstY, dstW, dstH int, image Image, srcX, srcY, srcW, srcH int)
+}
+    ImageBlitter 是 Graphics 的可选扩展：按**源矩形**把一张位图拷到目标矩形。
+
+    源矩形以源图的像素计（srcX/srcY 为左上角，srcW/srcH 为宽高）；目标矩形 与源矩形尺寸不同时由后端缩放（CSS
+    background-size 的 cover/contain/ 百分比都靠它实现）。源矩形让调用方只取图片的一部分。
+
+    不实现本接口的后端回落到 Graphics.DrawImage（整图缩放到目标矩形）——
+    背景图的源矩形恒为整张图，回落路径与实现路径的结果一致，只是缩放由 各后端各自的采样口径决定（软件光栅是最近邻，SDL 是渲染器自带缩放）。
 
 type Paint interface {
 	Size() Size
@@ -1585,6 +1604,11 @@ type BufferGraphics struct {
     混合规则做了简化：半透明填充按 src*a + dst*(255-a) 直通混合（不预乘）， 仅用于测试与可视化，不追求色彩学精确。
 
 func NewBufferGraphics(w, h int) *BufferGraphics
+
+func (g *BufferGraphics) BlitImage(dstX, dstY, dstW, dstH int, image Image,
+	srcX, srcY, srcW, srcH int)
+    BlitImage 实现 core.ImageBlitter：按源矩形把位图最近邻缩放混合到目标 矩形。源矩形是整图时与 DrawImage
+    同口径（背景图的平铺就走这条路）。
 
 func (g *BufferGraphics) ColorAt(x, y int) (r, gg, b, a uint8, ok bool)
     ColorAt 读取像素点，越界时 ok=false。
@@ -2218,6 +2242,9 @@ func (v *HeadlessViewport) ViewportWidth() int
 
 type Image = core.Image
     Image 是绘制目标里的一张位图。
+
+type ImageBlitter = core.ImageBlitter
+    ImageBlitter 是 Graphics 的可选扩展：按源矩形 blit 位图（背景图平铺）。
 
 type ImageLoader func(src string) ([]byte, error)
     ImageLoader 加载一张图片的原始字节；失败返回 error。

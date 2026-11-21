@@ -466,7 +466,18 @@ lower|upper-roman/none)`、`list-style-position(outside/inside)`、`list-style` 
 （`list-style-image` 接受但忽略，标记仍按 type 画）、
 `box-shadow`（外阴影与内阴影 `inset`；逗号分隔多条、px/pt/dp 偏移/模糊/扩散、
 颜色，第一条在最上层；内阴影按 padding 盒裁切并支持 `border-radius`）、
-`background-color`/`background`、`color`、`font-size`、`font-weight(bold)`、`font-family`、
+`background-color`、`background-image`（`url()`/`none`，逗号分隔**多层**，列表首层画在
+最上面；引用按文档 BaseURL 解析，字节仍走宿主 `LoadImage`，`data:` 内建解码）、
+`background-repeat(repeat/repeat-x/repeat-y/no-repeat，双值写法横纵分轴；space/round
+退化为普通平铺)`、`background-position(轴向关键字/长度/百分比/「贴边再偏移」如
+`right 10px bottom 20px`，单值另一轴补 center)`、`background-size(auto/cover/contain/
+长度/百分比，百分比相对定位盒)`、`background-origin`/`background-clip`（border/padding/
+content-box 两套独立口径：前者定定位盒、后者定裁剪盒）、`background` 简写（颜色/图/
+position/斜杠 size/repeat/box/attachment 自动归类，未写出的分量重置回初始值）；各长写
+值表按 CSS 的**循环表**口径对齐到层。背景图到货只涨重绘计数（不重排）；渐变 `<image>`
+与 `background-attachment: fixed` 未实现，这类声明按 CSS 语义整条忽略；`space`/`round`
+两种铺法退化为普通平铺；圆角裁切下背景图仍按「角标补盖」近似，不是真正的圆角遮罩）、
+`color`、`font-size`、`font-weight(bold)`、`font-family`、
 `text-align(left/center/right)`、`text-decoration(underline/line-through/none，随父链继承)`、
 `white-space(normal/nowrap/pre/pre-wrap/pre-line)`（CSS Text §4.1 的三条正交行为：
 `pre` 保留空白与制表符、按源换行强制断行、不软换行（长行溢出）；`pre-wrap` 同上但
@@ -676,9 +687,14 @@ goroutine 里被并发调用**（实现必须线程安全）；加载失败按�
   空块自折叠未实现（父-子穿越 margin 折叠已实现）
 - `<img>`：支持 PNG / JPEG / GIF（只解**第一帧**，无动画）；未加载或加载失败时是
   0×0 的空盒（Chrome 会画 alt 文字 / 裂图图标，引擎没有 alt 回退），也没有
-  `srcset`/`sizes`、`exif` 旋转、`image-rendering` 与 `background-image`（后者仍是
-  只取颜色 token）；位图只按目标矩形拉伸（缩放算法由后端决定：SDL2 交给
-  `SDL_RenderCopy` 的纹理过滤，`BufferGraphics` 是最近邻），不做九宫格/裁剪填充
+  `srcset`/`sizes`、`exif` 旋转与 `image-rendering`；位图只按目标矩形拉伸（缩放算法由
+  后端决定：SDL2 交给 `SDL_RenderCopy` 的纹理过滤，`BufferGraphics` 是最近邻），
+  不做九宫格/裁剪填充
+- 背景图（`background-image` + 配套长写）：只做 `url()` 与 `none`，渐变 `<image>`、
+  `image-set()`、`element()` 等整条声明忽略（按 CSS 语义「非法即丢弃」）；不做
+  `background-attachment: fixed`（视口固定）；`background-repeat` 的 `space`/`round`
+  退化为普通平铺（不做等距铺开与整倍数缩放）；圆角元素上的背景图仍按「角标补盖」
+  近似（引擎的裁剪栈只有矩形），不是真正的圆角遮罩
 - 圆角裁剪（`overflow:hidden` + `border-radius`）的角区用「盒后底色」补盖实现：背后不是纯色（渐变/图片）时是近似；后端不支持 `engine.SpriteDrawer` 时不补盖（退化为矩形裁剪）
 - 裁剪仅由实现 `engine.Clipper`（`PushClip`/`PopClip`）的后端生效（当前 `BufferGraphics`、SDL2 均已实现；自定义后端未实现时静默跳过裁剪、仅不裁剪不报错）
 - 边框只画**实线**：`inset/outset/groove/ridge/dashed/dotted/double` 都退化为
