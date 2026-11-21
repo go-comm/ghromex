@@ -251,6 +251,13 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH i
 
 	// 内容宽度。box-sizing:border-box 时显式 width/height 含 padding+border（不含 margin）。
 	borderBox := comp.BoxSizing() == BoxSizingBorderBox
+	// <img> 是替换元素：auto 宽高按固有尺寸/属性/纵横比推出来（见
+	// imageDeclaredBox），没有可用尺寸时占 0×0，等解码到货后重排。
+	img := isImageElement(el)
+	imgDeclW, imgDeclH := -1, -1
+	if img {
+		imgDeclW, imgDeclH = imageDeclaredBox(comp, el, pctW, pctH)
+	}
 	contentW := resolveLen(comp.Width(), pctW)
 	if contentW >= 0 && borderBox {
 		if cw := contentW - pd[eLeft] - pd[eRight] - bd[eLeft] - bd[eRight]; cw > 0 {
@@ -261,7 +268,18 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH i
 	}
 	shrinkWrap := false
 	if contentW < 0 { // auto
-		if w := inputButtonTextWidth(g, el, comp, pctW); w >= 0 {
+		if img {
+			// 替换元素不用父级的可用宽：block 级未加载的 <img> 也应保持
+			// 0 宽，而不是把整行铺满（否则解码到货后会剧烈跳动）。
+			contentW = maxZero(imgDeclW)
+			if borderBox {
+				if cw := contentW - pd[eLeft] - pd[eRight] - bd[eLeft] - bd[eRight]; cw > 0 {
+					contentW = cw
+				} else {
+					contentW = 0
+				}
+			}
+		} else if w := inputButtonTextWidth(g, el, comp, pctW); w >= 0 {
 			// input[submit/reset/button]：auto 宽按 value 文本测量（空元素
 			// 无子节点，常规 shrink-to-fit 拿不到文字宽）。返回的是外盒宽
 			//（文本+padding+border），按 border-box 语义扣减后即为内容宽——
@@ -312,7 +330,9 @@ func layoutBox(g Graphics, el *htmlElement, outerW, outerH, ox, oy, pctW, pctH i
 	// 高度以包含块（= 本元素）的内容高为基数，CSS 2.1 §10.5。
 	// 百分比高度在包含块高度不确定（auto）时按 auto 处理。
 	declaredH := -1
-	if h := comp.Height(); h != nil {
+	if img {
+		declaredH = imgDeclH
+	} else if h := comp.Height(); h != nil {
 		if h.Type() == SIZE_PERCENT {
 			if pctH >= 0 {
 				declaredH = resolveLen(h, pctH)
@@ -687,6 +707,13 @@ func inlineBoxBaseline(g Graphics, che *htmlElement, outerH int) (asc, desc int)
 			inner = borderH
 		}
 		return mg[eTop] + inner, borderH - inner
+	case tag == "img":
+		// 替换元素没有内部基线：vertical-align: baseline 时对齐的是
+		// **底外边距边**（CSS 2.1 §10.8.1 的「无基线取 bottom margin edge」），
+		// 所以 ascent = 整个外边距盒高、descent = 0。Chrome 实测核对：给行内
+		// `<img>` 加 margin-bottom:10px，图片整体上移 10px（不是把行盒下方撑高）。
+		// 按普通行内盒的「盒底 − 字体 descent」算会让图片压低一个 descent。
+		return outerH, 0
 	case tag == "textarea":
 		// 多行控件：Chrome 的 textarea 计算 overflow:auto，按 CSS 2.1 §10.8.1
 		// 「inline-block 无 in-flow 行盒，或 overflow 计算值不是 visible」时基线取

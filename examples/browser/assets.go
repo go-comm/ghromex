@@ -1,9 +1,9 @@
-// 本文件把引擎的「外部样式表」能力接到本地文件系统上：地址换算 + 只读
-// 本地文件的加载器。包文档见 main.go。
+// 本文件把引擎的「外部资源」能力接到本地文件系统上：地址换算 + 只读本地
+// 文件的样式表/图片加载器。包文档见 main.go。
 //
-// 引擎（engine 包）不碰 I/O：它只把 <link rel="stylesheet" href> 与 CSS 的
-// @import 解析成绝对地址，再回调宿主给的加载器。本示例的宿主就是这里——
-// 只认 file:// 地址，不联网（与页面导航的口径一致）。
+// 引擎（engine 包）不碰 I/O：它只把 <link rel="stylesheet" href>、CSS 的
+// @import 与 <img src> 解析成绝对地址，再回调宿主给的加载器。本示例的宿主
+// 就是这里——只认 file:// 地址，不联网（与页面导航的口径一致）。
 package main
 
 import (
@@ -72,6 +72,30 @@ func pathFromFileURL(u string) (string, bool) {
 		rest = rest[1:]
 	}
 	return filepath.FromSlash(rest), true
+}
+
+// loadLocalImage 是示例的图片加载器：与样式表同一口径，只读本地文件。
+//
+// 引擎在 worker goroutine 里调用它（<img> 异步加载），本函数只做纯读取，
+// 天然线程安全。失败只打到 stderr：引擎会把该图片按空图处理，页面继续渲染。
+func loadLocalImage(src string) ([]byte, error) {
+	if isExternal(src) {
+		err := fmt.Errorf("示例不联网，跳过外部图片 %s", src)
+		fmt.Fprintln(os.Stderr, "图片加载失败:", err)
+		return nil, err
+	}
+	path, ok := pathFromFileURL(src)
+	if !ok {
+		err := fmt.Errorf("不支持的图片地址 %s", src)
+		fmt.Fprintln(os.Stderr, "图片加载失败:", err)
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "图片加载失败:", err)
+		return nil, err
+	}
+	return data, nil
 }
 
 // loadLocalStylesheet 是示例的样式表加载器：只读本地文件，不联网。

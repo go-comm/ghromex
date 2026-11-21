@@ -41,7 +41,8 @@
   · 表格完整模型：display 家族（table/inline-table/table-row/table-cell 等）、
     colspan/rowspan、border-spacing、col 宽度、caption-side、empty-cells
   · 斜体为 SDL_ttf 合成斜体（不改变字形前进宽度）；无 webfont/@font-face
-  · img/svg/canvas/iframe/video 无渲染链路，只有 CSS 盒
+  · svg/canvas/iframe/video 无渲染链路，只有 CSS 盒（img 已支持：宿主
+    注入 ImageLoader 或内建 data: URL，见「媒体与嵌入标签」一节）
   · 悬停/按下默认反馈是引擎有意分歧（Chrome UA 无 hover 规则）
 -->
 <html>
@@ -261,11 +262,17 @@ a  b   c    d</pre>
 
 <!-- ===== 媒体与嵌入标签 ===== -->
 <div class="sec" id="sec-tags-media">
-	<h2>媒体与嵌入标签 <span class="badge b-none">不支持</span></h2>
-	<p class="note">引擎没有图像/矢量/画布渲染链路（不加载 <code class="inl">img src</code>、
-		不解析 SVG 元素、无 canvas 绘制）：下面每个元素在引擎里都是<b>空的 inline-block 盒</b>
-		（只画 CSS 底色与边框）。Chrome 里各按自身规则显示（alt 文字、画布、内嵌页面）——差异是预期。</p>
-	<img class="media" src="missing.png" alt="img：Chrome 显示 alt/裂图，引擎只有盒">
+	<h2>媒体与嵌入标签 <span class="badge b-part">部分支持</span></h2>
+	<p class="note"><code class="inl">&lt;img&gt;</code> 走替换元素链路：尺寸按
+		CSS width/height → HTML width/height 属性 → 固有纵横比 → 固有像素依次推导，
+		解码 PNG / JPEG / GIF（只取第一帧）后画进内容盒（缩放与
+		<code class="inl">opacity</code>、父级 <code class="inl">overflow</code> 裁剪
+		均生效）。字节来源由宿主注入（<code class="inl">DocumentOptions.LoadImage</code>，
+		异步加载、到货后自动重排），内建 <code class="inl">data:</code> URL 同步解码。
+		本页没有装加载器，所以下面这张 <code class="inl">src</code> 不存在的 img 仍是
+		<b>空盒</b>（尺寸为 0）；Chrome 显示 alt/裂图，差异是预期。
+		SVG 元素、canvas 绘制、video/iframe 内嵌页面<b>仍无渲染链路</b>：只画 CSS 底色与边框。</p>
+	<img class="media" src="missing.png" alt="img：无加载器时为空盒（装 LoadImage 后按固有尺寸绘制）">
 	<svg class="media" width="150" height="64">svg：Chrome 有矢量画布，引擎只有盒</svg>
 	<canvas class="media">canvas：Chrome 默认 300x150 画布，引擎只有盒</canvas>
 	<video class="media">video</video>

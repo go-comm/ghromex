@@ -1,7 +1,11 @@
 package engine
 
 import (
+	"bytes"
+	"encoding/base64"
 	"fmt"
+	"image"
+	"image/png"
 	"math"
 	"strings"
 )
@@ -409,6 +413,13 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 		clips = openSVGClip(b, clips, makeSVGClip(base, ctr))
 	}
 
+	// <img>：与渲染路径同序（裁剪压栈之后、子内容之前），导出为内嵌
+	// data URI 的 <image>。preserveAspectRatio="none"——宽高已由布局算定
+	// （可能被 CSS 拉伸），SVG 不应再按原始纵横比内缩。
+	if visible && isImageElement(base) && base.width > 0 && base.height > 0 {
+		dumpSVGImage(b, base.x, base.y, base.width, base.height, base.imgBitmap)
+	}
+
 	if visible && comp != nil && isFormControl(base) {
 		pd, bd := resolvedEdges(base, comp)
 		dumpControlText(b, base, comp,
@@ -432,6 +443,26 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 	if opacityGroup {
 		b.WriteString("</g>\n")
 	}
+}
+
+// dumpSVGImage 把已解码的位图编码成 data URI 的 <image>。未加载（nil）或
+// 尺寸非正的图片不导出——与渲染路径「没有位图就不落墨」同口径。
+func dumpSVGImage(b *strings.Builder, x, y, w, h int, bmp *Bitmap) {
+	if bmp == nil || bmp.W <= 0 || bmp.H <= 0 || w <= 0 || h <= 0 ||
+		len(bmp.Pix) < bmp.W*bmp.H*4 {
+		return
+	}
+	nrgba := &image.NRGBA{
+		Pix:    bmp.Pix,
+		Stride: bmp.W * 4,
+		Rect:   image.Rect(0, 0, bmp.W, bmp.H),
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, nrgba); err != nil {
+		return
+	}
+	fmt.Fprintf(b, `<image x="%d" y="%d" width="%d" height="%d" preserveAspectRatio="none" href="data:image/png;base64,%s"/>`+"\n",
+		x, y, w, h, base64.StdEncoding.EncodeToString(buf.Bytes()))
 }
 
 func hexColor(r, g, b uint8) string {

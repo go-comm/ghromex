@@ -198,6 +198,20 @@ func (p *paint) SetBackground(c Color)  { p.bg = c }
 type Image interface {
 }
 
+// Bitmap 是一张已解码的图片（RGBA8888，每像素 4 字节，行主序）。
+//
+// Pix 是**非预乘** alpha：每个像素字节序为 R,G,B,A，A=0 表示完全透明。
+// DrawImage 的 w/h 可以与 W/H 不同（缩放由后端完成）；图片像素在解码后
+// 不再修改，后端可以按指针缓存纹理。
+//
+// 具体类型放在 core 而 Image 仍是空接口：新增实现不必改动既有的
+// BackgroundImage()/DrawImage 签名，后端用类型断言识别（与 Sprite 的
+// 「可选扩展 + 回退」同一惯例）。
+type Bitmap struct {
+	W, H int
+	Pix  []byte
+}
+
 // Sprite 是一块可 blit 的位图（RGBA8888，每像素 4 字节，行主序）。
 //
 // 目前只用于圆角抗锯齿的“角标精灵”：整块圆角一次 blit，代替逐像素的

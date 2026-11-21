@@ -266,6 +266,13 @@ type Graphics struct {
 	// spriteUploads 统计纹理上传次数（测试用）：精灵像素不变，纹理只该
 	// 上传一次——每次绘制都上传会把帧预算吃光（实测 300 次/帧 ≈ 2ms）。
 	spriteUploads int
+	// images 是 <img> 位图的纹理缓存（键是解码后不再修改的 *core.Bitmap）。
+	// 图片比角标精灵大得多，同样按「条数 + 像素」双上限 LRU 淘汰：页面
+	// 反复换图（轮播/图库）时不能只靠引擎侧缓存兜底。
+	images      map[*core.Bitmap]*spriteTex
+	imagePixels int
+	// imageUploads 统计图片纹理上传次数（测试用）：同一张位图只该上传一次。
+	imageUploads int
 	// cursors 缓存已创建的系统光标（SDL_SystemCursor 枚举值 → SDL_Cursor*）。
 	// 按实例缓存：SDL_Quit 后句柄失效，跨实例复用会拿到野指针。
 	cursors map[uintptr]uintptr
@@ -421,6 +428,7 @@ func NewGraphics(renderer uintptr, fontPath string) *Graphics {
 		faces:        make(map[faceKey]*fontFace),
 		textures:     make(map[texKey]texInfo),
 		sprites:      make(map[*core.Sprite]*spriteTex),
+		images:       make(map[*core.Bitmap]*spriteTex),
 		measures:     make(map[measureKey]measureVal),
 		familyPaths:  make(map[string]string),
 		cursors:      make(map[uintptr]uintptr),
@@ -1195,8 +1203,42 @@ func (g *Graphics) DrawColor(x, y, w, h int, color core.Color) {
 	checkDraw("SDL_RenderFillRect", sdlRenderFillRect(g.renderer, uintptr(unsafe.Pointer(&rect))))
 }
 
-// DrawImage 暂不支持（预留接口）。
+// DrawImage 把 *core.Bitmap 上传成纹理后按目标矩形 blit（SDL 负责缩放）。
+//
+// 纹理按位图指针缓存：解码后的像素在生命周期内不变，同一张图只上传一次
+// （与 DrawSprite 同一理由——每帧上传会把帧预算吃光）。其它 Image 值
+// （含 nil）保持旧语义：不绘制（预留接口）。
 func (g *Graphics) DrawImage(x, y, w, h int, image core.Image) {
+	bmp, ok := image.(*core.Bitmap)
+	if !ok || bmp == nil || w <= 0 || h <= 0 || g.renderer == 0 ||
+		bmp.W <= 0 || bmp.H <= 0 || len(bmp.Pix) < bmp.W*bmp.H*4 {
+		return
+	}
+	entry, ok := g.images[bmp]
+	if !ok {
+		tex := sdlCreateTexture(g.renderer, uintptr(pixelFormatRGBA32),
+			uintptr(textureAccessStreaming), uintptr(bmp.W), uintptr(bmp.H))
+		if tex == 0 {
+			checkDraw("SDL_CreateTexture", 0)
+			return
+		}
+		sdlSetTextureBlendMode(tex, uintptr(blendModeBlend))
+		rect := sdlRect{0, 0, int32(bmp.W), int32(bmp.H)}
+		if sdlUpdateTexture(tex, uintptr(unsafe.Pointer(&rect)),
+			uintptr(unsafe.Pointer(&bmp.Pix[0])), uintptr(bmp.W*4)) != 0 {
+			checkDraw("SDL_UpdateTexture", 0)
+			return
+		}
+		entry = &spriteTex{tex: tex, w: bmp.W, h: bmp.H, lastUsed: g.nextTexClock()}
+		g.images[bmp] = entry
+		g.imagePixels += bmp.W * bmp.H
+		g.imageUploads++
+		g.evictImagesIfNeeded(bmp)
+	} else {
+		entry.lastUsed = g.nextTexClock()
+	}
+	dst := sdlRect{int32(x), int32(y), int32(w), int32(h)}
+	checkDraw("SDL_RenderCopy", sdlRenderCopy(g.renderer, entry.tex, 0, uintptr(unsafe.Pointer(&dst))))
 }
 
 // pixelFormatRGBA32 是 SDL_PIXELFORMAT_RGBA32（0x16762004）：小端下内存
@@ -1343,6 +1385,13 @@ func (g *Graphics) CloseFonts() {
 	}
 	g.sprites = make(map[*core.Sprite]*spriteTex)
 	g.spritePixels = 0
+	for _, t := range g.images {
+		if t.tex != 0 {
+			sdlDestroyTexture(t.tex)
+		}
+	}
+	g.images = make(map[*core.Bitmap]*spriteTex)
+	g.imagePixels = 0
 }
 
 // maxCachedTextures 是文本纹理缓存的条数上限，maxCachedTexPixels 是像素
@@ -1403,6 +1452,49 @@ func (g *Graphics) lruSprite() (*core.Sprite, *spriteTex, bool) {
 	var old *spriteTex
 	found := false
 	for k, e := range g.sprites {
+		if !found || e.lastUsed < old.lastUsed {
+			oldKey, old, found = k, e, true
+		}
+	}
+	return oldKey, old, found
+}
+
+// 图片纹理缓存的上限：条数与像素数（4 字节/像素估显存）。图片远大于精灵，
+// 上限按 MB 而非条数主导：16M 像素 ≈ 64MB。
+const (
+	maxCachedImages      = 64
+	maxCachedImagePixels = 16 << 20
+)
+
+// evictImagesIfNeeded 图片纹理超出上限时按最近最少使用淘汰。
+//
+// keep 是刚上传的那张：单张超大图片本身就可能超过像素上限，不能上传完
+// 立刻把它淘汰掉（下一次绘制又要重传，且当前这一帧的纹理句柄已失效）。
+func (g *Graphics) evictImagesIfNeeded(keep *core.Bitmap) {
+	if len(g.images) <= maxCachedImages && g.imagePixels <= maxCachedImagePixels {
+		return
+	}
+	targetItems := maxCachedImages * 9 / 10
+	targetPixels := maxCachedImagePixels * 9 / 10
+	for len(g.images) > targetItems || g.imagePixels > targetPixels {
+		oldKey, old, ok := g.lruImage()
+		if !ok || oldKey == keep {
+			return
+		}
+		if old.tex != 0 {
+			sdlDestroyTexture(old.tex)
+		}
+		g.imagePixels -= old.w * old.h
+		delete(g.images, oldKey)
+	}
+}
+
+// lruImage 找出最近最少使用的图片纹理。
+func (g *Graphics) lruImage() (*core.Bitmap, *spriteTex, bool) {
+	var oldKey *core.Bitmap
+	var old *spriteTex
+	found := false
+	for k, e := range g.images {
 		if !found || e.lastUsed < old.lastUsed {
 			oldKey, old, found = k, e, true
 		}

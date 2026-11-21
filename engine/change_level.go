@@ -68,6 +68,10 @@ const (
 // paintBase，档位只由 ChangeCount 决定。
 func PendingChange(doc HTMLDocument, reflowBase, paintBase int64) (ChangeLevel, int64, int64) {
 	if d, ok := doc.(*htmlDocument); ok {
+		// 异步解码完成的结果在这里收口（主 goroutine）：有图片到货时
+		// changed 增长，下面的档位判定即返回 ChangeReflow。放在读计数之前，
+		// 本轮就能看到这一笔。
+		d.drainImages()
 		reflow, paint := d.changed, d.paintChanged
 		switch {
 		case reflow != reflowBase:

@@ -521,6 +521,13 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 				bw-bd[eLeft]-bd[eRight], bh-bd[eTop]-bd[eBottom])
 		}
 
+		// <img>：内容盒里画位图（缩放交给后端）。放在裁剪压栈之后——
+		// overflow:hidden/clip 的父盒能截住图片，与子元素同口径。
+		if visible && inView && isImageElement(base) &&
+			base.width > 0 && base.height > 0 && base.imgBitmap != nil {
+			g.DrawImage(base.x, base.y, base.width, base.height, base.imgBitmap)
+		}
+
 		// 表单控件：input 按 type 分支（text/password 画 value 文本 + 光标 +
 		// 聚焦蓝框，宽度溢出舍头保尾；按钮型居中不截断；radio/checkbox 选中
 		// 时补画强调色与勾选标记）；textarea 画折行文本 + 光标；

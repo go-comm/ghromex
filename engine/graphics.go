@@ -23,6 +23,8 @@ type (
 	Paint = core.Paint
 	// Image 是绘制目标里的一张位图。
 	Image = core.Image
+	// Bitmap 是一张已解码的 RGBA8888 图片（<img> 的绘制载荷）。
+	Bitmap = core.Bitmap
 	// Sprite 是一块可 blit 的位图。
 	Sprite = core.Sprite
 	// SpriteDrawer 是 Graphics 的可选扩展：支持位图 blit。
@@ -294,7 +296,8 @@ func (g *FakeGraphics) PopClip()                {}
 
 // BufferGraphics 把绘制指令落在一块二维 RGBA 缓冲区上：
 // DrawColor 填充矩形、DrawText 把每个非空白字符画成一个色块（近似字形占位）、
-// DrawImage 填充品红占位块。它不依赖任何图形后端，适合单元测试断言像素，
+// DrawImage 把 *Bitmap 缩放混合（其它值仍填充品红占位块）。它不依赖任何
+// 图形后端，适合单元测试断言像素，
 // 也能 DumpPNG 出图供人工查看。缓冲区初始为全透明。
 //
 // 混合规则做了简化：半透明填充按 src*a + dst*(255-a) 直通混合（不预乘），
@@ -464,10 +467,31 @@ func (g *BufferGraphics) DrawText(x, y, w, h int, paint Paint, text string) {
 	}
 }
 
-// DrawImage 实现 Graphics：记录调用并填充品红占位块。
+// DrawImage 实现 Graphics：*Bitmap 按最近邻缩放逐像素混合；其它值（含
+// nil，历史上用于占位）仍填充品红方块，保持旧测试的占位语义。
+//
+// 缩放的取整口径与浏览器不同（这里只求测试/无头渲染可断言），显示质量
+// 由真实后端负责（SDL 的 RenderCopy 自带缩放）。
 func (g *BufferGraphics) DrawImage(x, y, w, h int, image Image) {
 	g.DrawCalls++
-	g.FillRect(x, y, w, h, 255, 0, 255, 255)
+	bmp, ok := image.(*Bitmap)
+	if !ok || bmp == nil || bmp.W <= 0 || bmp.H <= 0 || w <= 0 || h <= 0 ||
+		len(bmp.Pix) < bmp.W*bmp.H*4 {
+		g.FillRect(x, y, w, h, 255, 0, 255, 255)
+		return
+	}
+	for dy := 0; dy < h; dy++ {
+		sy := dy * bmp.H / h
+		for dx := 0; dx < w; dx++ {
+			sx := dx * bmp.W / w
+			i := (sy*bmp.W + sx) * 4
+			a := bmp.Pix[i+3]
+			if a == 0 {
+				continue
+			}
+			g.FillRect(x+dx, y+dy, 1, 1, bmp.Pix[i], bmp.Pix[i+1], bmp.Pix[i+2], a)
+		}
+	}
 }
 
 // DrawSprite 实现 engine.SpriteDrawer：按 RGBA8888 逐像素混合精灵

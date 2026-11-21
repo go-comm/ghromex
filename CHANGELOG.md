@@ -18,6 +18,66 @@
 
 ## 未发布
 
+**`<img>` 图片链路：替换元素布局 + 异步加载 + 解码绘制（PNG / JPEG / GIF）**。
+引擎此前把 `<img>` 当普通空盒：不加载、不解码、`DrawImage` 是空实现（SDL2 侧）或
+洋红占位（软件光栅）。本轮补上完整通路——**字节来源仍由宿主注入**（引擎不读文件、
+不联网，与外部样式表同一约定），解码只用标准库（`image/png`、`image/jpeg`、
+`image/gif`，GIF 取第一帧），纯 Go 无 CGO 的约束不变。
+
+- **公开 API**：`DocumentOptions.LoadImage ImageLoader`，其中
+  `type ImageLoader func(src string) ([]byte, error)`。`src` 是**已按 `BaseURL`
+  解析的绝对地址**，加载器不用自己拼路径；`data:` URL 由引擎内建解码（base64 与
+  百分号转义两种载荷），不会交给加载器。新增 `core.Bitmap{W, H int; Pix []byte}`
+  （RGBA8888、**非预乘** alpha、行主序）作为 `DrawImage` 的载荷，引擎侧
+  `engine.Bitmap` 是同类型别名；`core.Image` 仍是空接口，后端用类型断言识别
+  （与 `SpriteDrawer` 的「可选扩展 + 回退」同一惯例，不破坏既有实现）。
+- **替换元素尺寸**：CSS `width`/`height` 非 `auto` 优先（百分比按包含块解析，
+  高度百分比在包含块高度不定时按 `auto`）→ HTML `width`/`height` 属性
+  （presentational hint，容忍 `px` 后缀与空白）→ 单边已知时按**固有纵横比**补
+  另一边 → 最后用固有像素尺寸。两边都未知时占 **0×0**，解码到货后自动重排
+  （避免未加载时 block 级 `<img>` 铺满整行、到货后剧烈跳动）。行内 `<img>` 的
+  基线按替换元素语义取**底外边距边**（descent 0），不再按「盒底 − 字体 descent」
+  压低一个字降部。
+- **绘制**：`renderNode` 在裁剪压栈之后、表单控件之前调 `g.DrawImage(内容盒)`。
+  `BufferGraphics.DrawImage` 支持 `*Bitmap` 最近邻缩放 + 直通 alpha 混合
+  （非 `Bitmap` 仍保留旧的洋红占位语义，`TestBufferDrawImagePlaceholder` 不变）；
+  `opacityGraphics.DrawImage` 复制一份位图并缩放 alpha（同一图片在本次子树内只
+  复制一次）；`overflow` 裁剪对图片与子元素同口径。SDL2 后端把位图上传成
+  `RGBA32` 纹理后 `SDL_RenderCopy` 到目标矩形（缩放交给渲染器），纹理按位图
+  指针缓存（同一张图只上传一次），并按「条数 64 / 16M 像素」双上限 LRU 淘汰
+  ——页面反复换图（轮播/图库）不会把显存吃光；`CloseFonts` 一并释放。
+- **异步加载**：布局前 `resolveImages` 遍历 `<img>`、按 `src` 从文档缓存取位图；
+  未加载的登记后由 worker goroutine 调加载器 + 解码，把位图写回缓存（`imgMu` 内）
+  并给 `imgReady` 原子计数 +1。**worker 只写缓存与计数、不碰文档其它状态与
+  Graphics**（SDL 要求渲染状态单线程）：主 goroutine 在 `PendingChange` 与
+  `LayoutDocument` 两个入口调 `drainImages`，用 `Swap(0)` 把计数换算成 `changed`
+  ——主循环本来就每轮比对 `ChangeCount`，这一笔足够触发重排。`drainImages` 刻意
+  **不调 `onChanged`**：`LayoutDocument` 开头也会 drain，回调里重入布局会踩坏本轮
+  状态。采用**写回式**而非向 channel 投递结果：宿主换文档时忘了 `Close`，投递式
+  worker 会永久阻塞在发送上，顺带把整份文档与已解码位图钉在内存里；写回式 worker
+  加载完就自然退出，不需要关闭握手，`Close` 因此也不必额外收尾。
+  同一 `src` 只加载一次（多个 `<img>` 共享同一份位图）；加载失败按空图处理
+  （0×0、不落墨、不 panic、不重试），错误由加载器自己上报。
+- **SVG 导出**：`<image>` 内嵌 `data:image/png;base64,…`，落点/尺寸与渲染路径
+  一致（`preserveAspectRatio="none"`——宽高已由布局算定），未加载的图片不导出。
+- **结构体尺寸**：`htmlElement` 新增 `imgBitmap *Bitmap`（指针段末尾，不产生
+  空洞），尺寸不变量 **640B → 648B**（`field_packing_internal_test.go` 同步）；
+  `Clone` 里置 `nil`（克隆体按自己的 `src` 重新解析，位图仍在文档缓存里）。
+- **示例与文档**：`examples/browser` 的 `assets.go` 新增 `loadLocalImage`（只读
+  `file://`、不联网），`main.go` 打开页面时传入；`examples/stylebook` 的媒体节
+  从「不支持」改为「部分支持」并说明加载器与 `data:` 两种来源（该页没装加载器，
+  `src` 不存在的 img 仍是空盒）。README 特性/已知限制、`docs/ai/architecture.md`
+  的依赖表、异步口径与扩展点同步更新。
+- **回归**：新增 `engine/image_test.go` 覆盖尺寸来源（固有/属性/CSS/纵横比/非法
+  属性/无 src）、像素落点与透明、`overflow:hidden` 裁剪、`opacity`、异步 loader
+  （首帧 0×0 → `ChangeReflow` → 重排后 4×2、同一 `src` 只调一次）、加载失败退化、
+  SVG 导出（`display:none` 不导出）。`go build ./...`、`go vet ./...`、
+  `go test ./... -count=1` 全绿；`examples/ua` 与 `examples/notepad` 的
+  `-dump-svg` 与 `688c360` 基线逐字节一致（两页都不含 `<img>`，布局口径
+  未受替换元素分支影响）。
+- 本轮**不做** `background-image`（仍只取 `background` 简写里的颜色 token），
+  也没有 `srcset` / EXIF 旋转 / `alt` 回退 / 动画 GIF。
+
 **增量布局阶段一：布局缓冲跨轮复用 + 尾部零分配，稳定态重排分配 1.76GB → 36MB**。
 前面几阶段把「打开文档」「敲一个字」的常驻内存压下来了，但**稳定态全量重排**
 （悬停、焦点、`ChangeCount` 驱动的任何一次 `LayoutDocument`）仍然是重灾区：

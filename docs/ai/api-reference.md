@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-11-20 03:42
+> 生成时间: 2026-11-21 09:35
 
 ---
 
@@ -384,7 +384,10 @@ func (g *Graphics) DrawColor(x, y, w, h int, color core.Color)
     DrawColor 实现 core.Graphics。
 
 func (g *Graphics) DrawImage(x, y, w, h int, image core.Image)
-    DrawImage 暂不支持（预留接口）。
+    DrawImage 把 *core.Bitmap 上传成纹理后按目标矩形 blit（SDL 负责缩放）。
+
+    纹理按位图指针缓存：解码后的像素在生命周期内不变，同一张图只上传一次 （与 DrawSprite 同一理由——每帧上传会把帧预算吃光）。其它 Image
+    值 （含 nil）保持旧语义：不绘制（预留接口）。
 
 func (g *Graphics) DrawSprite(x, y int, s *core.Sprite)
     DrawSprite 实现 core.SpriteDrawer：把位图精灵上传成纹理并 blit 一次。
@@ -934,6 +937,18 @@ Package core 是渲染引擎与平台后端之间的契约层。
 这里只放**跨层契约**：接口，以及接口签名里用到的值类型。引擎内部的 类型（文档、DOM、样式）与平台内部的类型（纹理、窗口句柄）都不在此。
 
 TYPES
+
+type Bitmap struct {
+	W, H int
+	Pix  []byte
+}
+    Bitmap 是一张已解码的图片（RGBA8888，每像素 4 字节，行主序）。
+
+    Pix 是**非预乘** alpha：每个像素字节序为 R,G,B,A，A=0 表示完全透明。 DrawImage 的 w/h 可以与 W/H
+    不同（缩放由后端完成）；图片像素在解码后 不再修改，后端可以按指针缓存纹理。
+
+    具体类型放在 core 而 Image 仍是空接口：新增实现不必改动既有的 BackgroundImage()/DrawImage
+    签名，后端用类型断言识别（与 Sprite 的 「可选扩展 + 回退」同一惯例）。
 
 type Clipper interface {
 	PushClip(x, y, w, h int)
@@ -1520,6 +1535,9 @@ func ParseInlineStyle(text string) []simpleDecl
 
 TYPES
 
+type Bitmap = core.Bitmap
+    Bitmap 是一张已解码的 RGBA8888 图片（<img> 的绘制载荷）。
+
 type BorderCollapse uint8
     BorderCollapse 决定表格相邻单元格的边框是否合并（border-collapse）， 只被表格布局读取。separate 为
     CSS 默认（单元格各自画四边边框，相邻两条各 自 1px）；collapse 时相邻单元格共享一条线——浏览器把它实现成每个单元格只
@@ -1561,8 +1579,8 @@ type BufferGraphics struct {
 	// Has unexported fields.
 }
     BufferGraphics 把绘制指令落在一块二维 RGBA 缓冲区上： DrawColor 填充矩形、DrawText
-    把每个非空白字符画成一个色块（近似字形占位）、 DrawImage 填充品红占位块。它不依赖任何图形后端，适合单元测试断言像素， 也能 DumpPNG
-    出图供人工查看。缓冲区初始为全透明。
+    把每个非空白字符画成一个色块（近似字形占位）、 DrawImage 把 *Bitmap 缩放混合（其它值仍填充品红占位块）。它不依赖任何
+    图形后端，适合单元测试断言像素， 也能 DumpPNG 出图供人工查看。缓冲区初始为全透明。
 
     混合规则做了简化：半透明填充按 src*a + dst*(255-a) 直通混合（不预乘）， 仅用于测试与可视化，不追求色彩学精确。
 
@@ -1575,7 +1593,10 @@ func (g *BufferGraphics) DrawColor(x, y, w, h int, color Color)
     DrawColor 实现 Graphics：颜色填充矩形。
 
 func (g *BufferGraphics) DrawImage(x, y, w, h int, image Image)
-    DrawImage 实现 Graphics：记录调用并填充品红占位块。
+    DrawImage 实现 Graphics：*Bitmap 按最近邻缩放逐像素混合；其它值（含
+    nil，历史上用于占位）仍填充品红方块，保持旧测试的占位语义。
+
+    缩放的取整口径与浏览器不同（这里只求测试/无头渲染可断言），显示质量 由真实后端负责（SDL 的 RenderCopy 自带缩放）。
 
 func (g *BufferGraphics) DrawSprite(x, y int, s *Sprite)
     DrawSprite 实现 engine.SpriteDrawer：按 RGBA8888 逐像素混合精灵 （alpha 0
@@ -1880,6 +1901,12 @@ type DocumentOptions struct {
 	// LoadStylesheet 非 nil 时启用外部样式表：<link rel="stylesheet" href>
 	// 与 CSS 的 @import 都会经它加载。
 	LoadStylesheet StylesheetLoader
+	// LoadImage 非 nil 时启用 <img> 加载：src 按 BaseURL 解析后交给它读回
+	// 字节，引擎解码 PNG/JPEG/GIF。nil 时非 data: 的图片按空图处理。
+	//
+	// 加载在 worker goroutine 里进行（可能并发调用），加载器必须线程安全。
+	// data: URL 由引擎内建解码，不会调用加载器。
+	LoadImage ImageLoader
 }
     DocumentOptions 是 OpenDocumentWith 的可选能力。零值等同于 OpenDocument： 不加载外部样式表。
 
@@ -2191,6 +2218,18 @@ func (v *HeadlessViewport) ViewportWidth() int
 
 type Image = core.Image
     Image 是绘制目标里的一张位图。
+
+type ImageLoader func(src string) ([]byte, error)
+    ImageLoader 加载一张图片的原始字节；失败返回 error。
+
+    src 是**已解析成绝对地址**的引用（按文档 BaseURL 解析），所以加载器拿到 的永远是可以直接用的地址，不用自己再拼相对路径。
+
+    加载是**异步**的：引擎在布局时登记引用，worker goroutine 调加载器并解码， 完成后由主循环（PendingChange /
+    LayoutDocument）把结果收进缓存并触发 重排。加载器因此可能被并发调用，实现必须自行保证线程安全。
+
+    返回 error 时该图片按「空图」处理（盒子不占尺寸，页面继续渲染），错误由 宿主上报——引擎不打印、不弹窗。
+
+    data: URL 由引擎内建解码，不会交给加载器。
 
 type KeyEvent struct {
 	Type string

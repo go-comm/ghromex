@@ -348,6 +348,7 @@ func (b *browserApp) show(addr, dir string, data []byte, commit bool) bool {
 	doc, err := b.win.OpenDocumentWith(string(data), engine.DocumentOptions{
 		BaseURL:        pageBaseURL(addr, dir),
 		LoadStylesheet: loadLocalStylesheet,
+		LoadImage:      loadLocalImage,
 	})
 	if err != nil {
 		b.showMessage("HTML 解析失败", addr, err.Error())

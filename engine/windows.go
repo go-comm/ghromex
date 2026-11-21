@@ -29,6 +29,7 @@ func OpenDocumentWith(v Viewport, src string, opts DocumentOptions) (HTMLDocumen
 	impl := doc.(*htmlDocument)
 	impl.baseURL = opts.BaseURL
 	impl.loadSheet = opts.LoadStylesheet
+	impl.loadImage = opts.LoadImage
 	parseInto(doc, doc.Head(), doc.Body(), src, doc)
 	impl.viewport = v
 	LayoutDocument(doc)
@@ -77,6 +78,11 @@ func LayoutDocument(doc HTMLDocument) {
 	hd, _ := doc.(*htmlDocument)
 	resized := false
 	if hd != nil {
+		// 先收图片结果：worker 完成一次解码就给 changed 记一笔，本次必须走
+		// 全量布局（下面「只发生过滚动」的增量判据会因差额不等而失效）。
+		hd.drainImages()
+		// 把位图绑定到 <img> 上，并登记尚未加载的引用（异步 worker）。
+		resolveImages(hd)
 		// 先比对尺寸再判快路径：本次布局用的就是新尺寸，尺寸这笔账要落在
 		// 记账**之前**，否则 changed 比 lastLayoutChange 多出一笔永不算数的
 		// 账，下一档滚轮的「只发生了滚动」判定失效（差 1 就不等）→ 整棵树

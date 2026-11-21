@@ -185,6 +185,10 @@ type htmlElement struct {
 	// 行盒累加缓冲（curLine）跨轮复用，长 pre 单行可达几十万项、lineItem
 	// 约 120B，每轮从零 grow 就是几百 MB 的瞬时分配（见 layout_cache.go）。
 	lcache *layoutCache
+	// imgBitmap 是 <img> 当前可用的位图（未加载/非 img 为 nil），由布局前
+	// 的 resolveImages 每轮重新绑定：src 改了自然换成新图或 nil，不必另存
+	// 旧地址做比较。
+	imgBitmap *Bitmap
 
 	// —— 第二段：纯数值（不含指针，GC 扫描止于上一段）
 	width   int
@@ -704,6 +708,9 @@ func (element *htmlElement) Clone() HTMLElement {
 	// 布局缓冲不随克隆复制：行盒累加缓冲属于「这一轮排版」的临时产物，
 	// 克隆体自己会重新长一份（共享同一块数组会让两次布局互相踩）。
 	c.lcache = nil
+	// 图片绑定也不复制：克隆体可能被挪到另一份文档/另一种 BaseURL 下，
+	// 必须按自己的 src 重新解析（位图本身在文档缓存里，重复加载会命中）。
+	c.imgBitmap = nil
 	// 生成盒是宿主级联的产物，不随克隆复制：克隆元素会按自己的伪元素
 	// 规则重建（共享节点会造成两个宿主争用同一份布局几何）。
 	c.generated = false

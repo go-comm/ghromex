@@ -19,6 +19,7 @@
 - 应用层底座：`SetOnChanged` 变更回调（内容或**视口尺寸**变化都会通知——窗口缩放不改文档内容，只靠内容变更收不到信号）；失焦只停画、**不丢编辑状态**（光标与选区保留，页内菜单动作可作用于失焦的编辑区）；`CaretPosition` 查光标行列；`clipboard.Text` / `clipboard.SetText`（`runtime/clipboard`）读写系统剪贴板；`browser.RequestClose` 关窗
 - 事件冒泡：命中测试找到最深元素，沿父链依次派发 `click` / `change` / `wheel`，随后执行引擎默认动作（select 展开/选中、勾选切换、链接导航）
 - 滚动与裁剪：`overflow(visible/hidden/clip/scroll/auto，单值两轴、两值 x y、overflow-x/overflow-y 分轴)` 滚动容器（滚轮驱动、子树平移 + padding 盒裁剪，被裁内容不可命中）、**圆角裁剪按 border-radius 的形状**（`overflow:hidden` 的圆角盒，溢出到角外的子元素按圆角裁掉，角上透出盒后底色）、文档级页面滚动（根元素以视口为滚动盒，长页面/宽页面均可滚）、`wheel` 事件（`OnWheel` 注册、`MouseEvent.DeltaX/DeltaY` 像素位移、冒泡派发）、Shift+滚轮 转横向滚动、textarea 滚轮滚动（与光标跟随同夹紧口径，全量吸收纵向滚轮、撞边界不带动页面）；裁剪经 `Graphics` 可选 `Clipper`（`PushClip`/`PopClip`，逐层求交）落地：`BufferGraphics` 像素断言、SDL2 `SDL_RenderSetClipRect`，SVG 导出同步生成 `clipPath`
+- 图片 `<img>`：替换元素布局（尺寸按 CSS width/height → HTML width/height 属性 → 固有纵横比 → 固有像素推导，行内基线取盒底）、解码 PNG / JPEG / GIF（GIF 取第一帧）、绘制走 `Graphics.DrawImage`（后端缩放、alpha 混合，`opacity` 与父级 `overflow` 裁剪同时生效）、SVG 导出为内嵌 `data:image/png` 的 `<image>`。字节来源由宿主注入 `DocumentOptions.LoadImage`（`src` 已按 `BaseURL` 解析成绝对地址，worker goroutine 里异步加载 + 解码，到货后自动重排一次），引擎内建 `data:` URL（base64 / 百分号转义）同步解码以保证首帧可见；同一 `src` 只加载一次，纹理按位图指针上传一次并受 LRU 约束
 - 可插拔图形后端：`engine.Graphics` 接口（DrawText / DrawColor / DrawImage / MeasureText），内置 `FakeGraphics`（计数）、`BufferGraphics`（软件光栅化到 RGBA 缓冲，可 `DumpPNG`）供无显示器测试；圆角抗锯齿走**角标精灵**（可选扩展 `SpriteDrawer`：整块圆角一次 blit，替掉逐像素的半透明小方块）——绘制调用数是 GPU 路径上的主要开销，portal 页一帧从 31840 次降到 2500 次、单帧绘制 149ms → 8.7ms（软件渲染器实测），滚动动画才不会被切成几帧；精灵的像素（引擎侧）与纹理（后端侧）都按「条数 + 像素」双上限、LRU 淘汰——键里含颜色，页面逐帧改色（动画）会不断产生新精灵，不设上限就是内存/显存泄漏；**填充率**同样要命：SDL 的绘制混合模式一旦开着，每块不透明填充都走逐像素混合（软件光栅器 2.1ns/像素，直接写像素只要 0.2ns），门户页一帧要填 1700 万像素——2560×1440 的窗体下单帧 37ms，**最大化后滚动只剩 27fps**（小窗体看不出来）。按填充的 alpha 临时切换混合模式（画完复原，贴图拷贝还要混合）后，门户页整帧（软件光栅器，含呈现）：800×600 1.35ms、1280×820 1.95ms、1920×1080 2.84ms、2560×1440 **4.07ms**（原 37ms，9 倍）、3840×2160 7.11ms；画面逐像素不变。清屏也不再重复铺白底（画布背景不透明时白底那层完全被盖住）。**诊断**：`GHROMEX_DEBUG=1` 会打印渲染路径与驱动名（默认 `renderer=software (driver=software; 默认内存渲染)`；`GHROMEX_GPU=1` 时 `renderer=accelerated(GPU, driver=direct3d; GHROMEX_GPU=1)`）——软件路径的瓶颈是填充率，GPU 路径通常在纹理上传/draw call/swap 间隔（GPU 路径实测：1280×820 到 4K 的整帧都是 16.6ms = vsync 周期，稳在 60fps；其中 GPU 真实工作只有 1.3~3ms，其余 13.5~14.5ms 是等 vsync）。**这些数字的口径与分段拆解见「性能实测」**——不同口径的数不能并排比
 - 元素注册表：`CustomElements().Define(tag, proto)` + `CloneElement` 注册自定义标签，解析时克隆原型生成独立实例
 - 无头运行：`-dump-svg` 导出布局结果；`NewBufferedViewport` / `OpenBufferedDocument`（视口 + 软件光栅化缓冲）可在 CI 中像素级断言渲染结果；真实窗口的最终观感用 `Window.Screenshot()` 回读窗口像素（应用自行编码 PNG，见 `examples/snip`）
@@ -611,6 +612,30 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
 筛选（引擎不分媒体，与 `@media` 被跳过同口径）。`examples/browser` 把它接到了本地
 文件系统（`assets.go`，只认 `file://`），演示页是 `external.html`。
 
+**图片 `<img>`**：`<img src>` 走替换元素链路——布局按图片的**固有尺寸**定盒（CSS
+`width`/`height` 优先，其次是 HTML `width`/`height` 属性，再按已知一边 + 固有纵横比
+推另一边），解码后的位图画进内容盒（缩放由后端完成，`opacity` 与父级 `overflow`
+裁剪照常生效）。和样式表一样，字节来源由宿主提供，引擎不读文件、不联网：
+
+```go
+doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
+	BaseURL: "file:///C:/pages/index.html",
+	LoadImage: func(src string) ([]byte, error) {
+		// src 已是绝对地址；PNG/JPEG/GIF 的识别与解码由引擎负责
+		return os.ReadFile(pathFromFileURL(src))
+	},
+})
+```
+
+与样式表不同，图片加载是**异步**的：布局时登记引用，worker goroutine 调加载器并解码，
+完成后把位图写回文档缓存、给就绪计数 +1；主循环的 `PendingChange`/`LayoutDocument`
+收口（`ChangeCount` 增长一次）后自动重排，图片就出现在首帧之后的那一帧。因此：加载器**可能在多个
+goroutine 里被并发调用**（实现必须线程安全）；加载失败按「空图」处理（盒子
+0×0、不落墨、不 panic，错误由加载器自己上报）；同一 `src` 只加载一次（引擎按解析后的
+地址缓存，多个 `<img>` 共享同一份位图）。`data:` URL（base64 或百分号转义）由引擎
+**同步**解码，不经过加载器——自包含页面与测试用它就能首帧出图。`examples/browser`
+的 `loadLocalImage` 是只读本地文件的范例。
+
 ## 已知限制
 
 - **绑定层的结构体大小必须与运行库一致**：SDL 的结构体按值跨越 DLL 边界（Go 侧申请内存、SDL 按自己的大小写），估小了就是**越界写坏调用者的栈**。实例：`SDL_RendererInfo` 曾按「name + flags + num_texture_formats + 指针」估成 32/40 字节，而运行库（SDL 2.28.4）写的是 **88 字节**（`texture_formats` 是**内联数组** `Uint32[16]`，不是指针）——越界 48 字节，调用之后渲染器句柄变成 0、随后空指针崩溃。现在按真实布局定义，并有测试逐个量（缓冲区填 0xAA，看最后一个被改写的字节）断言「运行库写入长度 ≤ Go 侧结构体大小」：`SDL_RendererInfo` 88/88、`SDL_Event` 56/56、`SDL_SysWMinfo` 32/32。同类问题也可能出现在别的跨界结构体上（`SDL_Surface`/`SDL_Texture`/`SDL_AudioSpec`/`GUITHREADINFO` 等——`GUITHREADINFO` 就有：末字段 `rcCaret` 是 RECT 16 字节，写成 int32 会让结构体少 8 字节，运行库越界写），新增按值跨界时要**先量再写**。另外，C 侧地址（uintptr）转可解引用的指针统一走 `cMemPointer`（`backend/sdl2/sdl2.go`）：把位模式原样搬过去，**不做任何指针算术**；取地址的局部变量按 Go 的地址性规则一定在内存里，实测热循环一千万次读回一致。这个工具**只用于 C 侧内存**（C 内存不受 Go GC 管），并且**不提供任何 GC 保活**——Go 堆指针必须直接以 `unsafe.Pointer` 传递（`uintptr` 不是指针，`runtime.KeepAlive` 也救不了「已经被当成指针用的 uintptr」）。它是绕过 `go vet` 的 `unsafeptr` 检查的**唯一**入口，注释里已注明这是针对 C 内存的已知误报
@@ -649,7 +674,11 @@ doc, err := engine.OpenDocumentWith(vp, src, engine.DocumentOptions{
   全程为整数像素，浏览器的小数边距/行盒（如 h3 的 `margin: 1em` = 18.72px、
   h2 的 0.83em = 19.92px）只能取整，逐段累积后整页可漂移数像素；
   空块自折叠未实现（父-子穿越 margin 折叠已实现）
-- `DrawImage` 尚未实现（接口已预留）
+- `<img>`：支持 PNG / JPEG / GIF（只解**第一帧**，无动画）；未加载或加载失败时是
+  0×0 的空盒（Chrome 会画 alt 文字 / 裂图图标，引擎没有 alt 回退），也没有
+  `srcset`/`sizes`、`exif` 旋转、`image-rendering` 与 `background-image`（后者仍是
+  只取颜色 token）；位图只按目标矩形拉伸（缩放算法由后端决定：SDL2 交给
+  `SDL_RenderCopy` 的纹理过滤，`BufferGraphics` 是最近邻），不做九宫格/裁剪填充
 - 圆角裁剪（`overflow:hidden` + `border-radius`）的角区用「盒后底色」补盖实现：背后不是纯色（渐变/图片）时是近似；后端不支持 `engine.SpriteDrawer` 时不补盖（退化为矩形裁剪）
 - 裁剪仅由实现 `engine.Clipper`（`PushClip`/`PopClip`）的后端生效（当前 `BufferGraphics`、SDL2 均已实现；自定义后端未实现时静默跳过裁剪、仅不裁剪不报错）
 - 边框只画**实线**：`inset/outset/groove/ridge/dashed/dotted/double` 都退化为

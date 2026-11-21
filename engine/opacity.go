@@ -23,6 +23,9 @@ type opacityGraphics struct {
 	k float64
 	// sprites 缓存本次子树内已缩放过的精灵（同一角标/阴影常被重复 blit）。
 	sprites map[*Sprite]*Sprite
+	// bitmaps 缓存本次子树内已缩放 alpha 的图片副本（同一张图可能被
+	// 重复绘制，例如列表里的同一张缩略图）。
+	bitmaps map[*Bitmap]*Bitmap
 }
 
 // scaleColor 把颜色的 alpha 乘以 k；k 为 1 或颜色为 nil 时原样返回。
@@ -68,9 +71,31 @@ func (o *opacityGraphics) DrawText(x, y, w, h int, p Paint, s string) {
 	o.Graphics.DrawText(x, y, w, h, scalePaint(p, o.k), s)
 }
 
-// DrawImage 透传：位图本身没有可乘的颜色（引擎当前也不绘制图片）。
+// DrawImage 缩放位图的 alpha（*Bitmap）；其它 Image 实现原样透传。
 func (o *opacityGraphics) DrawImage(x, y, w, h int, img Image) {
+	if bmp, ok := img.(*Bitmap); ok && bmp != nil && o.k < 1 {
+		o.Graphics.DrawImage(x, y, w, h, o.scaledBitmap(bmp))
+		return
+	}
 	o.Graphics.DrawImage(x, y, w, h, img)
+}
+
+// scaledBitmap 复制一份图片并缩放 alpha；同一图片在本次子树内只复制一次。
+func (o *opacityGraphics) scaledBitmap(bmp *Bitmap) *Bitmap {
+	if o.bitmaps == nil {
+		o.bitmaps = make(map[*Bitmap]*Bitmap)
+	}
+	if cp, ok := o.bitmaps[bmp]; ok {
+		return cp
+	}
+	pix := make([]byte, len(bmp.Pix))
+	copy(pix, bmp.Pix)
+	for i := 3; i < len(pix); i += 4 {
+		pix[i] = uint8(float64(pix[i])*o.k + 0.5)
+	}
+	cp := &Bitmap{W: bmp.W, H: bmp.H, Pix: pix}
+	o.bitmaps[bmp] = cp
+	return cp
 }
 
 // PushClip/PopClip 委托给底层后端的裁剪栈；底层不支持时静默忽略

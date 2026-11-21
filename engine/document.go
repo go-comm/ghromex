@@ -1,6 +1,10 @@
 package engine
 
-import "strings"
+import (
+	"strings"
+	"sync"
+	"sync/atomic"
+)
 
 // HTMLDocument 是文档根节点，持有样式表与所属视口。
 type HTMLDocument interface {
@@ -75,6 +79,12 @@ type DocumentOptions struct {
 	// LoadStylesheet 非 nil 时启用外部样式表：<link rel="stylesheet" href>
 	// 与 CSS 的 @import 都会经它加载。
 	LoadStylesheet StylesheetLoader
+	// LoadImage 非 nil 时启用 <img> 加载：src 按 BaseURL 解析后交给它读回
+	// 字节，引擎解码 PNG/JPEG/GIF。nil 时非 data: 的图片按空图处理。
+	//
+	// 加载在 worker goroutine 里进行（可能并发调用），加载器必须线程安全。
+	// data: URL 由引擎内建解码，不会调用加载器。
+	LoadImage ImageLoader
 }
 
 func NewDocument() HTMLDocument {
@@ -83,6 +93,7 @@ func NewDocument() HTMLDocument {
 	document.setPaintBase(NewPaint())
 	document.head = newHeadElement()
 	document.body = newBodyElement()
+	document.images = make(map[string]*imageEntry)
 
 	// 根节点 self 指向文档包装器：子节点父链上溯到根后可命中 HTMLDocument，
 	// 变更通知（markChanged）与事件冒泡依赖该链路。
@@ -104,7 +115,14 @@ type htmlDocument struct {
 	// OpenDocumentWith 在解析前装好——<link>/@import 是解析阶段就加载的。
 	baseURL   string
 	loadSheet StylesheetLoader
-	head      HTMLHeadElement
+	loadImage ImageLoader
+	// images 是图片缓存（解析后的绝对地址 → 状态），受 imgMu 保护：worker
+	// 解码完在锁内写回位图，再给 imgReady +1；主 goroutine 在 drainImages
+	// 里把计数换算成一次重排级变更（不向 channel 投递，见 fetchImage 说明）。
+	imgMu    sync.Mutex
+	images   map[string]*imageEntry
+	imgReady atomic.Int32
+	head     HTMLHeadElement
 	body      HTMLBodyElement
 	focus     HTMLElement // 当前聚焦的元素（可编辑输入、按钮、链接等），nil 无焦点
 	// hover 是鼠标当前悬停的元素（:hover 规则的依据），active 是鼠标
@@ -414,6 +432,11 @@ func (document *htmlDocument) notifyChanged() {
 	}
 }
 
+// Close 解除文档与渲染后端的绑定。
+//
+// 图片加载不需要额外收尾：解码 worker 完成后只是把位图写回缓存并递增就绪计数，
+// 不会向任何长生命周期通道投递。即便宿主换文档时漏了 Close，worker 也就多解一张图，
+// 随后随缓存一起被回收，不会把旧文档钉在内存里。
 func (document *htmlDocument) Close() {
 	document.viewport = nil
 }
