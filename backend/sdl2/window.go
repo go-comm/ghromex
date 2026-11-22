@@ -192,6 +192,13 @@ func NewWindowWithOptions(o WindowOptions) (*Window, error) {
 		win.posX, win.posY = o.X, o.Y
 		win.posKnown = true
 	}
+	// 图标在首帧显示之前设上：图标纯装饰，设失败不阻断建窗（老 SDL 缺
+	// 符号、像素尺寸不合法…），只在 GHROMEX_DEBUG 下给一句线索。
+	if o.Icon != nil {
+		if err := win.SetIcon(o.Icon); err != nil && drawDebug {
+			fmt.Fprintf(os.Stderr, "ghromex: 设置窗口图标失败: %v\n", err)
+		}
+	}
 	return win, nil
 }
 
@@ -589,6 +596,76 @@ func (win *Window) SetTitle(title string) {
 	runtime.KeepAlive(b)
 }
 
+// 图标掩码：SDL_CreateRGBSurfaceFrom 按位掩码描述格式，RGBA8888 在小端下
+// 内存字节序正是 R,G,B,A，所以掩码就是低位起依次 8 位。与
+// pixelFormatRGBA32（0x16762004 = SDL_PIXELFORMAT_RGBA32）同一口径——
+// 老运行库没有 WithFormatFrom 时用它建同一种 surface。
+const (
+	iconMaskR = 0x000000FF
+	iconMaskG = 0x0000FF00
+	iconMaskB = 0x00FF0000
+	iconMaskA = 0xFF000000
+)
+
+// SetIcon 把一张位图设为窗口图标：标题栏、任务栏、Alt+Tab 都跟着变。
+//
+// 走 SDL_SetWindowIcon（不是自己调 WM_SETICON）：SDL 的 Windows 实现内部
+// 按系统 SM_CXICON / SM_CXSMICON 两个档位缩放后 CreateIconIndirect，一次
+// 把 ICON_SMALL 和 ICON_BIG 都设好——自己只设一个档位会出现「标题栏换了、
+// 任务栏还是默认图标」的半截效果。位图所有权归调用方：SDL 在调用内把像素
+// 拷进 HICON，返回后即可丢弃。
+//
+// surface 只是**借用** icon.Pix（SDL_CreateRGBSurface* 不拷贝像素），所以
+// 释放 surface 之前必须让切片保活——KeepAlive 放在 FreeSurface 之后。
+func (win *Window) SetIcon(icon *core.Bitmap) error {
+	if win == nil || win.closed || win.win == 0 {
+		return fmt.Errorf("窗口尚未创建，无法设置图标")
+	}
+	if icon == nil {
+		return fmt.Errorf("图标位图为 nil")
+	}
+	if icon.W <= 0 || icon.H <= 0 {
+		return fmt.Errorf("图标尺寸非法: %dx%d", icon.W, icon.H)
+	}
+	if need := icon.W * icon.H * 4; len(icon.Pix) < need {
+		return fmt.Errorf("图标像素长度 %d，按 %dx%d 需要 %d", len(icon.Pix), icon.W, icon.H, need)
+	}
+	if !hasSetWindowIcon {
+		return fmt.Errorf("SDL2.dll 未导出 SDL_SetWindowIcon，无法设置窗口图标")
+	}
+	surf := iconSurface(icon)
+	if surf == 0 {
+		return fmt.Errorf("建图标 surface 失败: %s", lastError())
+	}
+	ret := sdlSetWindowIcon(win.win, surf)
+	sdlFreeSurface(surf)
+	runtime.KeepAlive(icon.Pix)
+	if ret != 0 {
+		return fmt.Errorf("SDL_SetWindowIcon: %s", lastError())
+	}
+	return nil
+}
+
+// iconSurface 把 core.Bitmap 包成 SDL surface（不拷贝像素），取不到时返回 0。
+//
+// 优先 SDL_CreateRGBSurfaceWithFormatFrom（2.0.5+，只给一个 format 就够）；
+// 更老的运行库只有 SDL_CreateRGBSurfaceFrom，按位掩码描述同一种格式。
+func iconSurface(icon *core.Bitmap) uintptr {
+	if !hasSurfaceWithFormat && !hasSurfaceFrom {
+		return 0
+	}
+	pitch := uintptr(icon.W * 4)
+	if hasSurfaceWithFormat {
+		// unsafe.Pointer → uintptr 必须直接落在调用表达式里（go vet
+		// unsafeptr）：不能先赋值给局部变量再传参。
+		return sdlCreateSurfaceWithFmt(uintptr(unsafe.Pointer(&icon.Pix[0])),
+			uintptr(icon.W), uintptr(icon.H), 32, pitch, uintptr(pixelFormatRGBA32))
+	}
+	return sdlCreateSurfaceFrom(uintptr(unsafe.Pointer(&icon.Pix[0])),
+		uintptr(icon.W), uintptr(icon.H), 32, pitch,
+		iconMaskR, iconMaskG, iconMaskB, iconMaskA)
+}
+
 // RequestClose 请求关闭窗口：向事件队列压入一个 SDL_QUIT 事件，事件
 // 循环收到后按「用户点关闭按钮」的同一条路径退出（应用层的「退出」
 // 菜单项用）。
@@ -633,4 +710,8 @@ func (win *Window) Close() {
 	runtime.UnlockOSThread()
 }
 
+// 接口断言：图标能力走 core.IconSetter 这个可选扩展，与 CursorSetter 同一
+// 惯例——上层按类型断言决定调不调，非 Windows 的实现签名相同、只会回
+// ErrUnsupported。
 var _ core.Viewport = (*Window)(nil)
+var _ core.IconSetter = (*Window)(nil)

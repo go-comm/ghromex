@@ -103,6 +103,14 @@ type Spec struct {
 	Width  int
 	Height int
 
+	// Icon 是窗口图标（标题栏 + 任务栏 + Alt+Tab），只给 App 用；ui.Install
+	// 忽略（它不建窗口）。nil 用系统默认图标。
+	//
+	// 位图口径与页面图片相同（RGBA8888、非预乘 alpha）：engine.DecodeImage
+	// 解码 PNG/JPEG/GIF 即可。建窗时设上，运行期换用
+	// App.Window().SetIcon。
+	Icon *engine.Bitmap
+
 	// Theme 为空时用 Light()。
 	Theme *Theme
 

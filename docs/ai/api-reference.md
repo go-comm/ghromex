@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-11-21 19:14
+> 生成时间: 2026-11-23 00:48
 
 ---
 
@@ -518,6 +518,17 @@ func (win *Window) Screenshot() ([]byte, uint32, int, int, error)
     R,G,B,X）， 由 SDL 负责转换。注意渲染目标无 alpha 通道时第 4 字节恒为 0（不是 alpha）， 颜色只能按前三个通道读。 配合
     SDL_VIDEO_DRIVER=dummy 可在无显示器环境验证渲染结果。
 
+func (win *Window) SetIcon(icon *core.Bitmap) error
+    SetIcon 把一张位图设为窗口图标：标题栏、任务栏、Alt+Tab 都跟着变。
+
+    走 SDL_SetWindowIcon（不是自己调 WM_SETICON）：SDL 的 Windows 实现内部 按系统 SM_CXICON
+    / SM_CXSMICON 两个档位缩放后 CreateIconIndirect，一次 把 ICON_SMALL 和 ICON_BIG
+    都设好——自己只设一个档位会出现「标题栏换了、 任务栏还是默认图标」的半截效果。位图所有权归调用方：SDL 在调用内把像素 拷进
+    HICON，返回后即可丢弃。
+
+    surface 只是**借用** icon.Pix（SDL_CreateRGBSurface* 不拷贝像素），所以 释放 surface
+    之前必须让切片保活——KeepAlive 放在 FreeSurface 之后。
+
 func (win *Window) SetSize(w, h int)
     SetSize 运行期修改窗口尺寸（截图预览从整屏缩成选区大小）。
 
@@ -551,6 +562,13 @@ func (win *Window) ViewportWidth() int
 type WindowOptions struct {
 	Width, Height int
 	Title         string
+
+	// Icon 是窗口图标（标题栏 + 任务栏 + Alt+Tab），非 nil 时在窗口建好、
+	// 首帧显示之前设上——否则会先看到一眼 SDL 默认图标。非 Windows 平台
+	// 忽略（NewWindowWithOptions 本来就返回 ErrUnsupported）。
+	//
+	// 运行期想换图标用 Window.SetIcon，同一份 core.Bitmap 口径。
+	Icon *core.Bitmap
 
 	// X/Y 是窗口左上角的位置；Centered 为 true 时忽略 X/Y。
 	//
@@ -813,6 +831,13 @@ type Options struct {
 	AlwaysOnTop bool
 	SkipTaskbar bool
 	Resizable   bool
+
+	// Icon 是窗口图标（标题栏 + 任务栏 + Alt+Tab），nil 用系统默认图标。
+	//
+	// 位图口径与页面图片相同（RGBA8888、非预乘 alpha）：宿主自己解码，
+	// 或交给 engine.DecodeImage（PNG/JPEG/GIF，与 <img> 同一路径）。
+	// 建议 32×32 或 64×64——系统按 SM_CXICON/SM_CXSMICON 两档缩放，太小会糊。
+	Icon *core.Bitmap
 }
     Options 是建窗参数。零值表示位于 (0,0) 的固定尺寸普通窗口（带边框）； 截图工具的悬浮窗显式设置
     Borderless/AlwaysOnTop/SkipTaskbar。
@@ -833,6 +858,8 @@ func New(w, h int, title string) (*Window, error)
 
 func NewWithOptions(o Options) (*Window, error)
     NewWithOptions 同 New，可指定位置与窗口类型（无边框/置顶/不占任务栏）。
+
+    传了 o.Icon 会在窗口创建成功后、Run 之前尝试设为窗口图标；设失败 （老 SDL 缺符号、位图不合法等）不阻断建窗——图标纯属外观。
 
 func (win *Window) Close()
     Close 释放窗口资源。
@@ -897,6 +924,15 @@ func (win *Window) SetFrameHandler(f func() bool)
     一跳，看起来就是拖动一顿一顿的。改成在回调里按帧移动一次， 并在拖动期间保持 1ms 轮询，窗口就跟手了。
 
     回调里可以改 DOM（变更会让文档计数 +1，本帧随后自然重排重绘）。
+
+func (win *Window) SetIcon(icon *core.Bitmap) error
+    SetIcon 设置窗口图标（标题栏 + 任务栏 + Alt+Tab），建窗时没传 Options.Icon 或运行期想换图标时用。
+
+    位图口径：RGBA8888、非预乘 alpha、行主序（与页面图片同一套），建议 32×32 或 64×64——Windows 按
+    SM_CXICON/SM_CXSMICON 两档缩放，给太小会放糊。 手里只有 PNG/JPEG/GIF 字节？用 engine.DecodeImage
+    解成 *core.Bitmap 再传。 .ico 这类多帧容器不认，请宿主先取出其中一档像素（例如 32×32 帧）再传进来。
+
+    非 Windows 平台返回 ErrUnsupported；设置失败（老 SDL 缺符号等）返回对应 错误但不影响窗口其它功能——图标纯属外观。
 
 func (win *Window) SetKeyHandler(f func(key int, mods uint16) bool)
     SetKeyHandler 注册应用级按键处理器：key 为引擎键码（字母是 rune）， mods
@@ -1023,6 +1059,16 @@ type Graphics interface {
 }
     Graphics 是渲染后端的抽象。布局引擎依赖 MeasureText 获取文本度量， 渲染阶段通过
     DrawText/DrawColor/DrawImage 落笔。
+
+type IconSetter interface {
+	SetIcon(icon *Bitmap) error
+}
+    IconSetter 是 Viewport 的可选扩展：把一张位图设为窗口图标（标题栏 + 任务栏 + Alt+Tab）。
+
+    不实现该接口的后端（无头、缓冲渲染）静默忽略。返回 error 表示当前平台 或当前 SDL 运行库没有这条能力（非 Windows 返回
+    sdl2.ErrUnsupported）—— 图标纯属外观，调用方一般只需忽略错误，不该因此让应用起不来。
+
+    位图口径与 Bitmap 相同（RGBA8888、非预乘 alpha）。建议给 32×32 或 64×64：太小会被系统放得模糊，太大平台层要缩放。
 
 type Image interface {
 }
@@ -1556,6 +1602,17 @@ TYPES
 
 type Bitmap = core.Bitmap
     Bitmap 是一张已解码的 RGBA8888 图片（<img> 的绘制载荷）。
+
+func DecodeImage(data []byte) (*Bitmap, error)
+    DecodeImage 解码一份图片的原始字节（PNG / JPEG / GIF，GIF 取第一帧）为 *Bitmap，与 <img>
+    共用同一条解码路径和像素口径（RGBA8888、非预乘 alpha）。
+
+    用途是「宿主自己有图片字节、想要位图」：窗口图标（browser.Window.SetIcon）、 自写 ImageLoader
+    的预解码等。引擎内部的图片加载不经过它——那是 decodeDataURL / ImageLoader 的事，两者都**不读文件、不联网**，字节从哪来
+    由宿主决定。
+
+    data: URL 不是这个函数的输入（那是 src 字符串的事）：要吃 `data:image/png;base64,...` 请拆掉前缀后把载荷
+    base64 解码，或直接把整串 当作 <img> 的 src 交给引擎。
 
 type BorderCollapse uint8
     BorderCollapse 决定表格相邻单元格的边框是否合并（border-collapse）， 只被表格布局读取。separate 为
@@ -2239,6 +2296,9 @@ func (v *HeadlessViewport) ViewportHeight() int
 
 func (v *HeadlessViewport) ViewportWidth() int
     ViewportWidth 返回视口宽度（px）。
+
+type IconSetter = core.IconSetter
+    IconSetter 是 Viewport 的可选扩展：设置窗口图标。
 
 type Image = core.Image
     Image 是绘制目标里的一张位图。
@@ -3248,6 +3308,14 @@ type Spec struct {
 	Title  string
 	Width  int
 	Height int
+
+	// Icon 是窗口图标（标题栏 + 任务栏 + Alt+Tab），只给 App 用；ui.Install
+	// 忽略（它不建窗口）。nil 用系统默认图标。
+	//
+	// 位图口径与页面图片相同（RGBA8888、非预乘 alpha）：engine.DecodeImage
+	// 解码 PNG/JPEG/GIF 即可。建窗时设上，运行期换用
+	// App.Window().SetIcon。
+	Icon *engine.Bitmap
 
 	// Theme 为空时用 Light()。
 	Theme *Theme

@@ -102,6 +102,13 @@ type Options struct {
 	AlwaysOnTop bool
 	SkipTaskbar bool
 	Resizable   bool
+
+	// Icon 是窗口图标（标题栏 + 任务栏 + Alt+Tab），nil 用系统默认图标。
+	//
+	// 位图口径与页面图片相同（RGBA8888、非预乘 alpha）：宿主自己解码，
+	// 或交给 engine.DecodeImage（PNG/JPEG/GIF，与 <img> 同一路径）。
+	// 建议 32×32 或 64×64——系统按 SM_CXICON/SM_CXSMICON 两档缩放，太小会糊。
+	Icon *core.Bitmap
 }
 
 // New 创建一个窗口。坐标体系 1:1（1 CSS px = 1 物理像素）。
@@ -113,12 +120,16 @@ func New(w, h int, title string) (*Window, error) {
 }
 
 // NewWithOptions 同 New，可指定位置与窗口类型（无边框/置顶/不占任务栏）。
+//
+// 传了 o.Icon 会在窗口创建成功后、Run 之前尝试设为窗口图标；设失败
+// （老 SDL 缺符号、位图不合法等）不阻断建窗——图标纯属外观。
 func NewWithOptions(o Options) (*Window, error) {
 	sdl, err := sdl2.NewWindowWithOptions(sdl2.WindowOptions{
 		Width: o.Width, Height: o.Height, Title: o.Title,
 		X: o.X, Y: o.Y, Centered: o.Centered,
 		Borderless: o.Borderless, AlwaysOnTop: o.AlwaysOnTop,
 		SkipTaskbar: o.SkipTaskbar, Resizable: o.Resizable,
+		Icon: o.Icon,
 	})
 	if err != nil {
 		return nil, err
@@ -681,6 +692,23 @@ func (win *Window) RequestClose() { win.sdl.RequestClose() }
 
 // SetTitle 更新窗口标题（如编辑器显示当前文件名）。
 func (win *Window) SetTitle(title string) { win.sdl.SetTitle(title) }
+
+// SetIcon 设置窗口图标（标题栏 + 任务栏 + Alt+Tab），建窗时没传 Options.Icon
+// 或运行期想换图标时用。
+//
+// 位图口径：RGBA8888、非预乘 alpha、行主序（与页面图片同一套），建议 32×32
+// 或 64×64——Windows 按 SM_CXICON/SM_CXSMICON 两档缩放，给太小会放糊。
+// 手里只有 PNG/JPEG/GIF 字节？用 engine.DecodeImage 解成 *core.Bitmap 再传。
+// .ico 这类多帧容器不认，请宿主先取出其中一档像素（例如 32×32 帧）再传进来。
+//
+// 非 Windows 平台返回 ErrUnsupported；设置失败（老 SDL 缺符号等）返回对应
+// 错误但不影响窗口其它功能——图标纯属外观。
+func (win *Window) SetIcon(icon *core.Bitmap) error {
+	if win == nil || win.sdl == nil {
+		return ErrUnsupported
+	}
+	return win.sdl.SetIcon(icon)
+}
 
 // Close 释放窗口资源。
 func (win *Window) Close() { win.sdl.Close() }

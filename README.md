@@ -20,6 +20,7 @@
 - 事件冒泡：命中测试找到最深元素，沿父链依次派发 `click` / `change` / `wheel`，随后执行引擎默认动作（select 展开/选中、勾选切换、链接导航）
 - 滚动与裁剪：`overflow(visible/hidden/clip/scroll/auto，单值两轴、两值 x y、overflow-x/overflow-y 分轴)` 滚动容器（滚轮驱动、子树平移 + padding 盒裁剪，被裁内容不可命中）、**圆角裁剪按 border-radius 的形状**（`overflow:hidden` 的圆角盒，溢出到角外的子元素按圆角裁掉，角上透出盒后底色）、文档级页面滚动（根元素以视口为滚动盒，长页面/宽页面均可滚）、`wheel` 事件（`OnWheel` 注册、`MouseEvent.DeltaX/DeltaY` 像素位移、冒泡派发）、Shift+滚轮 转横向滚动、textarea 滚轮滚动（与光标跟随同夹紧口径，全量吸收纵向滚轮、撞边界不带动页面）；裁剪经 `Graphics` 可选 `Clipper`（`PushClip`/`PopClip`，逐层求交）落地：`BufferGraphics` 像素断言、SDL2 `SDL_RenderSetClipRect`，SVG 导出同步生成 `clipPath`
 - 图片 `<img>`：替换元素布局（尺寸按 CSS width/height → HTML width/height 属性 → 固有纵横比 → 固有像素推导，行内基线取盒底）、解码 PNG / JPEG / GIF（GIF 取第一帧）、绘制走 `Graphics.DrawImage`（后端缩放、alpha 混合，`opacity` 与父级 `overflow` 裁剪同时生效）、SVG 导出为内嵌 `data:image/png` 的 `<image>`。字节来源由宿主注入 `DocumentOptions.LoadImage`（`src` 已按 `BaseURL` 解析成绝对地址，worker goroutine 里异步加载 + 解码，到货后自动重排一次），引擎内建 `data:` URL（base64 / 百分号转义）同步解码以保证首帧可见；同一 `src` 只加载一次，纹理按位图指针上传一次并受 LRU 约束
+- 窗口/任务栏图标：`browser.Options.Icon` 建窗即设、`Window.SetIcon` 运行期换，标题栏 + 任务栏 + Alt+Tab 一起变（走 `SDL_SetWindowIcon`，SDL 内部按 `SM_CXICON`/`SM_CXSMICON` 两档缩放后一次设好大小两档，不会出现「标题栏换了任务栏没换」）；位图输入为 `*core.Bitmap`（RGBA8888 非预乘，与页面图片同一口径），PNG/JPEG/GIF 字节用 `engine.DecodeImage` 解码（与 `<img>` 同一路径）；`ui.Spec.Icon` 让组件库外壳也带图标。纯装饰：非 Windows 返回 `ErrUnsupported`、老 SDL 缺符号也只是图标不生效，都不阻断建窗
 - 可插拔图形后端：`engine.Graphics` 接口（DrawText / DrawColor / DrawImage / MeasureText），内置 `FakeGraphics`（计数）、`BufferGraphics`（软件光栅化到 RGBA 缓冲，可 `DumpPNG`）供无显示器测试；圆角抗锯齿走**角标精灵**（可选扩展 `SpriteDrawer`：整块圆角一次 blit，替掉逐像素的半透明小方块）——绘制调用数是 GPU 路径上的主要开销，portal 页一帧从 31840 次降到 2500 次、单帧绘制 149ms → 8.7ms（软件渲染器实测），滚动动画才不会被切成几帧；精灵的像素（引擎侧）与纹理（后端侧）都按「条数 + 像素」双上限、LRU 淘汰——键里含颜色，页面逐帧改色（动画）会不断产生新精灵，不设上限就是内存/显存泄漏；**填充率**同样要命：SDL 的绘制混合模式一旦开着，每块不透明填充都走逐像素混合（软件光栅器 2.1ns/像素，直接写像素只要 0.2ns），门户页一帧要填 1700 万像素——2560×1440 的窗体下单帧 37ms，**最大化后滚动只剩 27fps**（小窗体看不出来）。按填充的 alpha 临时切换混合模式（画完复原，贴图拷贝还要混合）后，门户页整帧（软件光栅器，含呈现）：800×600 1.35ms、1280×820 1.95ms、1920×1080 2.84ms、2560×1440 **4.07ms**（原 37ms，9 倍）、3840×2160 7.11ms；画面逐像素不变。清屏也不再重复铺白底（画布背景不透明时白底那层完全被盖住）。**诊断**：`GHROMEX_DEBUG=1` 会打印渲染路径与驱动名（默认 `renderer=software (driver=software; 默认内存渲染)`；`GHROMEX_GPU=1` 时 `renderer=accelerated(GPU, driver=direct3d; GHROMEX_GPU=1)`）——软件路径的瓶颈是填充率，GPU 路径通常在纹理上传/draw call/swap 间隔（GPU 路径实测：1280×820 到 4K 的整帧都是 16.6ms = vsync 周期，稳在 60fps；其中 GPU 真实工作只有 1.3~3ms，其余 13.5~14.5ms 是等 vsync）。**这些数字的口径与分段拆解见「性能实测」**——不同口径的数不能并排比
 - 元素注册表：`CustomElements().Define(tag, proto)` + `CloneElement` 注册自定义标签，解析时克隆原型生成独立实例
 - 无头运行：`-dump-svg` 导出布局结果；`NewBufferedViewport` / `OpenBufferedDocument`（视口 + 软件光栅化缓冲）可在 CI 中像素级断言渲染结果；真实窗口的最终观感用 `Window.Screenshot()` 回读窗口像素（应用自行编码 PNG，见 `examples/snip`）
@@ -382,6 +383,8 @@ page.AppendChild(preview.Element())
 go run ./examples/kit
 go run ./examples/kit -dark
 go run ./examples/kit -shot kit.png -shot-menu 文件
+go run ./examples/kit -dump-icon icon.png   # 把生成的窗口图标写成 PNG（核对形状/透明边）
+go run ./examples/kit -no-icon              # 不设窗口图标（用系统默认图标）
 go run ./examples/iconsheet
 go run ./examples/iconsheet -dark
 ```
@@ -690,6 +693,11 @@ goroutine 里被并发调用**（实现必须线程安全）；加载失败按�
   `srcset`/`sizes`、`exif` 旋转与 `image-rendering`；位图只按目标矩形拉伸（缩放算法由
   后端决定：SDL2 交给 `SDL_RenderCopy` 的纹理过滤，`BufferGraphics` 是最近邻），
   不做九宫格/裁剪填充
+- 窗口图标：只吃**已解码的位图**（`*core.Bitmap`），不认 `.ico` 这类多帧容器
+  （一个 `.ico` 里各档尺寸 + key 色透明，各平台规矩不一；宿主想用自己的图标文件，
+  先取出其中一档像素、`engine.DecodeImage` 解出来再传）；也不做 exe 资源图标（打包期
+  的事，需外部资源工具链）。建议给 32×32 或 64×64：系统按 `SM_CXICON`/`SM_CXSMICON`
+  两档缩放，太小放糊、太大后端多一道缩放
 - 背景图（`background-image` + 配套长写）：只做 `url()` 与 `none`，渐变 `<image>`、
   `image-set()`、`element()` 等整条声明忽略（按 CSS 语义「非法即丢弃」）；不做
   `background-attachment: fixed`（视口固定）；`background-repeat` 的 `space`/`round`

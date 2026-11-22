@@ -99,6 +99,21 @@ var (
 	sdlRenderReadPixels     nativeCall
 	sdlGetWindowPixelFormat nativeCall
 	sdlClearError           nativeCall
+	// 窗口/任务栏图标：SDL_SetWindowIcon 收一张 SDL_Surface。引擎给的是
+	// RGBA8888 的 core.Bitmap，用 SDL_CreateRGBSurfaceWithFormatFrom 包一层。
+	// 注意该系列**只借用**调用方的像素缓冲、不拷贝：surface 活多久，压着的
+	// Go 堆数组就得活多久（KeepAlive 到 FreeSurface 为止）。图标像素 SDL 在
+	// SetWindowIcon 里拷贝进 Win32 HICON，surface 用后即弃。
+	//
+	// 一律可选绑定：WithFormatFrom 要 SDL 2.0.5+（本仓库捆绑 2.28.4），老
+	// 运行库缺它时退到 From（同格式 RGBA32 下两者等价）；SetWindowIcon 缺
+	// 了图标就不可用（纯装饰，不影响渲染）。
+	sdlSetWindowIcon        nativeCall
+	sdlCreateSurfaceWithFmt nativeCall
+	sdlCreateSurfaceFrom    nativeCall
+	hasSetWindowIcon        bool
+	hasSurfaceWithFormat    bool
+	hasSurfaceFrom          bool
 	// 取窗口的原生句柄（HWND）：原生文件对话框要拿它当父窗口。
 	// SDL_CreateWindow 返回的是 SDL_Window*，不是 HWND——真 HWND 要用
 	// SDL_GetWindowWMInfo 取。两个符号都按可选绑定处理：缺失时对话框
@@ -339,6 +354,12 @@ func doLoad() error {
 	// 系统鼠标指针：可选符号（SDL2 各版本都应有，但缺了也只是光标不变形）。
 	sdlCreateSystemCursor, hasCreateSystemCursor = bindProbe(dllSDL, "SDL_CreateSystemCursor")
 	sdlSetCursor, hasSetCursor = bindProbe(dllSDL, "SDL_SetCursor")
+	// 窗口/任务栏图标：一律可选绑定。SDL 2.0.5 起才有
+	// SDL_CreateRGBSurfaceWithFormatFrom，更早的运行库只有 SDL_CreateRGBSurfaceFrom
+	// ——两条通路按能力择一，缺 SetWindowIcon 时 SetIcon 报「此 SDL2 不支持」。
+	sdlSetWindowIcon, hasSetWindowIcon = bindProbe(dllSDL, "SDL_SetWindowIcon")
+	sdlCreateSurfaceWithFmt, hasSurfaceWithFormat = bindProbe(dllSDL, "SDL_CreateRGBSurfaceWithFormatFrom")
+	sdlCreateSurfaceFrom, hasSurfaceFrom = bindProbe(dllSDL, "SDL_CreateRGBSurfaceFrom")
 	if bindErr != nil {
 		return fmt.Errorf("解析 SDL2.dll 符号失败: %w", bindErr)
 	}

@@ -10,6 +10,8 @@
 //	go run ./examples/kit -shot kit.png        # 真实窗口截图：真实字体观感
 //	go run ./examples/kit -dark -shot kit.png  # 深色主题 + 真实窗口截图
 //	go run ./examples/kit -shot kit.png -shot-menu 编辑
+//	go run ./examples/kit -dump-icon icon.png   # 把生成的窗口图标写成 PNG（核对形状/透明边）
+//	go run ./examples/kit -no-icon              # 不设窗口图标（用系统默认）
 //	go run ./examples/kit -exit-after 2s       # 调试/CI
 package main
 
@@ -19,6 +21,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"math"
 	"os"
 
 	"github.com/go-comm/ghromex/engine"
@@ -31,14 +34,20 @@ var page string
 const (
 	winW = 900
 	winH = 760
+
+	// iconSize 是窗口图标的边长：32 是 Windows 大图标档（SM_CXICON），
+	// 系统会自己缩到 16 的小档（标题栏/任务栏）。
+	iconSize = 32
 )
 
 func main() {
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
+	dumpIcon := flag.String("dump-icon", "", "把生成的窗口图标写成 PNG（不起窗口，核对形状/透明边）")
 	shotMenu := flag.String("shot-menu", "", "与 -shot 配合：先展开指定标题的菜单（如 文件）")
 	dark := flag.Bool("dark", false, "使用深色主题")
+	noIcon := flag.Bool("no-icon", false, "不设窗口图标（用系统默认图标）")
 	exitAfter := flag.Duration("exit-after", 0, "运行指定时长后自动退出（调试/CI）")
 	flag.Parse()
 
@@ -55,12 +64,27 @@ func main() {
 		theme := ui.Dark()
 		spec.Theme = &theme
 	}
+	// 窗口图标（标题栏 + 任务栏）：ui.Spec.Icon 只在建窗路径生效，无头 dump
+	// 路径不碰它。示例自己画一张，不引外部资源文件。
+	if !*noIcon {
+		spec.Icon = appIcon(iconSize)
+	}
 
 	if *dumpPNG != "" || *dumpSVG != "" {
 		if err := dump(spec, *dumpPNG, *dumpSVG); err != nil {
 			fmt.Fprintln(os.Stderr, "无头导出失败:", err)
 			os.Exit(1)
 		}
+		return
+	}
+
+	// 图标自检：把生成的位图原样写成 PNG（不起窗口），核对形状与透明边。
+	if *dumpIcon != "" {
+		if err := saveIcon(appIcon(iconSize), *dumpIcon); err != nil {
+			fmt.Fprintln(os.Stderr, "写图标失败:", err)
+			os.Exit(1)
+		}
+		fmt.Println("图标已写出:", *dumpIcon)
 		return
 	}
 
@@ -194,6 +218,54 @@ func buildSpec(status func(string)) ui.Spec {
 	}
 }
 
+// appIcon 画一张 size×size 的窗口图标：深蓝圆角底 + 琥珀色「小窗口」图形
+// （顶栏一条 + 内容区），示例不引外部图片资源，像素自己生成。
+//
+// 口径就是 core.Bitmap 的口径：RGBA8888、非预乘 alpha、行主序；圆角外
+// alpha=0，任务栏/标题栏上不会带一圈白底。
+func appIcon(size int) *engine.Bitmap {
+	pix := make([]byte, size*size*4)
+	// 深蓝底 (#1F3A5F) 与琥珀 (#E8A33D)：与 stylebook 的配色同一系。
+	base := [3]uint8{0x1F, 0x3A, 0x5F}
+	amber := [3]uint8{0xE8, 0xA3, 0x3D}
+	r := float64(size) * 0.22 // 圆角半径
+	put := func(x, y int, c [3]uint8, a uint8) {
+		i := (y*size + x) * 4
+		pix[i], pix[i+1], pix[i+2], pix[i+3] = c[0], c[1], c[2], a
+	}
+	inRounded := func(x, y int) bool {
+		fx, fy := float64(x)+0.5, float64(y)+0.5
+		// 经典圆角矩形判据：只在四角量距离，边到圆心距离恒 0。
+		dx := math.Max(math.Max(r-fx, fx-(float64(size)-r)), 0)
+		dy := math.Max(math.Max(r-fy, fy-(float64(size)-r)), 0)
+		return dx*dx+dy*dy <= r*r
+	}
+	for y := 0; y < size; y++ {
+		for x := 0; x < size; x++ {
+			if !inRounded(x, y) {
+				continue // alpha 0：圆角外透明
+			}
+			put(x, y, base, 255)
+		}
+	}
+	// 「小窗口」：琥珀实底框 (0.22,0.26)~(0.78,0.74)，上部 16% 是标题栏，
+	// 内容区挖回底色——描边式画法在 16px 小档上会被系统缩成一团糊，
+	// 实底 + 挖空的两段式在小尺寸下仍读得出「窗口」。
+	l, t := int(float64(size)*0.22), int(float64(size)*0.26)
+	rt, rb := int(float64(size)*0.78), int(float64(size)*0.74)
+	bar := t + (rb-t)*16/100
+	for y := t; y < rb; y++ {
+		for x := l; x < rt; x++ {
+			if y < bar || y == rb-1 || x == l || x == rt-1 {
+				put(x, y, amber, 255)
+			} else {
+				put(x, y, base, 255) // 内容区：挖回底色
+			}
+		}
+	}
+	return &engine.Bitmap{W: size, H: size, Pix: pix}
+}
+
 // addControls 用 Go 侧控件填充页面里的挂载点。
 //
 // 页面只写一个 #controls-host；控件的类名、取值和事件适配由 ui 包负责。
@@ -264,6 +336,19 @@ func dump(spec ui.Spec, pngPath, svgPath string) error {
 		return os.WriteFile(svgPath, []byte(doc.DumpSVG()), 0o644)
 	}
 	return nil
+}
+
+// saveIcon 把生成的图标位图写成 PNG（-dump-icon 用）：起窗口前就能核对
+// 形状与圆角外的透明边。
+func saveIcon(bmp *engine.Bitmap, path string) error {
+	img := image.NewNRGBA(image.Rect(0, 0, bmp.W, bmp.H))
+	copy(img.Pix, bmp.Pix)
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return png.Encode(f, img)
 }
 
 // saveShot 用真实字体渲染一帧并截图：Refresh 重排、RenderFrame 画一帧、

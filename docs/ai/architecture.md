@@ -18,7 +18,7 @@
 
 | 包 | 职责 | 关键约束 |
 |---|---|---|
-| `core` | 引擎与后端之间的契约：`Graphics`、`Viewport`、`Color`/`Size`/`Paint`/`Sprite`/`Bitmap` | 叶子包，谁都不依赖；可选扩展 `Clipper`、`SpriteDrawer`、`ImageBlitter` 靠类型断言启用；`Image` 是空接口，`Bitmap` 是 `<img>` 与背景图的载荷 |
+| `core` | 引擎与后端之间的契约：`Graphics`、`Viewport`、`Color`/`Size`/`Paint`/`Sprite`/`Bitmap` | 叶子包，谁都不依赖；可选扩展 `Clipper`、`SpriteDrawer`、`ImageBlitter`、`IconSetter` 靠类型断言启用；`Image` 是空接口，`Bitmap` 是 `<img>`、背景图与窗口图标的载荷 |
 | `engine` | 解析 HTML/CSS → 级联 → 布局 → 绘制 → 命中测试/事件 | **纯 Go**，不 import 平台包；`Graphics = core.Graphics` 用类型别名保持 API（`engine/graphics.go`） |
 | `engine/element_registry.go` | 元素注册表：`CustomElements().Define(tag, proto)`；内置标签走 `SystemElements()`（`html_elements.go`） | 解析时克隆原型（`CloneElement`）生成独立实例 |
 | `backend/sdl2` | Windows SDL2 窗口/渲染器/字体纹理/事件解码 | **不认识 engine**；动态加载 DLL，无 CGO；`NewWindow → Run → Close` 同一 OS 线程（`LockOSThread`） |
@@ -47,11 +47,21 @@ type Viewport interface {
     ViewportHeight() int
     Graphics() Graphics
 }
+
+// IconSetter —— Viewport 的**可选扩展**：把一张位图设为窗口图标（标题栏 + 任务栏 + Alt+Tab）。
+// 不实现的后端（无头、缓冲渲染）静默忽略。返回 error 表示当前平台或 SDL 运行库
+// 没有这条能力（非 Windows 返回 `sdl2.ErrUnsupported`）——图标纯属外观，调用方一般
+// 只需忽略错误，不该因此让应用起不来。
+// 位图口径与 Bitmap 相同（RGBA8888、非预乘 alpha）。建议给 32×32 或 64×64：
+// 太小会被系统放得模糊，太大平台层要缩放。
+type IconSetter interface {
+    SetIcon(icon *Bitmap) error
+}
 ```
 
 - 引擎只认这两个接口 → SDL2、软件光栅化（`BufferGraphics`）、无头（`FakeGraphics`）跑同一套布局。
 - `MeasureText` 与 `DrawText` **必须同一字体解析规则**，否则混排宽度错位。
-- 可选扩展（实现了就用，没实现回退到等价但更慢的路径）：`Clipper` 裁剪栈、`SpriteDrawer` 位图 blit、`ImageBlitter` **按源矩形** blit（`BlitImage(dst, src)`，背景图平铺时只画可见的那一块）。
+- 可选扩展（实现了就用，没实现回退到等价但更慢的路径）：`Clipper` 裁剪栈、`SpriteDrawer` 位图 blit、`ImageBlitter` **按源矩形** blit（`BlitImage(dst, src)`，背景图平铺时只画可见的那一块）、`IconSetter` 窗口图标（这个是「纯装饰」，不实现是**静默忽略**而非回退）。
 - `DrawImage` 的载荷是 `core.Image`（空接口）：引擎传 `*core.Bitmap`（RGBA8888、非预乘 alpha、`Pix` 解码后不再改），后端用类型断言识别；不认识的值（含 `nil`）按占位/跳过处理——新增图片类型不必改接口。
 
 ## 主循环与事件模型
@@ -109,6 +119,26 @@ BaseURL）。背景图不影响盒模型，因此到货只涨**重绘**计数（
 两个标记把 `<img>` 与背景图的到货分别记账。绘制顺序是「背景色 → 背景图层 → 边框
 → 内容」，多层按 CSS 顺序叠放（首层在最上面）。
 
+**窗口/任务栏图标**（`core.IconSetter`）——只吃**已解码的位图**，解码入口与 `<img>`
+同一条路径（`engine.DecodeImage`），像素口径也一致（RGBA8888、非预乘 alpha）：
+
+```go
+// 手里有 PNG/JPEG/GIF 字节 → 位图 → 建窗即设（首帧前生效，避免闪默认图标）。
+pngBytes, _ := os.ReadFile("icon.png")
+icon, _ := engine.DecodeImage(pngBytes)
+win, _ := browser.NewWithOptions(browser.Options{
+    Width: 900, Height: 620, Title: "记事本",
+    Centered: true, Resizable: true, Icon: icon, // nil 用系统默认
+})
+// 运行期换：
+win.SetIcon(other) // 非 Windows 返回 ErrUnsupported；失败不阻断应用
+```
+
+`ui.Spec.Icon` 是同一份位图，给 `ui.New` 用（`Install` 不建窗、忽略它）。图标纯
+装饰：老 SDL 缺符号、位图不合法都不让建窗失败，建窗路径上的失败只在 `GHROMEX_DEBUG=1`
+打一行。走 `SDL_SetWindowIcon`（SDL 内部按 `SM_CXICON`/`SM_CXSMICON` 两档缩放，一次设
+好标题栏/任务栏两档）——细节与坑见「关键设计取舍 9」与「容易踩的坑」。
+
 **应用工作台（菜单/工具栏/状态栏/主题）**：
 
 ```go
@@ -143,6 +173,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 6. **异步图片只写缓存 + 原子计数回主线程**：`<img>` 的解码在 worker goroutine，结果在 `imgMu` 内写回 `images[src]` 并给 `imgReady` +1，由主循环的 `drainImages` 把计数换算成一次 `ChangeCount` 增长——文档状态与渲染状态仍然只有一个线程在碰（`PendingChange`/`LayoutDocument` 两个入口都会 drain）。刻意不用 channel 投递结果：宿主换文档又漏 `Close` 时，投递式 worker 会永久阻塞在发送上，把整份文档钉在内存里。
 7. **平台能力下沉**：剪贴板、对话框、抓屏在 `runtime/*` 收口，`engine` 保持纯 Go（读剪贴板靠后端读出后调 `OnDocumentPaste`，写靠引擎给 `SelectedText` 后端去写）。图片同理：引擎只解码，字节由宿主注入的 `LoadImage` 提供，不读文件、不联网。
 8. **UI 是文档内自绘**：`position:fixed` 压页面上、body 首尾插占位块；换文档重装。代价是页面 `z-index` 更高的元素会盖住工作台。
+9. **窗口图标走 `SDL_SetWindowIcon`，不自己调 `WM_SETICON`**：SDL 的 Windows 实现内部按系统 `SM_CXICON` / `SM_CXSMICON` 两档缩放后 `CreateIconIndirect`，一次把 `ICON_SMALL` 和 `ICON_BIG` 都设好——自己只设一个档位会出现「标题栏换了、任务栏还是默认图标」的半截效果。
 
 ## 容易踩的坑 / 限制
 
@@ -157,6 +188,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 - **文本度量口径**：`FakeGraphics` 是计数桩，`BufferGraphics` 有软件光栅化度量；像素断言要用与布局同口径的后端。
 - **DLL**：`SDL2.dll`、`SDL2_ttf.dll`（及 `zlib1.dll`）放工程根 `libs/`（本仓库已备），或系统可搜索到。
 - **SDL 鼠标按钮事件坐标缓存**：SDL2 的 `WM_LBUTTONDOWN/UP` 不读 `lParam`，直接取内部 `mouse->x/y`（仅 `WM_MOUSEMOVE` 刷新）。窗口移动/缩放但光标静止时，下一击携带的仍是**旧窗口位置相对**的坐标——snip「先点一下才拖得动」即此根因（见 `backend/sdl2/window.go:fixStale` 与 `.temp/mousecache` 实证）。
+- **`SDL_CreateRGBSurface*From` 只借用像素、不拷贝**：窗口图标把 `*core.Bitmap` 的 `Pix` 包成 surface 时，surface 活多久压着的 Go 堆数组就得活多久——`runtime.KeepAlive(icon.Pix)` 必须落在 `SDL_FreeSurface` **之后**（放在之前等于没保活）。`SetWindowIcon` 会把像素拷进 Win32 `HICON`，所以 surface 用后即弃。三个图标符号（`SetWindowIcon`、`CreateRGBSurfaceWithFormatFrom`、`CreateRGBSurfaceFrom`）一律 `bindProbe` 可选绑定：缺了只是图标不可用，不该让整个后端加载失败。
 
 ## 扩展点
 
@@ -172,6 +204,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 | 页面导航回调 | `SetOnNavigate`（导航在 click 冒泡之后执行） | `engine` 文档 API |
 | 应用层变更信号 | `SetOnChanged`（内容**或视口尺寸**变化都通知） | `engine` 文档 API |
 | 高频输入按帧合并（拖动窗口等） | `browser.Window.SetFrameHandler`：事件排空后每帧调一次，返回 true 时主循环改用 1ms 轮询（空闲 10ms） | `browser/window.go`、`examples/snip/preview.go` |
+| 自定义窗口图标 | 造一个 `*core.Bitmap`（`engine.DecodeImage` 解 PNG/JPEG/GIF 字节），传给 `browser.Options.Icon`（建窗即设）或 `browser.Window.SetIcon`（运行期换）；`ui.Spec.Icon` 同理。**只吃位图**，`.ico` 多帧容器要宿主先取出其中一档 | `core/graphics.go`（`IconSetter`）、`backend/sdl2/window.go`、`browser/window.go` |
 
 ## 无头模式与测试
 
@@ -197,7 +230,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 |---|---|
 | `examples/browser` | 最小浏览器门面：`browser.New` + `OpenDocument` + `Run` |
 | `examples/notepad` | 记事本：`ui.Install` + 主题 + TextAreaView/BarView/TextInputView + Ctrl+S 对话框 |
-| `examples/kit` | 组件画廊：表单控件全家桶 + `NewBufferedViewport` 截图 |
+| `examples/kit` | 组件画廊：表单控件全家桶 + `NewBufferedViewport` 截图 + 程序化窗口图标（`ui.Spec.Icon` / `-dump-icon` / `-no-icon`） |
 | `examples/portal` | 门户页：定位层/层叠/滚动性能基准页 |
 | `examples/ua` | UA 样式表对照：`NewHeadlessViewport` + `-dump-svg` |
 | `examples/stylebook` | 作者样式表全集：`<link>` 外链样式表（`docOptions` 加载器回调）+ 全标签/CSS 对照页（对照 Chrome） |

@@ -268,6 +268,21 @@ func decodeImageBytes(data []byte) (*Bitmap, error) {
 	return &Bitmap{W: w, H: h, Pix: dst.Pix}, nil
 }
 
+// DecodeImage 解码一份图片的原始字节（PNG / JPEG / GIF，GIF 取第一帧）为
+// *Bitmap，与 <img> 共用同一条解码路径和像素口径（RGBA8888、非预乘 alpha）。
+//
+// 用途是「宿主自己有图片字节、想要位图」：窗口图标（browser.Window.SetIcon）、
+// 自写 ImageLoader 的预解码等。引擎内部的图片加载不经过它——那是
+// decodeDataURL / ImageLoader 的事，两者都**不读文件、不联网**，字节从哪来
+// 由宿主决定。
+//
+// data: URL 不是这个函数的输入（那是 src 字符串的事）：要吃
+// `data:image/png;base64,...` 请拆掉前缀后把载荷 base64 解码，或直接把整串
+// 当作 <img> 的 src 交给引擎。
+func DecodeImage(data []byte) (*Bitmap, error) {
+	return decodeImageBytes(data)
+}
+
 // imageDeclaredBox 给出 <img> 在布局阶段应使用的声明尺寸（内容盒，未扣
 // padding/border）；-1 表示未知（尚未解码且没有声明）。
 //

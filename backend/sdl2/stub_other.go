@@ -68,6 +68,12 @@ func (*Window) SetTitle(string) {}
 // NativeHandle 在非 Windows 平台总是返回 ErrUnsupported（没有原生句柄）。
 func (*Window) NativeHandle() (uintptr, error) { return 0, ErrUnsupported }
 
+// SetIcon 在非 Windows 平台总是返回 ErrUnsupported（没有图标装载实现）。
+//
+// 签名与 Windows 实现一致（参数 *core.Bitmap、返回 error），跨平台代码
+// 可以直接调用；用 errors.Is(err, sdl2.ErrUnsupported) 判断「这台机器没这能力」。
+func (*Window) SetIcon(*core.Bitmap) error { return ErrUnsupported }
+
 // ClipboardText 在非 Windows 平台返回空串（无剪贴板实现）。
 func ClipboardText() string { return "" }
 
@@ -92,3 +98,4 @@ func (*Window) SetVSync(bool) {}
 
 // 平台无关地保持与 Windows 实现一致的接口实现。
 var _ core.Viewport = (*Window)(nil)
+var _ core.IconSetter = (*Window)(nil)

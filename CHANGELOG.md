@@ -18,6 +18,49 @@
 
 ## 未发布
 
+**窗口/任务栏图标：`core.IconSetter` + `SetIcon` 运行时能力（PNG/JPEG/GIF 位图，仅 Windows 有实现）**。
+引擎此前所有窗口都是 SDL 的默认图标：应用没法在标题栏、任务栏、Alt+Tab 里认出自己。
+本轮补上这条运行时能力——输入是**已解码的位图**（`*core.Bitmap`，与 `<img>` 同一口径：
+RGBA8888、非预乘 alpha），不是 `.ico` 容器；纯 Go 无 CGO 的约束不变，非 Windows 返回
+`ErrUnsupported`（不 panic）。
+
+- **契约**：`core.IconSetter{ SetIcon(icon *Bitmap) error }`——`Viewport` 的**可选扩展**，
+  与 `CursorSetter` / `SpriteDrawer` / `Clipper` 同一惯例：不实现的后端（无头、缓冲渲染）
+  静默忽略，实现签名两边齐、能力差异只体现在返回值。`engine` 加同名别名。
+- **走 `SDL_SetWindowIcon` 而不是自己调 `WM_SETICON`**：SDL 的 Windows 实现内部按
+  `SM_CXICON` / `SM_CXSMICON` 两档缩放后 `CreateIconIndirect`，一次把 `ICON_SMALL` 和
+  `ICON_BIG` 都设好。自己只设一档会得到「标题栏换了、任务栏还是默认图标」的半截效果。
+- **surface 只**借用**像素**：`SDL_CreateRGBSurfaceWithFormatFrom`（2.0.5+，仓库捆绑
+  2.28.4）不拷贝 `icon.Pix`，所以 `runtime.KeepAlive(icon.Pix)` 必须落在
+  `SDL_FreeSurface` **之后**；老运行库缺它时退到 `SDL_CreateRGBSurfaceFrom` + 显式
+  RGBA 位掩码（小端下内存字节序正是 R,G,B,A，与 `SDL_PIXELFORMAT_RGBA32` 同一种
+  surface）。三个符号一律 `bindProbe` **可选绑定**——缺符号只是图标不可用，不该让
+  整个后端加载失败。
+- **解码入口 `engine.DecodeImage(data []byte) (*Bitmap, error)`**：与 `<img>` 共用
+  `decodeImageBytes`，格式支持面（PNG / JPEG / GIF 首帧）与像素口径必然一致，
+  `browser` 层不再自己写一份 PNG 解码。
+- **公开 API**：`browser.Options.Icon` / `browser.Window.SetIcon`、
+  `sdl2.WindowOptions.Icon` / `(*sdl2.Window).SetIcon`、`ui.Spec.Icon`（`ui.New` 因此
+  改走 `browser.NewWithOptions`，`Centered`+`Resizable` 与旧 `browser.New` 默认一致）。
+  建窗参数与运行期 API 是同一条代码路径（`NewWindowWithOptions` 末尾调 `win.SetIcon`）。
+- **失败不阻断**：图标纯属外观——老 SDL 缺符号、位图不合法都不该让应用起不来，
+  建窗路径上的失败只在 `GHROMEX_DEBUG=1` 打一行。传了 `Options.Icon` 会在首帧显示
+  之前设上，避免闪一眼默认图标。
+- **示例**：`examples/kit` 自己画一张 32×32 图标（深蓝圆角底 + 琥珀「小窗口」，
+  不引外部资源文件），带 `-dump-icon`（把生成的位图写成 PNG 核对形状与透明边）与
+  `-no-icon`。图形用「实底 + 挖空」两段式而不是描边：描边在系统缩到 16px 小档后
+  会糊成一团。
+- **回归**：`backend/sdl2/icon_test.go`（真机 `WM_GETICON` 回读 `ICON_SMALL`/`ICON_BIG`
+  两个句柄都非空，再 `GetIconInfo` + `GetObject` + `GetDIBits` 把颜色位图读回，断言中心
+  8×8 是源图的品红——只有 `GHROMEX_REAL=1` 且能建真窗口时跑，否则 skip）；
+  `browser/window_icon_test.go`（合法位图成功、nil / 像素长度不足 / 尺寸非法报错、
+  `Options.Icon` 建窗不失败）；`engine/decode_test.go`（PNG/JPEG/GIF 三口径 + 垃圾字节报错）。
+  `go build ./...`、`go vet ./...`、`go test ./... -count=1` 全 15 包绿；
+  `examples/ua` 与 `examples/notepad` 的 `-dump-svg` 与 `688c360` 基线逐字节一致。
+- 本轮**不做** `.ico` 多帧容器解码（要自己按帧头分析各档尺寸与 key 色透明，且平台
+  各有各的规矩；宿主想用自己的图标文件，先取出其中一档像素传进来即可），也**不做**
+  exe 资源图标（那是打包期的事，需要外部资源工具链，与运行时能力无关）。
+
 **CSS 背景图层：`background-image` 全套单层语义 + 多层叠放**。引擎此前只认
 `background-color`：作者写 `background-image: url(...)` 时整条声明被丢弃（`background`
 简写也只取颜色 token）。本轮把 CSS Backgrounds 3 的背景部分补齐到「能用的程度」——

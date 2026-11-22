@@ -29,7 +29,13 @@ func New(spec Spec) (*App, error) {
 	if h <= 0 {
 		h = 620
 	}
-	win, err := browser.New(w, h, spec.Title)
+	// 与旧 browser.New 默认一致：居中 + 可缩放。走 NewWithOptions 是为了能把
+	// Spec.Icon 透下去（建窗即设图标，避免首帧闪一下默认图标）。
+	win, err := browser.NewWithOptions(browser.Options{
+		Width: w, Height: h, Title: spec.Title,
+		Centered: true, Resizable: true,
+		Icon: spec.Icon,
+	})
 	if err != nil {
 		return nil, err
 	}

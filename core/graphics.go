@@ -290,3 +290,16 @@ type Viewport interface {
 	ViewportHeight() int
 	Graphics() Graphics
 }
+
+// IconSetter 是 Viewport 的可选扩展：把一张位图设为窗口图标（标题栏 +
+// 任务栏 + Alt+Tab）。
+//
+// 不实现该接口的后端（无头、缓冲渲染）静默忽略。返回 error 表示当前平台
+// 或当前 SDL 运行库没有这条能力（非 Windows 返回 sdl2.ErrUnsupported）——
+// 图标纯属外观，调用方一般只需忽略错误，不该因此让应用起不来。
+//
+// 位图口径与 Bitmap 相同（RGBA8888、非预乘 alpha）。建议给 32×32 或
+// 64×64：太小会被系统放得模糊，太大平台层要缩放。
+type IconSetter interface {
+	SetIcon(icon *Bitmap) error
+}

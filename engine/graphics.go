@@ -41,6 +41,8 @@ type (
 	CursorShape = core.CursorShape
 	// CursorSetter 是 Graphics 的可选扩展：切换系统鼠标指针。
 	CursorSetter = core.CursorSetter
+	// IconSetter 是 Viewport 的可选扩展：设置窗口图标。
+	IconSetter = core.IconSetter
 	// StyledPaint 是 Paint 的可选扩展：带斜体标记。
 	StyledPaint = core.StyledPaint
 	// WeightedPaint 是 Paint 的可选扩展：带数值字重标记。
