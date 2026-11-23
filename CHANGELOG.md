@@ -4,6 +4,48 @@
 `github.com/go-comm/ghromex@v0.5.0` 直接取用）。
 
 
+## v0.7.1 — 2026-11-23
+
+**纹理增量更新 + 贴图失效自愈 + 窗口级滚轮钩子**（无破坏性变更）。
+
+三处都源自同一类真实痛点：**逐帧合成画面**的应用（图片预览、动画、截图悬浮窗）
+被后端当成「每帧换新纹理」处理，既费性能又怕句柄失效。
+
+- **精灵/图片纹理增量更新（`core.Sprite.Rev` / `core.Bitmap.Rev`）**：
+  后端按「指针 + Rev」判定纹理缓存。命中且 Rev 相同只贴图；命中但 Rev 变了
+  （像素就地改写）只 `SDL_UpdateTexture` 重传像素、**纹理对象复用**，不再每帧
+  `CreateTexture + DestroyTexture`。Rev 零值 = 旧语义（像素不可变，指针命中即有效），
+  存量应用零改动。每帧合成画面的应用现在应**复用同一个** Sprite/Bitmap 指针并
+  `Rev++`，缓存表也从「逐帧增删」变成恒定一条目（顺带消除驱逐扫描）。
+
+- **贴图失效自愈**：三处缓存纹理（文本字形 / 图片 / 精灵）的 `RenderCopy` 统一走
+  `renderCopy`——失败（`texture invalid`：device lost、显示模式切换、多显示器 DPI
+  变化都可能让缓存句柄失效）时把该纹理移出缓存、销毁句柄、记账归零，当前帧跳过
+  该贴图，下一帧缓存 miss 自动重建。从「永久黑屏」降为「闪烁一帧」。单帧自愈次数
+  封顶（32 次）防止病理循环；`GHROMEX_DEBUG=1` 下打印失效与重试日志。
+
+- **窗口级滚轮钩子（`Window.SetWheelHandler`）**：与 `SetKeyHandler` /
+  `SetMouseHandler` 同构——在文档滚动与元素 `OnWheel` **之前**调用，返回 true 即
+  消费、不再派发。应用不必再维护一个全屏覆盖层来截滚轮。`WheelEvent` 给出原始
+  档位（未乘每档像素数、未做 Shift 横滚转换）。
+
+### 新增公开 API
+
+- `core.Sprite.Rev` / `core.Bitmap.Rev`（内容版本号，零值 = 像素不可变）
+- `browser.WheelEvent` / `browser.Window.SetWheelHandler`
+
+### 修复
+
+- `backend/sdl2.BlitImage` 的临时纹理销毁多传了一个 `renderer` 实参
+  （`SDL_DestroyTexture` 只收纹理句柄），属「局部源矩形」慢路径上的潜在
+  野指针隐患，已改为单参调用。
+
+### 内部
+
+- `spriteTex` 增加 `rev` 字段；新增 `updateTexturePixels` 与 `renderCopy` /
+  `invalidateTexture`；`Clear`（帧起点）清零单帧自愈计数。
+
+
 ## v0.7.0 — 2026-11-23
 
 **增量布局六阶段 + 页面文本可选中 + `<img>` 与 CSS 背景图链路 + 窗口图标 + 文档体系重构**。
