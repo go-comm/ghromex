@@ -4,6 +4,80 @@
 `github.com/go-comm/ghromex@v0.5.0` 直接取用）。
 
 
+## 未发布
+
+**调试模式：本地 HTTP/JSON 驱动与观测**。点击/滚动/按键不再只能靠人肉或
+系统层脚本（AutoHotkey 那类绕过了平台事件解码，看不见坐标修正、焦点链、
+悬停档位这些真机 bug）：`debug` 包把输入注入与状态观测收进引擎内部，注入
+的事件照样走 `SDL_PushEvent → 后端解码 → 浏览器派发`，与真人操作同一条链路。
+默认不起、只绑回环、不开 CORS——它是开发调试设施，不是产品功能。
+
+```go
+srv, err := debug.Serve(win, debug.Options{Addr: "127.0.0.1:9223"})
+if err != nil {
+	return err
+}
+defer srv.Close() // 兜底：Run 已返回后（或 Run 没跑时）再收尾
+// 或按环境变量起：GHROMEX_DEBUG_PORT=9223（未设置返回 nil, nil）
+if srv, err := debug.ServeFromEnv(win); err != nil {
+	return err
+}
+
+// win.Run() 阻塞到窗口关闭；它返回之后再 Close，服务本身不需要显式停。
+win.Run()
+```
+
+- **观测端点**：`GET /debug/state`（视口/标题/变更与重绘计数、滚动偏移、
+  悬停/焦点/按下元素、选区）、`GET /debug/hit?x&y`（命中元素链 + 伪类 +
+  光标形状）、`GET /debug/dom?selector&depth&limit`（DOM 快照：盒、文本、
+  属性白名单、元素自身滚动偏移）、`GET /debug/text?selector`（InnerText 与
+  表单取值）、`GET /debug/attr?selector&name`（任意属性）、
+  `GET /debug/shot.png`（画面 PNG）、`GET /debug/layout.svg`（布局 SVG）。
+  `dom` 默认 `depth=6`/`limit=2000`：几十万节点的页面全量序列化会撑爆连接。
+- **输入动作**：`POST /debug/input` 收动作数组（也接受 `{"actions":[...]}`），
+  支持 `move`/`down`/`up`/`click`/`drag`/`wheel`/`key`/`text`/`drop`/`wait`/
+  `resize`/`close` 与观测类 `state`/`hit`/`text`/`dom`/`shot`；`key` 认
+  `"ctrl+shift+s"`、`"F5"`、`"enter"`、`"tab"`、方向键（`left`/`←`）等。
+- **确定性用同步栅栏，不猜帧**：主循环在「事件排空之后、`frameHandler` 与
+  布局之前」执行任务队列，所以插一个空任务即等价于「上一动作注入的事件
+  已经派发完」。每个动作后自动插一道（可用 `sync:false` 关掉），脚本不用
+  自己 `wait` 等派发；`wait` 保留给「让滚动动画跨帧推进」这类真实时间需求。
+  队列非空时本帧跳过空闲休眠，一次请求往返不会被 10ms 睡得飘。
+- `GET /debug/help` 返回端点与动作清单（JSON），脚本可自描述，不用照抄文档。
+
+### 新增公开 API
+
+- `browser.Window.Post(f func()) error` —— 把任务投进主线程队列，不等结果
+- `browser.Window.Do(f func() (any, error), timeout time.Duration) (any, error)` —— 排队并等结果
+- `browser.Window.Running() bool` —— 主循环是否在跑
+- `browser.Window.Document() engine.HTMLDocument` —— 当前文档（主线程读）
+- `browser.Window.ScreenshotPNG() ([]byte, error)` —— 当前画面编码成 PNG（主线程），省掉调用方每处一份 raw→RGBA 转换
+- `browser.ErrLoopNotRunning` / `browser.ErrTaskTimeout` / `browser.ErrLoopStopped`
+- `engine.ScrollOffset(el HTMLElement) (x, y int)` —— 元素自身滚动偏移（文档级也一样）
+- `debug.Serve` / `debug.ServeFromEnv` / `debug.Options` / `debug.EnvPort`
+  （`"GHROMEX_DEBUG_PORT"`）/ `debug.Server`（`URL`/`Addr`/`Close`）/
+  `debug.ErrNotLoopback` / `debug.ErrAlreadyClosed`
+
+### 修复
+
+- `docs/development.md` 的 `GHROMEX_DEBUG` 口径过期（写着「回显点击的命中/
+  派发结果」，代码里从来没有）：已改为它真正做的三件事，命中回显改用调试服务。
+
+### 内部
+
+- `browser/tasks.go`：主线程任务队列。`enqueue` 在锁内检查 `loopRunning`，
+  与 `stopLoop` 全序；`stopLoop` 把残留任务统一报成 `ErrLoopStopped`，等待方
+  不干等超时。任务 panic 在 `runTask` 里收敛成 error（Post 的只打一行诊断）。
+- `browser/window.go`：`Run` 每帧在 `PollEvent` 排空之后调 `drainTasks`，
+  `hasTasks()` 并入「本帧是否还要画/是否休眠」的判断。
+- `browser/png.go`：`ScreenshotPNG`。SDL 回读是 32bpp 小端 `R,G,B,X`，
+  第 4 字节不是 alpha（实测恒 0），编码前统一补 255——否则 PNG 全透明。
+- `core/arch_test.go`：分层表加 `debug`（允许 `engine`/`browser`/`backend/sdl2`），
+  另加 `TestDebugIsNotADependency` 钉死 `engine`/`browser`/`ui`/`core`/
+  `backend/sdl2`/`runtime/dialog` 都不许 import `debug`。
+- `examples/browser`：加 `-debug-port`，另接 `GHROMEX_DEBUG_PORT` 旁路。
+
+
 ## v0.8.0 — 2026-11-23
 
 **文件拖放（拖入窗口）**：把文件从资源管理器（或任何 OLE 拖放源）拖到窗口上，

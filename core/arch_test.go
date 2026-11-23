@@ -40,6 +40,10 @@ func TestLayeringHasNoBackwardDependency(t *testing.T) {
 		// 反过来不行——引擎和 browser 都不该知道「菜单/工具栏」的存在，
 		// 否则想要一个空壳窗口的应用会被迫拖上整套 UI。
 		{dir: "ui", allow: []string{"engine", "browser"}},
+		// 调试服务与 ui 同层（都在 browser 之上），但只被示例/开发期用：
+		// engine/browser/ui 都不许 import 它，否则发布路径会被拖上一个
+		// HTTP 服务。它读平台事件模型是为了注入输入，不自己造事件。
+		{dir: "debug", allow: []string{"engine", "browser", "backend/sdl2"}},
 	}
 	for _, c := range cases {
 		allowed := map[string]bool{"core": true}
@@ -63,6 +67,19 @@ func TestBrowserLayerWiresEngineAndBackend(t *testing.T) {
 	}
 	if !imps["engine"] || !imps["backend/sdl2"] {
 		t.Errorf("browser 应同时依赖 engine 与 backend/sdl2，实际：%v", imps)
+	}
+}
+
+// 调试服务是「可选的开发期外挂」：engine / browser / ui / backend 都不该
+// 依赖它，否则任何用到这些包的应用都被迫拖上一个 HTTP 服务（还有端口与
+// 安全面）。发布路径里它只能由示例或宿主自己显式起。
+func TestDebugIsNotADependency(t *testing.T) {
+	for _, dir := range []string{"engine", "browser", "ui", "core", "backend/sdl2", "runtime/dialog"} {
+		for _, imp := range repoImports(t, dir, false) {
+			if imp == "debug" {
+				t.Errorf("%s 依赖了 debug：调试服务必须是可选外挂，不许被生产代码引用", dir)
+			}
+		}
 	}
 }
 

@@ -26,6 +26,7 @@
 | `runtime/{clipboard,dialog,screen}` | 上述平台能力的通用调用入口（类型别名转发） | 调用方只 import 这一层，不碰 backend |
 | `browser` | 装配门面：持有 `HTMLDocument`，跑主循环（事件 → 引擎动作 → 重排 → 重绘） | 生命周期同一 goroutine；把平台差异挡在应用之外 |
 | `ui` | 菜单栏/工具栏/状态栏 + 页面控件（TextInputView/TextAreaView/BarView）+ 浅色/深色主题 + 快捷键 | 装在文档 DOM 里（`position:fixed` + body 占位块），换文档要重装 |
+| `debug` | 本地调试服务：HTTP/JSON 注入输入 + 观测状态（`Serve`/`ServeFromEnv`） | **可选开发期外挂**，只被示例/宿主显式引用；`engine`/`browser`/`ui` 都不许 import 它（`TestDebugIsNotADependency`） |
 
 **为什么有 `core`**：Go 接口是结构化的。若后端直接 import 引擎来「实现引擎的接口」，依赖方向就反了。所以把接口和跨层值类型下沉到 `core`，引擎用类型别名（`type Color = core.Color`）保持对外 API 不变。`core/arch_test.go` 是架构护栏：钉死依赖单向、平台层禁止反向 import 上层、`browser` 必须同时依赖 engine 与 backend/sdl2。
 
@@ -68,11 +69,26 @@ type IconSetter interface {
 
 `browser.Window.Run()` 每帧：
 
-1. `PollEvent` 取平台事件（SDL 解码成 `sdl2.Event`）
-2. 平台事件 → 引擎动作：`OnDocumentClick` / `OnDocumentKeyDownMods` / `OnDocumentWheel` / `OnDocumentMouseMove`…（命中测试取最深元素 → 沿父链冒泡 → 执行默认动作）
-3. `doc.ChangeCount()` 变了才 `LayoutDocument`（变更计数是**唯一**重排触发器，布局期禁止 `markChanged`）
-4. `engine.RenderNode(g, doc)` 绘制 + `Present`
-5. `engine.TickScroll` / `engine.TickTooltip` 推进滚动动画与提示气泡（决定本帧是否休眠）
+1. `PollEvent` 取平台事件（SDL 解码成 `sdl2.Event`；`PollEvent` 自身先排空外部拖入的文件批），本帧把队列取空
+2. `drainTasks` 跑主线程任务队列（`Window.Post` / `Window.Do`）——**调试服务的读状态、截图、改 DOM、注入输入的「落地」都在这里**，排空点刻意在事件之后：那时本帧收到的事件还没派发，队列里排着的正是「上一动作注入的事件」，跑完即等价于「上一动作已生效」
+3. 平台事件 → 引擎动作：`OnDocumentClick` / `OnDocumentKeyDownMods` / `OnDocumentWheel` / `OnDocumentMouseMove`…（命中测试取最深元素 → 沿父链冒泡 → 执行默认动作）
+4. `doc.ChangeCount()` 变了才 `LayoutDocument`（变更计数是**唯一**重排触发器，布局期禁止 `markChanged`）
+5. `engine.RenderNode(g, doc)` 绘制 + `Present`
+6. `engine.TickScroll` / `engine.TickTooltip` 推进滚动动画与提示气泡（决定本帧是否休眠）；队列非空时本帧不休眠，让一次请求往返落在下几帧内
+
+## 主线程任务队列（`browser/tasks.go`）
+
+SDL 的窗口/渲染器绑在 `Run` 所在 OS 线程，引擎文档也不接受跨线程访问。别的
+goroutine（`debug` 的 HTTP handler、宿主的后台 worker）要对窗口做事，只能：
+
+- `win.Post(func())` —— 把任务排进队列，**不等待**（任务里 panic 只打一行诊断）；
+- `win.Do(func() (any, error), timeout)` —— 排队 + 阻塞等结果（任务 panic 被收敛成 error）；**只能在非主循环 goroutine 上调**，同 goroutine 调等于让主循环等自己；
+- `win.Running()` —— 主循环是否在跑（竞态口径：读到 true 之后可能已退出，只适合观测）。
+
+`Run` 未跑/已退出时 `Post`/`Do` 立刻返回 `ErrLoopNotRunning`（检查与 `stopLoop` 在同一把锁里，不存在「刚要执行、主循环刚好退出」的夹缝）。超时返回 `ErrTaskTimeout`（任务仍在队列里，之后可能照跑——所以闭包要么幂等要么只读）；主循环在任务执行前退出则等待方拿到 `ErrLoopStopped`，不是干等。`Close` 先 `stopLoop` 再结清队列。
+
+`win.Document()` 直接返回当前文档（不排队）、`win.ScreenshotPNG()` 内部走 `Do`——两者都**必须**在主循环 goroutine 上用。
+
 
 三个「状态存在文档上」的伪类：`:hover` / `:focus` / `:active`（`SetHoveredElement` / `SetFocusedElement` / `SetActiveElement`），变化走同一条 `markChanged → 重排重绘` 链路。
 
@@ -212,6 +228,8 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 | 高频输入按帧合并（拖动窗口等） | `browser.Window.SetFrameHandler`：事件排空后每帧调一次，返回 true 时主循环改用 1ms 轮询（空闲 10ms） | `browser/window.go`、`examples/snip/preview.go` |
 | 接收拖入窗口的文件 | `browser.Window.SetFileDropHandler`：一次拖放调一次，给整批绝对路径（多选不拆分）；后端 `WM_DROPFILES` → `sdl2.EventFilesDropped`。只做接收方向 | `backend/sdl2/filedrop.go`、`browser/window.go` |
 | 自定义窗口图标 | 造一个 `*core.Bitmap`（`engine.DecodeImage` 解 PNG/JPEG/GIF 字节），传给 `browser.Options.Icon`（建窗即设）或 `browser.Window.SetIcon`（运行期换）；`ui.Spec.Icon` 同理。**只吃位图**，`.ico` 多帧容器要宿主先取出其中一档 | `core/graphics.go`（`IconSetter`）、`backend/sdl2/window.go`、`browser/window.go` |
+| 从外部脚本驱动/观测窗口 | `debug.Serve(win, debug.Options{Addr:...})`（或 `ServeFromEnv` + `GHROMEX_DEBUG_PORT`）；输入走 `Window.InjectEvent`，读状态/截图走 `Window.Do`。别在生产代码里 import `debug` | `debug/server.go`、`debug/input.go`、`debug/state.go`、`examples/browser/main.go` |
+| 别的 goroutine 想碰窗口/文档 | `browser.Window.Post`（不等）/ `browser.Window.Do`（等结果）交回主循环；`Run` 没跑时返回 `ErrLoopNotRunning`。`Run` 内每帧事件排空后执行 | `browser/tasks.go`、`browser/window.go`（`Run`） |
 
 ## 无头模式与测试
 
@@ -224,6 +242,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 ## 命名与代码风格惯例
 
 - 平台不支持统一返回哨兵错误 `ErrUnsupported`（非 Windows 路径），不要 panic、不要静默。
+- **跨线程碰窗口只走 `Post`/`Do`**：别的 goroutine 上「顺手调用一下窗口方法」是 bug——SDL 与文档树都要求单线程。读文档直接 `Do(func() (any, error) { return win.Document(), nil }, t)`，别自己 Export 状态。
 - 平台文件用构建标签分文件（Windows 实现 / 其它平台 stub），保证跨平台 `go build ./...` 通过。
 - 引擎对外 API 通过 `engine` 的类型别名透出 `core` 类型；新增跨层值类型放 `core`，`engine/graphics.go` 加别名。
 - 可选能力用「类型断言 + 回退」而非配置开关（`Clipper`、`SpriteDrawer` 模式）。
@@ -235,7 +254,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 
 | 目录 | 内容 |
 |---|---|
-| `examples/browser` | 最小浏览器门面：`browser.New` + `OpenDocument` + `Run` |
+| `examples/browser` | 最小浏览器门面：`browser.New` + `OpenDocument` + `Run`；`-debug-port` / `GHROMEX_DEBUG_PORT` 挂调试服务 |
 | `examples/notepad` | 记事本：`ui.Install` + 主题 + TextAreaView/BarView/TextInputView + Ctrl+S 对话框 |
 | `examples/kit` | 组件画廊：表单控件全家桶 + `NewBufferedViewport` 截图 + 程序化窗口图标（`ui.Spec.Icon` / `-dump-icon` / `-no-icon`） |
 | `examples/portal` | 门户页：定位层/层叠/滚动性能基准页 |

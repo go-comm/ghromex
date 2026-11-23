@@ -20,6 +20,9 @@
 //	     ├ backend/*  平台实现：sdl2 窗口与绘制、dialog、clipboard
 //	     └ core       契约：Graphics / Viewport / 跨层值类型（叶子包）
 //
+//	debug      本地调试服务（可选开发期外挂）：HTTP/JSON 驱动与观测窗口
+//	           与 ui 同层，但 engine/browser/ui 都不许 import 它
+//
 //	runtime/{clipboard,dialog,screen} 是平台能力的通用入口：调用方只
 //	import 这一层，不直接碰 backend。examples/ 下各目录是可独立运行的示例。
 //
@@ -69,6 +72,7 @@
 //	engine      引擎：HTML/CSS 解析级联布局绘制 + 事件/编辑 + Fake/Buffer/Headless 视口
 //	browser     门面：New / OpenDocument / Run / SetFrameHandler / NativeHandle
 //	ui          工作台：菜单 / 工具栏 / 状态栏 / 主题 / TextInputView / BarView
+//	debug       本地调试服务（可选开发期外挂）：HTTP/JSON 注入输入 + 读内部状态
 //	runtime/*   平台能力：dialog / clipboard / screen（只 import 这一层，别碰 backend）
 //	backend/*   平台实现：sdl2（窗口/绘制）/ dialog / clipboard
 //	examples/*  可运行示例：browser / notepad / kit / portal / ua / stylebook / snip /
