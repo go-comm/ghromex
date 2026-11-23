@@ -44,6 +44,23 @@
   `go build ./...` / `go vet ./...` / `go test ./...` 全绿，ua 与 notepad 基线不变。
 - **本轮不做**：双击选词、三击选行、拖选越出视口自动滚动、跨 `<br>` 显式换行。
 
+**模块总览可被 `go doc` 读到：新增根包 `ghromex`**。此前根目录只有 `go.mod`、
+没有任何 `.go` 文件，`go doc github.com/go-comm/ghromex` 直接报「no required
+module provides package」——AI 拿到这个模块只能猜包名，根级查询一条信息都没有。
+新增 `ghromex.go`：**零声明、零 import**，只有一段包注释，内容是模块定位、
+分层图、核心入口、必守不变量，外加一份「包 → 职责」对照与查接口的命令清单。
+
+- **不 import 仓库内任何包**：根包保持叶子地位，`core/arch_test.go` 的依赖
+  单向规则不变（已用该测试专门验过）。`go doc` 只读注释，不产生任何依赖。
+- **`go doc` 的真实用法一并写进注释**（实测踩过的坑）：`go doc` 不吃 `./...`
+  （报「too many periods in symbol specification」），也不接受多个包位置参数
+  （`go doc $(go list ./...)` 报 usage），得「一个包一条命令」；
+  `go doc <包> <符号>` 查单个类型/函数。
+- **文档双写**：根包注释是「入口与导航」，`docs/ai/api-reference.md` 是「全量
+  落盘 API」（已重新生成，根包作为 `# package .` 进首节）；AGENTS.md 的
+  「开始开发前必读」把 `go doc github.com/go-comm/ghromex` 提到第 1 条——
+  先跑它就知道该查哪个包，不必猜。
+
 **窗口/任务栏图标：`core.IconSetter` + `SetIcon` 运行时能力（PNG/JPEG/GIF 位图，仅 Windows 有实现）**。
 引擎此前所有窗口都是 SDL 的默认图标：应用没法在标题栏、任务栏、Alt+Tab 里认出自己。
 本轮补上这条运行时能力——输入是**已解码的位图**（`*core.Bitmap`，与 `<img>` 同一口径：

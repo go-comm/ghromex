@@ -4,9 +4,10 @@
 
 ## 开始开发前必读
 
-1. **`docs/ai/architecture.md`** — 架构地图：分层与依赖规则、核心接口、主循环、典型用法代码、扩展点、坑与惯例。**改动前先读它。**
-2. **`docs/ai/api-reference.md`** — 全部公开 API（自动生成，勿手改）。接口变了运行 `powershell -File tools\gen-ai-context.ps1` 重新生成。
-3. 详细行为口径、性能实测数据见 `README.md`（很长，按需检索章节，不要整读）。
+1. **`go doc github.com/go-comm/ghromex`** — 模块总览与**接口导航**：定位、分层图、核心入口、必守不变量，以及「该查哪个包、用哪条命令查」。跑完这条就知道接口在哪，不必猜包名。
+2. **`docs/ai/architecture.md`** — 架构地图：分层与依赖规则、核心接口、主循环、典型用法代码、扩展点、坑与惯例。**改动前先读它。**
+3. **`docs/ai/api-reference.md`** — 全部公开 API（自动生成，勿手改）。接口变了运行 `powershell -File tools\gen-ai-context.ps1` 重新生成。
+4. 详细行为口径、性能实测数据见 `README.md`（很长，按需检索章节，不要整读）。
 
 ## 30 秒速览
 
