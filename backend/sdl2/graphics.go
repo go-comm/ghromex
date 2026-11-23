@@ -24,6 +24,111 @@ func checkDraw(what string, ret uintptr) {
 	}
 }
 
+// maxTextureInvalidationsPerFrame 是单帧的纹理自愈上限：超过后只记日志、
+// 不再 invalidate，防止「失效 → 重建 → 又失效」的病理循环把每帧都变成全量重建。
+// 计数器在 Clear（帧起点）清零。
+const maxTextureInvalidationsPerFrame = 32
+
+// invalidateTexture 标记纹理失效：从 sprites/images/textures 中删除对应条目、
+// 销毁 SDL 纹理、减记账。返回是否找到并处理了。
+func (g *Graphics) invalidateTexture(tex uintptr) bool {
+	if tex == 0 {
+		return false
+	}
+	found := false
+	// 1) 精灵缓存
+	for k, e := range g.sprites {
+		if e.tex == tex {
+			if drawDebug {
+				fmt.Fprintf(os.Stderr, "[ghromex] 纹理失效: sprite key=%p w=%d h=%d\n", k, e.w, e.h)
+			}
+			if e.tex != 0 {
+				sdlDestroyTexture(e.tex)
+			}
+			g.spritePixels -= e.w * e.h
+			delete(g.sprites, k)
+			found = true
+			break // 一个纹理只在一个缓存里
+		}
+	}
+	if found {
+		return true
+	}
+	// 2) 图片缓存
+	for k, e := range g.images {
+		if e.tex == tex {
+			if drawDebug {
+				fmt.Fprintf(os.Stderr, "[ghromex] 纹理失效: image key=%p w=%d h=%d\n", k, e.w, e.h)
+			}
+			if e.tex != 0 {
+				sdlDestroyTexture(e.tex)
+			}
+			g.imagePixels -= e.w * e.h
+			delete(g.images, k)
+			found = true
+			break
+		}
+	}
+	if found {
+		return true
+	}
+	// 3) 文本字形缓存
+	for k, info := range g.textures {
+		if info.tex == tex {
+			if drawDebug {
+				fmt.Fprintf(os.Stderr, "[ghromex] 纹理失效: glyph text=%q size=%d\n", k.text, k.size)
+			}
+			if info.tex != 0 {
+				sdlDestroyTexture(info.tex)
+			}
+			g.texPixels -= info.w * info.h
+			delete(g.textures, k)
+			found = true
+			break
+		}
+	}
+	return found
+}
+
+// renderCopyHook 是测试注入点：非 nil 时替代 SDL_RenderCopy 的返回值
+// （用于模拟「纹理失效」而无需真正销毁纹理，避免测试里的 double-free）。
+// 生产路径恒为 nil，走真实 SDL 调用。
+var renderCopyHook func(renderer, tex, src, dst uintptr) uintptr
+
+// renderCopy 统一的贴图入口（三处缓存纹理用此，临时纹理仍用 checkDraw）。
+//
+// 自愈逻辑：RenderCopy 失败（如 "texture invalid"——device lost、显示模式
+// 切换、多显示器 DPI 变化都可能让缓存句柄失效）时标记该纹理失效（删除缓存
+// 条目、销毁句柄、减记账），当前帧跳过该贴图，下一帧缓存 miss 触发重建——
+// 从「永久黑屏」降为「闪烁一帧」。不递归重试，避免一次性全量重建的性能炸弹。
+func (g *Graphics) renderCopy(dst *sdlRect, tex uintptr) {
+	if tex == 0 {
+		return
+	}
+	var ret uintptr
+	if renderCopyHook != nil {
+		ret = renderCopyHook(g.renderer, tex, 0, uintptr(unsafe.Pointer(dst)))
+	} else {
+		ret = sdlRenderCopy(g.renderer, tex, 0, uintptr(unsafe.Pointer(dst)))
+	}
+	if ret == 0 {
+		return
+	}
+	if drawDebug {
+		fmt.Fprintf(os.Stderr, "[ghromex] RenderCopy 失败: %s (tex=%d)\n", lastError(), tex)
+	}
+	// 单帧自愈上限：避免连续失效把每帧都吃成全量重建。
+	if g.texInvalidations >= maxTextureInvalidationsPerFrame {
+		if drawDebug {
+			fmt.Fprintf(os.Stderr, "[ghromex] 单帧自愈上限已达，跳过 invalidate\n")
+		}
+		return
+	}
+	if g.invalidateTexture(tex) {
+		g.texInvalidations++
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 字体解析：对齐 Chrome 在 Windows 上的默认字体映射，唯一例外：
 // standard（未指定 family）默认取 sans-serif（Arial）而非 Chrome 的 Times New Roman，
@@ -289,6 +394,10 @@ type Graphics struct {
 	// clips 是裁剪矩形栈（与 core.Clipper 的 Push/Pop 严格配对），栈顶
 	// 即当前生效裁剪区；空栈 = 无裁剪。与 SDL viewport 同坐标系。
 	clips []sdlRect
+
+	// texInvalidations 是本帧的纹理自愈次数（RenderCopy 失败 → invalidate）。
+	// 帧起点（Clear）清零：单帧上限防止病理循环把每帧变成全量重建。
+	texInvalidations int
 }
 
 // 编译期断言：SDL 后端必须实现 core.Clipper，否则 overflow 裁剪会静默失效。
@@ -1100,7 +1209,7 @@ func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string) {
 			top = y + int(refAscent-info.ascent)
 		}
 		dst := sdlRect{int32(cx), int32(top), int32(info.w), int32(info.h)}
-		checkDraw("SDL_RenderCopy", sdlRenderCopy(g.renderer, info.tex, 0, uintptr(unsafe.Pointer(&dst))))
+		g.renderCopy(&dst, info.tex)
 		cx += info.w
 	}
 }
@@ -1205,9 +1314,14 @@ func (g *Graphics) DrawColor(x, y, w, h int, color core.Color) {
 
 // DrawImage 把 *core.Bitmap 上传成纹理后按目标矩形 blit（SDL 负责缩放）。
 //
-// 纹理按位图指针缓存：解码后的像素在生命周期内不变，同一张图只上传一次
-// （与 DrawSprite 同一理由——每帧上传会把帧预算吃光）。其它 Image 值
-// （含 nil）保持旧语义：不绘制（预留接口）。
+// 纹理按位图指针缓存，并结合 core.Bitmap.Rev 判定内容是否变化：
+//   - 命中且 Rev 相同：只贴图（Rev=0 即「像素不可变」，与旧语义一致）。
+//   - 命中但 Rev 变了（同尺寸）：只重传像素（SDL_UpdateTexture），纹理对象
+//     复用，不销毁重建——逐帧换图的场景（如动画/视频流）由此省掉每帧的
+//     驱动级纹理分配与全量拷贝。
+//   - 未命中或尺寸变了：新建纹理。
+//
+// 其它 Image 值（含 nil）保持旧语义：不绘制（预留接口）。
 func (g *Graphics) DrawImage(x, y, w, h int, image core.Image) {
 	bmp, ok := image.(*core.Bitmap)
 	if !ok || bmp == nil || w <= 0 || h <= 0 || g.renderer == 0 ||
@@ -1215,7 +1329,27 @@ func (g *Graphics) DrawImage(x, y, w, h int, image core.Image) {
 		return
 	}
 	entry, ok := g.images[bmp]
-	if !ok {
+	switch {
+	case ok && entry.w == bmp.W && entry.h == bmp.H && entry.rev == bmp.Rev:
+		// 命中且内容未变：只贴图。
+		entry.lastUsed = g.nextTexClock()
+	case ok && entry.w == bmp.W && entry.h == bmp.H:
+		// 命中但 Rev 变了：像素被改写，重传像素、复用纹理（尺寸不变，记账不动）。
+		entry.lastUsed = g.nextTexClock()
+		entry.rev = bmp.Rev
+		if !g.updateTexturePixels(entry.tex, bmp.Pix, bmp.W, bmp.H) {
+			return
+		}
+		g.imageUploads++
+	default:
+		// 新图片，或同指针但尺寸变了：旧纹理作废（若有），重建。
+		if ok {
+			if entry.tex != 0 {
+				sdlDestroyTexture(entry.tex)
+			}
+			g.imagePixels -= entry.w * entry.h
+			delete(g.images, bmp)
+		}
 		tex := sdlCreateTexture(g.renderer, uintptr(pixelFormatRGBA32),
 			uintptr(textureAccessStreaming), uintptr(bmp.W), uintptr(bmp.H))
 		if tex == 0 {
@@ -1223,22 +1357,34 @@ func (g *Graphics) DrawImage(x, y, w, h int, image core.Image) {
 			return
 		}
 		sdlSetTextureBlendMode(tex, uintptr(blendModeBlend))
-		rect := sdlRect{0, 0, int32(bmp.W), int32(bmp.H)}
-		if sdlUpdateTexture(tex, uintptr(unsafe.Pointer(&rect)),
-			uintptr(unsafe.Pointer(&bmp.Pix[0])), uintptr(bmp.W*4)) != 0 {
-			checkDraw("SDL_UpdateTexture", 0)
+		if !g.updateTexturePixels(tex, bmp.Pix, bmp.W, bmp.H) {
+			sdlDestroyTexture(tex)
 			return
 		}
-		entry = &spriteTex{tex: tex, w: bmp.W, h: bmp.H, lastUsed: g.nextTexClock()}
+		entry = &spriteTex{tex: tex, w: bmp.W, h: bmp.H, lastUsed: g.nextTexClock(), rev: bmp.Rev}
 		g.images[bmp] = entry
 		g.imagePixels += bmp.W * bmp.H
 		g.imageUploads++
 		g.evictImagesIfNeeded(bmp)
-	} else {
-		entry.lastUsed = g.nextTexClock()
 	}
 	dst := sdlRect{int32(x), int32(y), int32(w), int32(h)}
-	checkDraw("SDL_RenderCopy", sdlRenderCopy(g.renderer, entry.tex, 0, uintptr(unsafe.Pointer(&dst))))
+	g.renderCopy(&dst, entry.tex)
+}
+
+// updateTexturePixels 把 RGBA8888 像素整块灌进纹理（streaming 纹理）。
+//
+// 返回 false 表示上传失败（调用方负责销毁纹理并放弃本次绘制）。
+func (g *Graphics) updateTexturePixels(tex uintptr, pix []byte, w, h int) bool {
+	if tex == 0 || len(pix) < w*h*4 {
+		return false
+	}
+	rect := sdlRect{0, 0, int32(w), int32(h)}
+	if sdlUpdateTexture(tex, uintptr(unsafe.Pointer(&rect)),
+		uintptr(unsafe.Pointer(&pix[0])), uintptr(w*4)) != 0 {
+		checkDraw("SDL_UpdateTexture", 0)
+		return false
+	}
+	return true
 }
 
 // BlitImage 实现 core.ImageBlitter：按源矩形把位图 blit 到目标矩形（缩放
@@ -1287,7 +1433,7 @@ func (g *Graphics) BlitImage(dstX, dstY, dstW, dstH int, image core.Image,
 		checkDraw("SDL_CreateTexture", 0)
 		return
 	}
-	defer sdlDestroyTexture(g.renderer, tex)
+	defer sdlDestroyTexture(tex)
 	sdlSetTextureBlendMode(tex, uintptr(blendModeBlend))
 	buf := make([]byte, srcW*srcH*4)
 	for y := 0; y < srcH; y++ {
@@ -1317,16 +1463,43 @@ const textureAccessStreaming = 0
 
 // DrawSprite 实现 core.SpriteDrawer：把位图精灵上传成纹理并 blit 一次。
 //
-// 精灵按指针缓存（引擎侧的角标精灵按「半径+颜色」缓存，同一份像素只上传
-// 一次）。整块圆角一次 blit，替掉逐像素的半透明小方块——后者是绘制调用
-// 的主要来源（实测 portal 页一帧 1.8 万次 1×1 绘制），GPU 路径上每次都
-// 是驱动调用，帧时间被拖到几十毫秒，滚动动画被切成两三帧。
+// 精灵按指针缓存，并结合 core.Sprite.Rev 判定内容是否变化：
+//   - 命中且 Rev 相同：只贴图（Rev=0 即「像素不可变」，与旧语义一致）。
+//   - 命中但 Rev 变了（同尺寸）：只重传像素（SDL_UpdateTexture），纹理对象
+//     复用，不销毁重建——每帧合成新画面的应用（如逐帧预览、窗口背景图）
+//     由此从「逐帧 CreateTexture + DestroyTexture」降为「恒定一张 + 一次
+//     像素拷贝」，同时缓存表恒定一条目（顺带消除驱逐扫描）。
+//   - 未命中或尺寸变了：新建纹理。
+//
+// 整块圆角一次 blit，替掉逐像素的半透明小方块——后者是绘制调用的主要来源
+// （实测 portal 页一帧 1.8 万次 1×1 绘制），GPU 路径上每次都是驱动调用，
+// 帧时间被拖到几十毫秒，滚动动画被切成两三帧。
 func (g *Graphics) DrawSprite(x, y int, s *core.Sprite) {
 	if s == nil || s.W <= 0 || s.H <= 0 || g.renderer == 0 || len(s.Pix) < s.W*s.H*4 {
 		return
 	}
 	entry, ok := g.sprites[s]
-	if !ok {
+	switch {
+	case ok && entry.w == s.W && entry.h == s.H && entry.rev == s.Rev:
+		// 命中且内容未变：只贴图。
+		entry.lastUsed = g.nextTexClock()
+	case ok && entry.w == s.W && entry.h == s.H:
+		// 命中但 Rev 变了：像素被改写，重传像素、复用纹理（尺寸不变，记账不动）。
+		entry.lastUsed = g.nextTexClock()
+		entry.rev = s.Rev
+		if !g.updateTexturePixels(entry.tex, s.Pix, s.W, s.H) {
+			return
+		}
+		g.spriteUploads++
+	default:
+		// 新精灵，或同指针但尺寸变了：旧纹理作废（若有），重建。
+		if ok {
+			if entry.tex != 0 {
+				sdlDestroyTexture(entry.tex)
+			}
+			g.spritePixels -= entry.w * entry.h
+			delete(g.sprites, s)
+		}
 		tex := sdlCreateTexture(g.renderer, uintptr(pixelFormatRGBA32),
 			uintptr(textureAccessStreaming), uintptr(s.W), uintptr(s.H))
 		if tex == 0 {
@@ -1334,27 +1507,23 @@ func (g *Graphics) DrawSprite(x, y int, s *core.Sprite) {
 			return
 		}
 		sdlSetTextureBlendMode(tex, uintptr(blendModeBlend))
-		// 精灵的像素创建后不变（引擎按「半径+颜色」缓存复用同一份，见
+		// 精灵的像素通常创建后不变（引擎按「半径+颜色」缓存复用同一份，见
 		// engine 的 spriteCache），所以纹理**只上传一次**：每次绘制都
 		// UpdateTexture 的话，一帧几百次纹理上传会吃掉大半帧时间——实测
 		// 门户页 300 次/帧 ≈ 2ms，240Hz 屏幕（帧预算 4.2ms）直接超支，
-		// 滚动就掉帧。
-		rect := sdlRect{0, 0, int32(s.W), int32(s.H)}
-		if sdlUpdateTexture(tex, uintptr(unsafe.Pointer(&rect)),
-			uintptr(unsafe.Pointer(&s.Pix[0])), uintptr(s.W*4)) != 0 {
-			checkDraw("SDL_UpdateTexture", 0)
+		// 滚动就掉帧。Rev 变化的分支才是「像素确实改写了」的增量更新。
+		if !g.updateTexturePixels(tex, s.Pix, s.W, s.H) {
+			sdlDestroyTexture(tex)
 			return
 		}
-		entry = &spriteTex{tex: tex, w: s.W, h: s.H, lastUsed: g.nextTexClock()}
+		entry = &spriteTex{tex: tex, w: s.W, h: s.H, lastUsed: g.nextTexClock(), rev: s.Rev}
 		g.sprites[s] = entry
 		g.spritePixels += s.W * s.H
 		g.spriteUploads++
 		g.evictSpritesIfNeeded(s)
-	} else {
-		entry.lastUsed = g.nextTexClock()
 	}
 	dst := sdlRect{int32(x), int32(y), int32(s.W), int32(s.H)}
-	checkDraw("SDL_RenderCopy", sdlRenderCopy(g.renderer, entry.tex, 0, uintptr(unsafe.Pointer(&dst))))
+	g.renderCopy(&dst, entry.tex)
 }
 
 // Clear 清屏。同时把裁剪栈清空并关闭 SDL 裁剪（SDL_RenderClear 本身无视
@@ -1363,6 +1532,7 @@ func (g *Graphics) DrawSprite(x, y int, s *core.Sprite) {
 func (g *Graphics) Clear(r, gr, b, a uint8) {
 	g.refreshEnv()
 	g.clips = g.clips[:0]
+	g.texInvalidations = 0
 	checkDraw("SDL_RenderSetClipRect", sdlRenderSetClipRect(g.renderer, 0))
 	checkDraw("SDL_SetRenderDrawColor", sdlSetRenderDrawColor(g.renderer, uintptr(r), uintptr(gr), uintptr(b), uintptr(a)))
 	checkDraw("SDL_RenderClear", sdlRenderClear(g.renderer))
@@ -1470,11 +1640,17 @@ const (
 	maxCachedTexPixels = 8 << 20 // 8M 像素 ≈ 32MB
 )
 
-// spriteTex 是精灵纹理的缓存项：纹理 + 尺寸 + 最近使用时刻。
+// spriteTex 是精灵纹理的缓存项：纹理 + 尺寸 + 最近使用时刻 + 内容版本。
+//
+// rev 记录上传时的 core.Sprite.Rev / core.Bitmap.Rev：命中缓存时先比对
+// 内容版本，变了（同指针同尺寸但像素被改写）只 SDL_UpdateTexture 重传像素，
+// 纹理对象复用不销毁重建——每帧合成新画面的应用由此从「逐帧 CreateTexture
+// + DestroyTexture」降为「恒定一张 + 一次像素拷贝」。
 type spriteTex struct {
 	tex      uintptr
 	w, h     int
 	lastUsed uint64
+	rev      uint64
 }
 
 // 精灵纹理缓存的上限：条数与像素数（像素数按 4 字节/像素估显存）。
