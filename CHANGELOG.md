@@ -4,6 +4,35 @@
 `github.com/go-comm/ghromex@v0.5.0` 直接取用）。
 
 
+## v0.8.0 — 2026-11-23
+
+**文件拖放（拖入窗口）**：把文件从资源管理器（或任何 OLE 拖放源）拖到窗口上，
+应用拿到整批绝对路径。只做**接收**方向；把窗口里的文件拖出去是另一套 OLE
+源端能力（`DoDragDrop`），不在这里。
+
+- `browser.Window.SetFileDropHandler(func(files []string))`：一次拖放调用一次，
+  `files` 是整批路径（UTF-8，顺序与拖出顺序一致）——多选拖放**不会拆成多次
+  调用**。回调在事件阶段执行（与 `SetKeyHandler`/`SetMouseHandler` 同层），
+  可以安全地开新文档、改 DOM、换标题。不注册回调即忽略拖放。
+- 后端语义：`sdl2.EventFilesDropped` + `Event.Files`。事件不经过 SDL 事件队列
+  ——`WM_DROPFILES` 由窗口过程截获（子类化 + `DragAcceptFiles`），一次 `HDROP`
+  取全整批路径，`PollEvent` 先交待处理项。
+- 无原生窗口的环境（SDL dummy 驱动等）静默不可用，不影响建窗与其它功能；
+  `Close` 前恢复原窗口过程后再销毁窗口。
+
+### 新增公开 API
+
+- `browser.Window.SetFileDropHandler`
+- `sdl2.EventFilesDropped` / `sdl2.Event.Files`
+
+### 内部
+
+- 新增 `backend/sdl2/filedrop.go`：shell32（`DragAcceptFiles` / `DragQueryFileW`
+  / `DragFinish`）+ user32（`SetWindowLongPtrW`/`SetWindowLongW` 回退、
+  `CallWindowProcW`），`syscall.NewCallback` 窗口过程全局只建一次，按 HWND
+  映射到 `Window`；路径按 UTF-16 读取后转 UTF-8。
+
+
 ## v0.7.1 — 2026-11-23
 
 **纹理增量更新 + 贴图失效自愈 + 窗口级滚轮钩子**（无破坏性变更）。
