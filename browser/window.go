@@ -4,6 +4,7 @@ package browser
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/go-comm/ghromex/backend/sdl2"
@@ -105,6 +106,13 @@ type Window struct {
 	// Sleep(1) 不保证 1ms（默认计时器粒度 15.6ms，负载下 1ms 会被拉成
 	// ~15ms），按回调次数反推档位会假失败——见 frame_handler_test.go。
 	delay func(ms int)
+
+	// taskMu 保护 tasks 与 loopRunning：主线程任务队列（见 tasks.go）。
+	// 跨线程的动作（调试服务、后台 worker）在这里排队，由主循环执行——
+	// 引擎与 SDL 都不接受跨线程访问。
+	taskMu      sync.Mutex
+	tasks       []mainTask
+	loopRunning bool
 }
 
 // Options 是建窗参数。零值表示位于 (0,0) 的固定尺寸普通窗口（带边框）；
@@ -394,6 +402,11 @@ func (win *Window) Run() error {
 	}
 
 	running := true
+	// 主线程任务队列的开关：Run 期间才有消费者。startLoop 放在事件循环
+	// 之前，stopLoop 随 Run 返回（defer）——它同时把排队未执行的任务
+	// 结清成错误，等待方不会白等到超时。
+	win.startLoop()
+	defer win.stopLoop()
 	// GHROMEX_BENCH：分段计时（布局/清屏/重绘/呈现/空闲）。只做本地诊断，
 	// 不进 CI——计时不可复现，断言它只会得到 flaky 测试。口径说明见 bench.go。
 	//
@@ -476,6 +489,14 @@ func (win *Window) Run() error {
 		}
 
 		pending := false
+		// 主线程任务队列：平台事件排空之后、每帧回调与布局之前执行。
+		// 位置选在这里有两个理由：任务里改 DOM 本帧就能重排重绘；
+		// 而任务之前排空事件，外部脚本「注入一个点击再读状态」时读到的
+		// 一定是点击之后的世界（见 browser/tasks.go）。
+		// 关闭事件已到达时不再执行任务——窗口即将销毁，别在那之前改文档。
+		if running {
+			win.drainTasks()
+		}
 		// 每帧回调：事件队列排空后、布局之前调用一次。拖动窗口这类高频
 		// 交互在这里把一批 motion 事件合并成一次 MoveTo（见 SetFrameHandler）。
 		busy := false
@@ -561,6 +582,13 @@ func (win *Window) Run() error {
 			if bench != nil {
 				pending = true
 			}
+		}
+
+		if win.hasTasks() {
+			// 队列里有跨线程投递的动作：不能睡 10ms。外部脚本的一次请求
+			// 因此最多等一帧，而不是等一整拍休眠——否则「注入点击后立刻
+			// 读状态」会读到点击前的样子，脚本看着像没生效。
+			pending = true
 		}
 
 		if !pending {
@@ -782,8 +810,20 @@ func (win *Window) SetIcon(icon *core.Bitmap) error {
 	return win.sdl.SetIcon(icon)
 }
 
+// Document 返回窗口当前持有的文档（还没打开过任何文档时为 nil）。
+//
+// 只能从**主循环的 goroutine**读（含 `Do` 递交的任务里）：文档树按单线程
+// 访问设计，换文档的动作（OpenDocument）本身也在主循环 goroutine 上做。
+// 其它 goroutine 想读，用 `win.Do(func() (any, error) { ... win.Document() ... })`。
+func (win *Window) Document() engine.HTMLDocument { return win.doc }
+
 // Close 释放窗口资源。
-func (win *Window) Close() { win.sdl.Close() }
+func (win *Window) Close() {
+	// 先结清任务队列：没跑过 Run 就直接 Close 的宿主（一次性出图脚本
+	// 常见），等待方要拿到明确错误，而不是干等一场超时。
+	win.stopLoop()
+	win.sdl.Close()
+}
 
 // NativeHandle 返回窗口的原生句柄（Windows 上是 HWND），供 runtime/dialog
 // 的原生对话框当父窗口。
