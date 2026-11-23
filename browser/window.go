@@ -67,6 +67,9 @@ type Window struct {
 	// 边框、工具条）。
 	// 位图必须是 RGBA 且 alpha=255——DrawSprite 走 alpha 混合，alpha=0
 	// 会被当成“不着色”。
+	//
+	// 逐帧更新画面时复用同一个 Sprite（就地改 Pix + Rev++）比每帧换一个新
+	// Sprite 便宜得多：前者只重传像素，后者每帧重建纹理对象。
 	backdrop *core.Sprite
 
 	// mouseHandler 是窗口级原始鼠标钩子：在引擎的点击/拖选语义之前调用，
@@ -75,6 +78,14 @@ type Window struct {
 	// 引擎的 OnDocumentMouseDown/Up 面向文本选择（Up 还不带坐标），画
 	// 截图选区需要按下/移动/抬起的原始坐标，所以在事件循环这一层留口。
 	mouseHandler func(ev MouseEvent) bool
+
+	// wheelHandler 是窗口级原始滚轮钩子：在 OnDocumentWheel/元素 OnWheel
+	// 之前调用，返回 true 表示已消费（不再派发文档滚动）。传 nil 取消。
+	//
+	// 放在这一层（而非元素级 OnWheel）：应用想在页面滚动前拦截滚轮
+	// （如全屏预览的「缩放/切换」）需要一个不与 DOM 元素绑定的入口——
+	// 元素级方案要维护一个覆盖层，窗口级钩子直接拿到原始滚动量即可。
+	wheelHandler func(ev WheelEvent) bool
 
 	// frameHandler 是每帧回调：事件队列排空后、布局/重绘之前调用一次，
 	// 返回 true 表示「还有每帧任务」（主循环据此把空闲休眠从 10ms 降到 1ms）。
@@ -213,6 +224,26 @@ type MouseEvent struct {
 // 参与；引擎也不该为每个工具加一套专用事件。
 func (win *Window) SetMouseHandler(f func(ev MouseEvent) bool) { win.mouseHandler = f }
 
+// WheelEvent 是窗口级原始滚轮事件。X/Y 是事件发生处的视口坐标；
+// WheelX/WheelY 是**滚动档位**（SDL 口径：y 正=滚轮向上/远离用户，
+// x 正=向右），尚未乘窗口层的每档像素数，也没做 Shift 横滚转换。
+//
+// 亚档位的高精度量（触控板平滑滚动）在本版本拿不到：解码层已在整数档位
+// 为 0 时回退 precise 并四舍五入成整数（见 backend/sdl2 的事件解码），
+// 需要细粒度 delta 请提 issue。
+type WheelEvent struct {
+	X, Y           int
+	WheelX, WheelY int
+}
+
+// SetWheelHandler 注册窗口级滚轮钩子：在文档滚动与元素 OnWheel **之前**调用，
+// 返回 true 表示事件已消费，不再派发滚动。传 nil 取消。
+//
+// 放在这一层而不是引擎：与 SetKeyHandler/SetMouseHandler 同构——谁先看到
+// 滚轮是**事件循环**的策略（应用命令优先于页面），引擎不该为每个工具加一套
+// 专用事件。应用由此不必再维护一个全屏覆盖层来截滚轮。
+func (win *Window) SetWheelHandler(f func(ev WheelEvent) bool) { win.wheelHandler = f }
+
 // SetFrameHandler 注册每帧回调：每轮事件队列排空后、布局与重绘之前调用一次。
 // 返回 true 表示「本帧之后还有事要做」——主循环会把空闲休眠从 10ms 降到 1ms
 // （实测 SDL_Delay(1) 约 1.06ms），让后续鼠标事件尽快落成动作。传 nil 取消。
@@ -240,6 +271,11 @@ func idleDelay(busy bool) int {
 //
 // 背景图不参与布局：宽高应与窗口视口一致，像素格式为 RGBA8888 且
 // alpha=255（见 backdrop 字段的说明）。传新精灵后下一帧生效。
+//
+// 逐帧换画面（截图预览、动画）请复用**同一个** *core.Sprite、就地改写
+// Pix 并递增 Sprite.Rev，然后仍然传这同一个精灵调一次 SetBackdrop：
+// 后端按「指针 + Rev」判定，Rev 变了只重传像素、纹理对象复用。每帧传
+// 新建的 Sprite 会让后端每帧重建纹理（驱动级分配 + 全量拷贝 + 销毁旧的）。
 func (win *Window) SetBackdrop(s *core.Sprite) {
 	win.backdrop = s
 	win.dirty = true
@@ -664,8 +700,17 @@ func (win *Window) onMouseUp(ev sdl2.Event) {
 	}
 }
 
-// onWheel 处理滚轮：Shift+竖轮转横向。
+// onWheel 处理滚轮：先给窗口级钩子（SetWheelHandler），再 Shift+竖轮转横向、
+// 最后派发文档滚动。
 func (win *Window) onWheel(ev sdl2.Event) {
+	// 应用级钩子在文档之前（与 SetKeyHandler/SetMouseHandler 同层同语义）：
+	// 返回 true 就到此为止，不再滚动页面、也不触发元素的 OnWheel。
+	// 传的是原始档位，不含 wheelStepPx 缩放与 Shift 横滚转换。
+	if win.wheelHandler != nil && win.wheelHandler(WheelEvent{
+		X: ev.X, Y: ev.Y, WheelX: ev.WheelX, WheelY: ev.WheelY,
+	}) {
+		return
+	}
 	if win.doc == nil {
 		return
 	}

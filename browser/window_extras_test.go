@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-comm/ghromex/backend/sdl2"
 	"github.com/go-comm/ghromex/core"
 	"github.com/go-comm/ghromex/engine"
 )
@@ -108,6 +109,64 @@ func TestMouseHandlerConsumesBeforeEngine(t *testing.T) {
 }
 
 // nil 钩子保持原行为：点击照常到页面。
+// 窗口级滚轮钩子先于文档：返回 true 时文档不滚动；返回 false/nil 时照常滚动。
+func TestWheelHandlerConsumesBeforeDocument(t *testing.T) {
+	win := newTestWindow(t, 200, 120, "wheel-hook-test")
+	doc, err := win.OpenDocument(`<!doctype html><html><head><style>body{margin:0}</style></head>` +
+		`<body><div style="height:800px;background:#EEE">x</div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var got []WheelEvent
+	win.SetWheelHandler(func(ev WheelEvent) bool {
+		got = append(got, ev)
+		return true // 消费
+	})
+
+	win.onWheel(sdl2.Event{Kind: sdl2.EventMouseWheel, X: 10, Y: 20, WheelX: 0, WheelY: -1})
+	if len(got) != 1 {
+		t.Fatalf("钩子收到 %d 个事件，期望 1：%+v", len(got), got)
+	}
+	if want := (WheelEvent{X: 10, Y: 20, WheelX: 0, WheelY: -1}); got[0] != want {
+		t.Fatalf("钩子事件 = %+v，期望 %+v（应传原始档位，未乘像素/未做 Shift 转换）", got[0], want)
+	}
+	if engine.ScrollAnimating(doc) {
+		t.Fatal("钩子消费后文档仍开始滚动（消费语义断了）")
+	}
+
+	// 摘掉钩子 → 同样的滚轮应派发到文档并触发滚动动画。
+	win.SetWheelHandler(nil)
+	win.onWheel(sdl2.Event{Kind: sdl2.EventMouseWheel, X: 10, Y: 20, WheelX: 0, WheelY: -1})
+	if !engine.ScrollAnimating(doc) {
+		t.Fatal("钩子摘除后滚轮未派发到文档")
+	}
+}
+
+// 钩子返回 false 表示放行：事件继续走文档滚动。
+func TestWheelHandlerPassthroughWhenFalse(t *testing.T) {
+	win := newTestWindow(t, 200, 120, "wheel-pass-test")
+	doc, err := win.OpenDocument(`<!doctype html><html><head><style>body{margin:0}</style></head>` +
+		`<body><div style="height:800px;background:#EEE">x</div></body></html>`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	called := 0
+	win.SetWheelHandler(func(WheelEvent) bool {
+		called++
+		return false // 放行
+	})
+
+	win.onWheel(sdl2.Event{Kind: sdl2.EventMouseWheel, X: 10, Y: 20, WheelX: 0, WheelY: -1})
+	if called != 1 {
+		t.Fatalf("钩子调用次数 = %d，期望 1", called)
+	}
+	if !engine.ScrollAnimating(doc) {
+		t.Fatal("钩子返回 false 后文档未滚动（放行语义断了）")
+	}
+}
+
 func TestNilMouseHandlerKeepsClicks(t *testing.T) {
 	win := newTestWindow(t, 120, 80, "mouse-nil-test")
 	doc, err := win.OpenDocument(`<!doctype html><html><body style="margin:0">` +
