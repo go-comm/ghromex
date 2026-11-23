@@ -105,6 +105,17 @@ func scrollVisualOffset(base *htmlElement) (int, int) {
 	return base.scrollLeft, base.scrollTop
 }
 
+// ScrollOffset 返回元素当前的滚动偏移（像素）：x 是横向、y 是纵向。
+//
+// 口径与绘制一致：滚动动画在途时给的是**正在显示**的位置（scrollAnimTop），
+// 动画结束后就是目标值（scrollTop）。根元素（html）代表文档级页面滚动。
+//
+// 用途：调试观测（滚动到哪儿了）、应用状态栏（进度指示）。引擎内部布局
+// 用的是内部字段，这里是只读出口。
+func ScrollOffset(el HTMLElement) (x, y int) {
+	return scrollVisualOffset(inner(el))
+}
+
 // applyScrollOffsets 在布局完成后对滚动容器的子树施加滚动偏移，
 // 并按当前内容/盒尺寸夹紧偏移量（内容变小后自动回弹到可滚范围）。
 // 根元素以视口 (vw, vh) 为滚动盒，实现文档级页面滚动。
