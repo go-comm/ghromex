@@ -3,20 +3,30 @@
 版本号即 git tag（Go module 语义：`v0.5.0` 可从
 `github.com/go-comm/ghromex@v0.5.0` 直接取用）。
 
-## v0.6.0 — 2026-11-20
 
-**大文本编辑的内存与输入延迟**。以 19.5MB / 360,214 行的
-`LICENSES.chromium.html` 为同口径基线：首帧总分配 **1,358MB → 119MB**、
-常驻 **400MB+ → 105MB → 36MB**（两阶段），敲一个字 **145ms/235MB →
-71ms/103MB**，连敲 10 字后 Sys **435MB → 112MB**。折行缓存把一帧内约 8 次
-全文折行收成一次命中；输入路径改到字节空间拼接，不再把全文转 `[]rune`；
-应用层的撤销栈与状态栏也不再按全文拷贝。顺着这条线还修了 `input` / `select`
-可见窗口的每帧 O(n²)：20,000 字符的 input 从 **860ms / 201MB 每帧**降到
-**0.16ms / 0.003MB**，`select` 的 20 万字符 option 也从跑不完降到
-0.33ms/帧。新增公开 API `engine.SelectionLength`（只返回选区 rune 数、
-不复制文本）。无破坏性变更，按 minor 收口。
+## v0.7.0 — 2026-11-23
 
-## 未发布
+**增量布局六阶段 + 页面文本可选中 + `<img>` 与 CSS 背景图链路 + 窗口图标 + 文档体系重构**。
+
+核心数据：**稳定态全量重排**（悬停/焦点/`ChangeCount` 触发）从 **503ms / 1.76GB 分配**
+降到 **188ms / 10.9MB**（−63% / −99.4%）；19.5MB 文档的 **textarea 首帧** 1,358MB →
+119MB、**敲一个字** 145ms/235MB → 71ms/103MB；**`input`/`select` 渲染** O(n²) → O(n)
+（20,000 字符 860ms/帧 → 0.16ms/帧）。
+
+功能侧新增四条链路：**页面文本可选中**（拖选 / 高亮 / Ctrl+C）、**`<img>` 完整图片链路**
+（替换元素布局 + 异步加载 + PNG/JPEG/GIF 解码绘制）、**CSS 背景图层**（`background-image`
+全套单层语义 + 多层叠放）、**窗口/任务栏图标**（`core.IconSetter` + `SetIcon`）。
+工程侧把文档体系从「README 1489 行 + 落盘 API 清单 182KB」压成「README 200 行门面 +
+6 个分册」，接口信息一律就地查 `go doc`。
+
+新增公开 API：`engine.SelectionLength`、`engine.DecodeImage`、`DocumentOptions.LoadImage`、
+`core.Bitmap` / `core.IconSetter` / `core.ImageBlitter`、`browser.Options.Icon` /
+`browser.Window.SetIcon`、`sdl2.WindowOptions.Icon` / `(*sdl2.Window).SetIcon`、
+`ui.Spec.Icon`。无破坏性变更。
+
+**修复：精灵纹理 LRU 淘汰不再误驱逐当前帧刚上传的超大精灵**（`backend/sdl2/graphics.go`：`evictSpritesIfNeeded` 接收 `keep` 参数）。此前全窗 backdrop 等大精灵上传后若超像素上限会被立刻淘汰，下一帧 `RenderCopy` 拿到无效句柄导致黑屏。现保留 `keep` 指向的精灵直到下一轮淘汰扫描。
+
+---
 
 **文档瘦身：README 拆成门面 + 分册，`docs/ai/api-reference.md` 删除**。
 两条动机同源：**AI（和人）取信息的成本**。README 此前 1489 行 / 125KB，
@@ -525,8 +535,7 @@ credits 页 780 个 `<pre>`、0 个 `<p>`，`<pre>` 走 `addPreText`，两条路
   `len([]rune(value))` 热路径统一改为零分配的 `runeLen` / 命中缓存的
   `valueRuneLen`。
 - `loadFile` 的 `string(data)` 由两次合并为一次（少一次 19.5MB 瞬时复制）。
-- 新增公开 API：`engine.SelectionLength`（`docs/ai/api-reference.md` 已重新
-  生成纳入）。
+- 新增公开 API：`engine.SelectionLength`。
 
 **修复：写系统剪贴板偶发失败（连续复制 8 轮里会丢 1~3 轮）**。
 `SDL_SetClipboardText` 在 Windows 上打不开剪贴板就返回 -1，而 `browser`
@@ -624,6 +633,19 @@ credits 页 780 个 `<pre>`、0 个 `<p>`，`<pre>` 走 `addPreText`，两条路
 SHA256 全等（`4a8d8a66…` / `364df932…`）；稳定态常驻堆 `HeapAlloc` 重排前后相等
 （credits 459.7 → 459.7MB，1M 单节点 26.0 → 26.0MB），重排不再净分配。`go build
 ./...`、`go vet ./...`、`go test ./... -count=1` 全绿。
+
+## v0.6.0 — 2026-11-20
+
+**大文本编辑的内存与输入延迟**。以 19.5MB / 360,214 行的
+`LICENSES.chromium.html` 为同口径基线：首帧总分配 **1,358MB → 119MB**、
+常驻 **400MB+ → 105MB → 36MB**（两阶段），敲一个字 **145ms/235MB →
+71ms/103MB**，连敲 10 字后 Sys **435MB → 112MB**。折行缓存把一帧内约 8 次
+全文折行收成一次命中；输入路径改到字节空间拼接，不再把全文转 `[]rune`；
+应用层的撤销栈与状态栏也不再按全文拷贝。顺着这条线还修了 `input` / `select`
+可见窗口的每帧 O(n²)：20,000 字符的 input 从 **860ms / 201MB 每帧**降到
+**0.16ms / 0.003MB**，`select` 的 20 万字符 option 也从跑不完降到
+0.33ms/帧。新增公开 API `engine.SelectionLength`（只返回选区 rune 数、
+不复制文本）。无破坏性变更，按 minor 收口。
 
 ## v0.5.0 — 2026-10-28
 

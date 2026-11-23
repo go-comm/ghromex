@@ -1349,7 +1349,7 @@ func (g *Graphics) DrawSprite(x, y int, s *core.Sprite) {
 		g.sprites[s] = entry
 		g.spritePixels += s.W * s.H
 		g.spriteUploads++
-		g.evictSpritesIfNeeded()
+		g.evictSpritesIfNeeded(s)
 	} else {
 		entry.lastUsed = g.nextTexClock()
 	}
@@ -1488,9 +1488,15 @@ const (
 
 // evictSpritesIfNeeded 精灵纹理超出上限时按最近最少使用淘汰。
 //
+// keep 是刚上传的那张：单张超大精灵（如全窗 backdrop，最大化窗口可到
+// 200 万像素级）本身就可能超过像素上限，不能上传完立刻把它淘汰掉——
+// 否则紧接着的 RenderCopy 用的是已销毁的纹理句柄（报 "texture invalid"），
+// 且下一帧缓存 miss 重建后又被驱逐，黑屏永不恢复。全表只剩 keep 时
+// 允许超限保留（单张超大精灵是合法工作集）。
+//
 // 一次淘汰一批（降到 90%），摊平扫描成本：满页逐帧换色时每次新建纹理都
 // 扫全表，帧时间会被吃掉。
-func (g *Graphics) evictSpritesIfNeeded() {
+func (g *Graphics) evictSpritesIfNeeded(keep *core.Sprite) {
 	if len(g.sprites) <= maxCachedSprites && g.spritePixels <= maxCachedSpritePixels {
 		return
 	}
@@ -1498,7 +1504,7 @@ func (g *Graphics) evictSpritesIfNeeded() {
 	targetPixels := maxCachedSpritePixels * 9 / 10
 	for len(g.sprites) > targetItems || g.spritePixels > targetPixels {
 		oldKey, old, ok := g.lruSprite()
-		if !ok {
+		if !ok || oldKey == keep {
 			return
 		}
 		if old.tex != 0 {
