@@ -20,6 +20,7 @@ libs/*.dll
 # 编辑器 / 系统
 .vscode/
 .idea/
+.kilo/
 *.swp
 .DS_Store
 Thumbs.db
