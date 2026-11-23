@@ -87,6 +87,13 @@ type Window struct {
 	// 元素级方案要维护一个覆盖层，窗口级钩子直接拿到原始滚动量即可。
 	wheelHandler func(ev WheelEvent) bool
 
+	// fileDropHandler 接收「拖入窗口」的文件路径：一次拖放调用一次，多选
+	// 拖放的路径在同一批里。传 nil 取消。
+	//
+	// 与文档无关：拖放不经过页面命中测试，引擎也没有默认的拖放行为
+	// （见 SetFileDropHandler）。
+	fileDropHandler func(files []string)
+
 	// frameHandler 是每帧回调：事件队列排空后、布局/重绘之前调用一次，
 	// 返回 true 表示「还有每帧任务」（主循环据此把空闲休眠从 10ms 降到 1ms）。
 	// 拖动无边框窗口这类高频动作在这里把一批事件合并成一次窗口移动。
@@ -243,6 +250,22 @@ type WheelEvent struct {
 // 滚轮是**事件循环**的策略（应用命令优先于页面），引擎不该为每个工具加一套
 // 专用事件。应用由此不必再维护一个全屏覆盖层来截滚轮。
 func (win *Window) SetWheelHandler(f func(ev WheelEvent) bool) { win.wheelHandler = f }
+
+// SetFileDropHandler 注册文件拖放（拖入窗口）回调：把文件从资源管理器
+// （或任何支持 OLE 拖放的源）拖到窗口上时调用一次，files 是本批绝对路径
+// （UTF-8，顺序与拖出顺序一致；多选拖放不会拆成多次调用）。传 nil 取消。
+//
+// 方向：只做「拖入（接收）」。把窗口里的文件拖出去是另一套能力（OLE 源端
+// DoDragDrop），与这个回调无关。
+//
+// 拖放不经过页面：没有对应的 DOM 事件，也不做命中测试；引擎当前也没有
+// 默认行为（如把文件塞进 <input type=file>），所以不注册回调就等于忽略。
+// 回调在主循环的事件阶段执行（与 SetKeyHandler/SetMouseHandler 同一层），
+// 可以安全地改 DOM、开新文档、换标题等。
+//
+// 拿不到原生窗口的环境（SDL dummy 驱动等）不会触发（本来也没有可拖放的
+// 原生窗口）。
+func (win *Window) SetFileDropHandler(f func(files []string)) { win.fileDropHandler = f }
 
 // SetFrameHandler 注册每帧回调：每轮事件队列排空后、布局与重绘之前调用一次。
 // 返回 true 表示「本帧之后还有事要做」——主循环会把空闲休眠从 10ms 降到 1ms
@@ -440,6 +463,10 @@ func (win *Window) Run() error {
 				win.onMouseUp(ev)
 			case sdl2.EventMouseWheel:
 				win.onWheel(ev)
+			case sdl2.EventFilesDropped:
+				if win.fileDropHandler != nil {
+					win.fileDropHandler(ev.Files)
+				}
 			}
 			if !running {
 				// 关闭事件已到达：不再消费队列里的剩余事件——否则窗口已关

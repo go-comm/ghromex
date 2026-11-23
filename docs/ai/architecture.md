@@ -76,6 +76,8 @@ type IconSetter interface {
 
 三个「状态存在文档上」的伪类：`:hover` / `:focus` / `:active`（`SetHoveredElement` / `SetFocusedElement` / `SetActiveElement`），变化走同一条 `markChanged → 重排重绘` 链路。
 
+**文件拖放（拖入窗口）不走 SDL 事件队列**：`WM_DROPFILES` 由后端窗口过程截获（`backend/sdl2/filedrop.go`，子类化 + `DragAcceptFiles`），`PollEvent` 先把待处理的整批路径交成 `sdl2.EventFilesDropped`；browser 在事件阶段调 `SetFileDropHandler`（一次拖放一批路径，多选不拆分）。方向只有「拖入」：拖出是 OLE 源端 `DoDragDrop`，不属于这里。
+
 **两套选区模型**：可编辑控件（input/textarea）的选区在元素自身（`caret` / `selAnchor`，value 的 rune 下标，见 `selection.go` / `text_input.go`）；普通页面文本用**文档级选区**（`flow_selection.go`），位置 = `(文本节点, 该节点「流文本」的 rune 偏移)`，流文本 = 节点 `runs` 文本按序拼接（按 run 下标存会在重排后错位）。更新选区时把覆盖区间预算到文本节点上（`flowSelLo/flowSelHi`），渲染与 SVG 只读，不做全文档遍历；拖选只 `markPaintChanged`。`SelectedText` / `SelectionLength` 优先返回文档级选区，`browser` 的 Ctrl+C 与状态栏因此对页面文字同样有效。两套互斥：点页面文本让输入框失焦并清页面选区；输入框拖选/键入/粘贴/Ctrl+A 时清页面选区。
 
 ## 典型用法（由浅入深）
@@ -208,6 +210,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 | 页面导航回调 | `SetOnNavigate`（导航在 click 冒泡之后执行） | `engine` 文档 API |
 | 应用层变更信号 | `SetOnChanged`（内容**或视口尺寸**变化都通知） | `engine` 文档 API |
 | 高频输入按帧合并（拖动窗口等） | `browser.Window.SetFrameHandler`：事件排空后每帧调一次，返回 true 时主循环改用 1ms 轮询（空闲 10ms） | `browser/window.go`、`examples/snip/preview.go` |
+| 接收拖入窗口的文件 | `browser.Window.SetFileDropHandler`：一次拖放调一次，给整批绝对路径（多选不拆分）；后端 `WM_DROPFILES` → `sdl2.EventFilesDropped`。只做接收方向 | `backend/sdl2/filedrop.go`、`browser/window.go` |
 | 自定义窗口图标 | 造一个 `*core.Bitmap`（`engine.DecodeImage` 解 PNG/JPEG/GIF 字节），传给 `browser.Options.Icon`（建窗即设）或 `browser.Window.SetIcon`（运行期换）；`ui.Spec.Icon` 同理。**只吃位图**，`.ico` 多帧容器要宿主先取出其中一档 | `core/graphics.go`（`IconSetter`）、`backend/sdl2/window.go`、`browser/window.go` |
 
 ## 无头模式与测试
