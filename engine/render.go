@@ -409,16 +409,34 @@ func renderNodeTextColor(g Graphics, e HTMLElement, parentPaint Paint, focus HTM
 		if comp != nil {
 			dec = comp.TextDecoration()
 		}
-		for _, run := range tn.node.runs {
+		// 文档级文本选区：按节点上的高亮区间逐 run 求交，画在文字下面。
+		// 没有选区时完全不付度量的钱（正常渲染路径不受影响）。
+		hasFlowSel := tn.node.flowSelHi > tn.node.flowSelLo
+		var measure func(string) int
+		if hasFlowSel {
+			px, weightNum, bold, family := fontOf(comp)
+			measure = func(s string) int {
+				return prefixWidth(g, s, px, weightNum, bold, family)
+			}
+		}
+		flowOff := 0
+		for i := range tn.node.runs {
+			run := &tn.node.runs[i]
 			// 视口外的片段不画：长页滚动时页面下半部分的文字占了大部分
 			// 绘制调用，逐段裁掉能把一帧的调用数降到可见部分那点。
-			if offscreenBox(run.x, run.y, run.w, run.h, vpW, vpH) {
-				continue
+			if !offscreenBox(run.x, run.y, run.w, run.h, vpW, vpH) {
+				if hasFlowSel {
+					if x, w, ok := flowRunSelectionRect(tn.node, run, flowOff, measure); ok {
+						g.DrawColor(x, run.y, w, run.h, selectionColor)
+					}
+				}
+				g.DrawText(run.x, run.y, run.w, run.h, p, run.text)
+				if dec != TextDecorationNone && run.w > 0 && run.h > 0 {
+					drawDecoration(g, dec, run.x, run.y, run.w, run.h, run.asc, p.Size().Pixel(), p)
+				}
 			}
-			g.DrawText(run.x, run.y, run.w, run.h, p, run.text)
-			if dec != TextDecorationNone && run.w > 0 && run.h > 0 {
-				drawDecoration(g, dec, run.x, run.y, run.w, run.h, run.asc, p.Size().Pixel(), p)
-			}
+			// 偏移量必须无条件推进：被视口裁掉的片段仍占流文本。
+			flowOff += runeLen(run.text)
 		}
 		return
 	}

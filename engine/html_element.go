@@ -203,6 +203,13 @@ type htmlElement struct {
 	// 拖选时锚点不动、活动端跟随指针；键入/退格/方向键会把两者收敛，
 	// 与浏览器「输入即替换选区、方向键折叠选区」一致。
 	selAnchor int
+	// flowSelLo/flowSelHi 是该文本节点当前被**文档级选区**覆盖的区间，
+	// 单位是节点「流文本」（runs 文本顺序拼接）的 rune 偏移；
+	// flowSelHi <= flowSelLo 表示未选中。由 setFlowSelection 维护、
+	// 绘制路径只读——渲染时不必为了高亮再做一次全文档序遍历。
+	// int32：单个文本节点的字符数远到不了 20 亿，省下的 8B/元素
+	// 在几十万节点的页面上是实打实的内存。
+	flowSelLo, flowSelHi int32
 	// scrollTop 为纵向滚动偏移（像素）。textarea 由光标跟随/滚轮驱动，
 	// overflow 滚动容器与根元素（文档级滚动）由 applyScrollOffsets 施加。
 	scrollTop int
@@ -725,6 +732,8 @@ func (element *htmlElement) Clone() HTMLElement {
 	c.open = false
 	c.caret = 0
 	c.selAnchor = 0
+	c.flowSelLo = 0
+	c.flowSelHi = 0
 	c.scrollTop = 0
 	c.scrollLeft = 0
 	c.textScrollX = 0

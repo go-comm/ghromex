@@ -18,6 +18,32 @@
 
 ## 未发布
 
+**页面文本可选中：文档级文本选区（普通 HTML 文本的拖选、高亮与 Ctrl+C 复制）**。
+此前只有 `input` / `textarea` 有选区模型，`<p>`、`<div>`、标题等页面文字拖不动
+（用户报告「HTML 的文本内容不能鼠标选中」）。本轮补一套文档级选区，与控件选区
+并存且互斥：
+
+- **位置模型**：`(文本节点, 该节点「流文本」的 rune 偏移)`，流文本 = 节点
+  `runs` 的文本按序拼接（`engine/flow_selection.go`）。不按 run 下标存——runs
+  每轮重排都会重建，按它存会在重排后错位；文本内容不变时流文本拼接结果稳定。
+- **高亮是预算的**：更新选区时把每个文本节点被覆盖的区间写到元素上
+  （`flowSelLo/flowSelHi int32`），绘制与 SVG 导出只读该区间，不做全文档遍历；
+  没有选区时零额外开销（ua/notepad 的 `-dump-svg` 与基线逐字节一致）。
+- **拖选只重绘**：选区属于绘制状态，走 `markPaintChanged`（`PaintCount`），
+  不涨 `ChangeCount`，因此拖选不触发重排。有序文本节点表按 `doc.changed` 缓存。
+- **命中**：优先在 `ElementAt` 命中元素的子树里找最近 run（逐 run 比距离——
+  mixed font-size 的行内文本 `run.y` 不严格单调，二分不可靠）；指针移出内容或
+  拖选延伸时退到全文档扫描。长 `<pre>` 只在自身被命中时才扫。
+- **复制口径**：`engine.SelectedText` / `SelectionLength` 优先返回文档级选区；
+  跨块（最近块级祖先变化，含段落/列表项/表格单元格）插 `\n`，同一块内直接拼。
+- **两套选区互斥**：点页面文本让输入框失焦（`SetFocusedElement(doc, nil)`）并
+  清页面选区；输入框拖选、键入、粘贴、Ctrl+A 时清页面选区，反之亦然。
+- **回归**：`engine/flow_selection_test.go`（页内拖选、跨段复制 `Hello\nWorld`、
+  单击不产生选区、输入框拖选让位、`ChangeCount` 不变 / `PaintCount` 增长、
+  SVG 高亮 `fill-opacity="0.51"`）、`browser/run_events_test.go` 端到端注入拖动；
+  `go build ./...` / `go vet ./...` / `go test ./...` 全绿，ua 与 notepad 基线不变。
+- **本轮不做**：双击选词、三击选行、拖选越出视口自动滚动、跨 `<br>` 显式换行。
+
 **窗口/任务栏图标：`core.IconSetter` + `SetIcon` 运行时能力（PNG/JPEG/GIF 位图，仅 Windows 有实现）**。
 引擎此前所有窗口都是 SDL 的默认图标：应用没法在标题栏、任务栏、Alt+Tab 里认出自己。
 本轮补上这条运行时能力——输入是**已解码的位图**（`*core.Bitmap`，与 `<img>` 同一口径：

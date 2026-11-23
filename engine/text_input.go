@@ -249,6 +249,10 @@ func OnDocumentTextInput(doc HTMLDocument, s string) bool {
 		//（浏览器同语义：按钮聚焦时打字不会改按钮的 value）。
 		return false
 	}
+	if d, ok := doc.(*htmlDocument); ok {
+		// 焦点在可编辑输入上：输入即让页面文本选区让位（浏览器同语义）。
+		clearFlowSelection(d)
+	}
 	s = stripControlChars(s)
 	if s == "" {
 		return false
@@ -279,6 +283,10 @@ func OnDocumentPaste(doc HTMLDocument, text string) bool {
 	if b == nil || !editableInput(f) {
 		// 焦点不在可编辑元素上：无处可粘（按钮的 value 不该被粘贴改写）。
 		return false
+	}
+	if d, ok := doc.(*htmlDocument); ok {
+		// 焦点在可编辑输入上：改控件内容即让页面文本选区让位（浏览器同语义）。
+		clearFlowSelection(d)
 	}
 	if !strings.EqualFold(b.tagName, "textarea") {
 		text = stripLineBreaks(text)
@@ -490,6 +498,13 @@ func OnDocumentKeyDownMods(doc HTMLDocument, key int, mods uint16) bool {
 	if b.keyHandler != nil {
 		if b.keyHandler(&KeyEvent{Type: EventKeyDown, Key: key, Mods: mods}) {
 			return true
+		}
+	}
+	// 焦点在可编辑输入上时，任何按键都让页面文本选区让位（浏览器同语义）：
+	// 否则 Ctrl+A/Ctrl+C 会优先作用在残留的页面选区上，键入也会留下两套高亮。
+	if editableInput(f) {
+		if d, ok := doc.(*htmlDocument); ok {
+			clearFlowSelection(d)
 		}
 	}
 	if mods&ModCtrl != 0 {

@@ -76,6 +76,8 @@ type IconSetter interface {
 
 三个「状态存在文档上」的伪类：`:hover` / `:focus` / `:active`（`SetHoveredElement` / `SetFocusedElement` / `SetActiveElement`），变化走同一条 `markChanged → 重排重绘` 链路。
 
+**两套选区模型**：可编辑控件（input/textarea）的选区在元素自身（`caret` / `selAnchor`，value 的 rune 下标，见 `selection.go` / `text_input.go`）；普通页面文本用**文档级选区**（`flow_selection.go`），位置 = `(文本节点, 该节点「流文本」的 rune 偏移)`，流文本 = 节点 `runs` 文本按序拼接（按 run 下标存会在重排后错位）。更新选区时把覆盖区间预算到文本节点上（`flowSelLo/flowSelHi`），渲染与 SVG 只读，不做全文档遍历；拖选只 `markPaintChanged`。`SelectedText` / `SelectionLength` 优先返回文档级选区，`browser` 的 Ctrl+C 与状态栏因此对页面文字同样有效。两套互斥：点页面文本让输入框失焦并清页面选区；输入框拖选/键入/粘贴/Ctrl+A 时清页面选区。
+
 ## 典型用法（由浅入深）
 
 **最简——一个窗口显示 HTML**（`examples/browser` 同款）：
@@ -174,6 +176,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 7. **平台能力下沉**：剪贴板、对话框、抓屏在 `runtime/*` 收口，`engine` 保持纯 Go（读剪贴板靠后端读出后调 `OnDocumentPaste`，写靠引擎给 `SelectedText` 后端去写）。图片同理：引擎只解码，字节由宿主注入的 `LoadImage` 提供，不读文件、不联网。
 8. **UI 是文档内自绘**：`position:fixed` 压页面上、body 首尾插占位块；换文档重装。代价是页面 `z-index` 更高的元素会盖住工作台。
 9. **窗口图标走 `SDL_SetWindowIcon`，不自己调 `WM_SETICON`**：SDL 的 Windows 实现内部按系统 `SM_CXICON` / `SM_CXSMICON` 两档缩放后 `CreateIconIndirect`，一次把 `ICON_SMALL` 和 `ICON_BIG` 都设好——自己只设一个档位会出现「标题栏换了、任务栏还是默认图标」的半截效果。
+10. **文档级选区是绘制状态，不是布局状态**：拖选只记重绘账（`markPaintChanged`），命中与复制都在布局结果（`runs`）上做，大页面拖选不重排。代价是内容变更后旧偏移要按新流文本长度夹紧（见 `flowSelectionBounds` 的 `clampInt`），极端情况下贴到最近边界而不是原字符。
 
 ## 容易踩的坑 / 限制
 
@@ -183,6 +186,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 - **背景图只做 `url()`/`none`**：渐变等 `<image>`、`background-attachment: fixed`、`background-repeat` 的 `space`/`round` 铺法未实现（按 CSS 语义整条声明忽略）；圆角元素上的背景图仍是「角标补盖」近似，不是真正的圆角遮罩。
 - **无 flex / grid / 过渡动画**，布局只有 block / inline / inline-block + relative/absolute/fixed；UI 主题靠 `inline-block` 和 1px 实体分隔线拼。
 - **没有实时 `input` 事件**：实时联动用 `OnKeyDown`（元素级按键处理器，返回 true = 已消费，等价 preventDefault）或在命令执行时读 `Value`。
+- **页面文本选区**是「最近块级祖先变化即换行」的复制口径：跨 `<p>`/`<li>`/单元格复制插 `\n`，同一块内直接拼；`<br>` 不产生文本节点，跨 `<br>` 复制不插换行。未实现双击选词/三击选行/拖选越出视口自动滚动；它只 `markPaintChanged`，不会让 `ChangeCount` 变化。
 - **多窗口未实现**：API 塑形成「可多次 New」，底层基础待真实需求再补。
 - **行高与 Chrome 可能差 1~4px**；LCD 子像素渲染默认关（灰度 AA），`GHROMEX_LCD=1` 开启；`GHROMEX_DEBUG=1` 打印渲染路径与驱动名。
 - **文本度量口径**：`FakeGraphics` 是计数桩，`BufferGraphics` 有软件光栅化度量；像素断言要用与布局同口径的后端。

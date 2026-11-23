@@ -68,13 +68,18 @@ func valueText(b *htmlElement, lo, hi int) string {
 	return string(r[lo:hi])
 }
 
-// SelectedText 返回聚焦输入当前选中的文本。第二个返回值为 false 表示
-// 没有选区（或没有聚焦输入），后端据此决定是否写剪贴板——空选区不应
-// 清空用户原有剪贴板。
+// SelectedText 返回当前选中的文本：优先返回文档级文本选区（普通页面
+// 文本），其次返回聚焦输入内的选区。第二个返回值为 false 表示没有选区，
+// 后端据此决定是否写剪贴板——空选区不应清空用户原有剪贴板。
 //
 // password 返回真实 value（浏览器允许选中并复制密码框内容），显示层
 // 的 ● 掩码只在绘制/SVG 导出时生效。
 func SelectedText(doc HTMLDocument) (string, bool) {
+	if d, ok := doc.(*htmlDocument); ok {
+		if text, ok := flowSelectedText(d); ok {
+			return text, true
+		}
+	}
 	f := FocusedElement(doc)
 	if f == nil {
 		return "", false
@@ -91,13 +96,18 @@ func SelectedText(doc HTMLDocument) (string, bool) {
 	return valueText(b, lo, hi), true
 }
 
-// SelectionLength 返回聚焦输入当前选区的 rune 数，第二个返回值为 false
-// 表示没有选区（或没有聚焦输入）。
+// SelectionLength 返回当前选区的 rune 数，第二个返回值为 false 表示没有
+// 选区。文档级文本选区优先（与 SelectedText 同口径）。
 //
 // 与 SelectedText 相比它不复制选区文本：状态栏这类每帧都要刷新、只关心
 // 「选中多少字」的场景用它，避免为一句提示复制整个选区（全选一份 19.5MB
 // 的文档就是 19.5MB 的临时分配）。
 func SelectionLength(doc HTMLDocument) (int, bool) {
+	if d, ok := doc.(*htmlDocument); ok {
+		if n, ok := flowSelectedLength(d); ok {
+			return n, true
+		}
+	}
 	f := FocusedElement(doc)
 	if f == nil {
 		return 0, false
@@ -166,8 +176,26 @@ func OnDocumentMouseDown(doc HTMLDocument, x, y int) bool {
 		}
 	}
 	if next == nil {
-		return false
+		// 命中普通页面文本：进入文档级拖选准备态。锚点先落在按下点，选区
+		// 在 MouseMotion 中才展开（与可编辑控件同语义：单击不产生选区）。
+		pos, ok := flowPositionAt(doc, x, y, false)
+		d.flowSelecting = false
+		clearFlowSelection(d)
+		if !ok {
+			return false
+		}
+		// 浏览器点击页面文本会让输入框失焦：焦点留着的话后续打字还会
+		// 改输入框，输入框选区高亮也会和页面选区同时出现。
+		if d.focus != nil {
+			SetFocusedElement(doc, nil)
+		}
+		d.flowAnchor, d.flowFocus = pos, pos
+		d.flowSelecting = true
+		return true
 	}
+	// 命中可编辑输入：输入框选区接管，先清掉文档级选区（两套高亮不能同时亮）。
+	d.flowSelecting = false
+	clearFlowSelection(d)
 	b := inner(next)
 	// 按在 textarea 覆盖滚动条上：只滚动——不移动光标、不改变焦点，
 	// 按下即跳到点击位置，随后拖动跟随指针（OnDocumentMouseDrag）。
@@ -213,6 +241,14 @@ func OnDocumentMouseDrag(doc HTMLDocument, x, y int) bool {
 		return true
 	}
 	if d.dragInput == nil {
+		if d.flowSelecting {
+			if pos, ok := flowPositionAt(doc, x, y, true); ok {
+				setFlowSelection(d, d.flowAnchor, pos)
+			}
+			// 指针即使暂时不在文本上（划过图片/空白）也保持拖选通道，
+			// 后续移动仍能继续扩展选区。
+			return true
+		}
 		return false
 	}
 	b := d.dragInput
@@ -230,6 +266,7 @@ func OnDocumentMouseUp(doc HTMLDocument) {
 		d.dragInput = nil
 		d.dragScroll = nil
 		d.dragViewAxis = 0
+		d.flowSelecting = false
 	}
 	SetActiveElement(doc, nil)
 }

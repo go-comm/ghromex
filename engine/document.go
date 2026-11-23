@@ -160,7 +160,20 @@ type htmlDocument struct {
 	// -1=横）：拖动期间指针映射为文档级滚动（见 viewportBarScrollTo），
 	// 抬起即清零。与 dragInput/dragScroll 互斥，按下时先于命中测试判掉。
 	dragViewAxis int
-	changed      int64
+	// flowAnchor/flowFocus 是**文档级文本选区**的两端（普通 HTML 文本，
+	// 不含 input/textarea）：node 是文本节点、off 是该节点流文本的 rune
+	// 偏移。node 为 nil 表示没有文档级选区。flowSelecting 表示鼠标拖选
+	// 进行中（抬起即复位）。输入框选区仍存在元素自身（caret/selAnchor），
+	// 两套模型互不干扰；SelectedText 优先返回文档级选区。
+	flowAnchor, flowFocus flowPosition
+	flowSelecting         bool
+	// flowNodes 是文档内「有文本片段」的文本节点，按 DOM 前序排列；
+	// flowNodesMark 是构建时的 changed 计数（DOM/布局变化后重建）。
+	// flowMarked 记住当前被打上高亮区间的节点，更新选区时先清它们。
+	flowNodes     []*htmlElement
+	flowNodesMark int64
+	flowMarked    []*htmlElement
+	changed       int64
 	// paintChanged 是**重绘级**变更计数：样式已在标记前就地重算、盒模型
 	// 没变（:hover/:active/:focus 的纯绘制档，见 applyStateChange），主循环
 	// 按它与 ChangeCount 的差额分别决定「布局+重绘」与「只重绘」。它不进

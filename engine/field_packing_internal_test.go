@@ -44,22 +44,23 @@ func layoutHoles(typ reflect.Type) (holes int, where string) {
 // 单字节枚举必须聚在一起放在尾部（夹在 8 字节字段之间会各自撑出 5~7B 空洞）。
 // 这两条一旦破功，六万节点的页面就要多付近 6MB，故在此钉住：
 //
-//	htmlElement         648B（重排前 680B）
+//	htmlElement         656B（重排前 680B）
 //	cssStyleDeclaration 408B（重排前 440B）
 //
 // htmlElement 从 632B 涨到 640B 是增量布局阶段一引入 `lcache *layoutCache`
 // （布局缓冲缓存，懒分配）所致；再到 648B 是 `<img>` 支持引入
 // `imgBitmap *Bitmap`（布局前绑定的已解码位图）。两者都是指针，落在第一段
-// 末尾，不产生空洞。
+// 末尾，不产生空洞。再到 656B 是文档级文本选区引入
+// `flowSelLo/flowSelHi int32`（文本节点被选中的区间，纯数值段，8B）。
 //
 // cssStyleDeclaration 从 400B 涨到 408B 是 `background-image` 支持引入
 // `background []backgroundLayer`（24B 的切片头）替换旧 `backgroundImage Image`
-//（16B 的接口）所致：CSS 允许多层背景，每层各有自己的位置/尺寸/平铺方式，
+// （16B 的接口）所致：CSS 允许多层背景，每层各有自己的位置/尺寸/平铺方式，
 // 单张 Image 装不下。切片头落在指针段末尾，不产生空洞。
 func TestNodeStructFieldPacking(t *testing.T) {
 	for _, typ := range []reflect.Type{reflect.TypeOf(htmlElement{}), reflect.TypeOf(cssStyleDeclaration{})} {
 		name := typ.Name()
-		want := map[string]int{"htmlElement": 648, "cssStyleDeclaration": 408}[name]
+		want := map[string]int{"htmlElement": 656, "cssStyleDeclaration": 408}[name]
 		if got := int(typ.Size()); got != want {
 			t.Errorf("%s sizeof = %d，期望 %d（字段分段被打破？新增字段请按「含指针 → 纯数值 → 单字节标记」归位）",
 				name, got, want)

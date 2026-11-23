@@ -135,6 +135,41 @@ func TestRunConsumesInjectedDragSelection(t *testing.T) {
 	}
 }
 
+// 端到端：普通页面文本的鼠标拖选（非 input/textarea）。补此前「选区只
+// 认可编辑控件」的盲区：按下/移动/抬起整条平台事件链都要走到文档级选区。
+func TestRunConsumesInjectedFlowDragSelection(t *testing.T) {
+	win := newTestWindow(t, 320, 200, "flow-drag-test")
+
+	const src = `<!doctype html><html><head><style>` +
+		`body{margin:0;font:16px monospace}p{margin:0}` +
+		`</style></head><body><p id="p">page text to select</p></body></html>`
+	doc, err := win.OpenDocument(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := doc.QuerySelector("#p")
+	if p == nil {
+		t.Fatal("p not found")
+	}
+	r := p.GetBoundingClientRect()
+	y := (r.Top().Pixel() + r.Bottom().Pixel()) / 2
+
+	mouseButtonDown(win, 0, y)
+	mouseMotion(win, 319, y)
+	mouseButtonUp(win, 319, y)
+
+	win.SetAutoExit(250 * time.Millisecond)
+	if err := win.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := engine.SelectedText(doc)
+	if !ok || got != "page text to select" {
+		t.Fatalf("页面文本拖选 = %q, ok=%v，want %q（MouseMotion 未接入文档级选区）",
+			got, ok, "page text to select")
+	}
+}
+
 func TestRunConsumesSelectionKeys(t *testing.T) {
 	win := newTestWindow(t, 320, 200, "ctrl-a-test")
 

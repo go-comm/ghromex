@@ -13,6 +13,7 @@
 - 原生文件对话框：Windows Shell 的 `IFileDialog`（Vista 起的现代对话框），支持打开文件、打开多个文件、选择文件夹、另存为，带文件类型过滤与初始目录；纯 Win32 COM 调用，无 CGO、非 Windows 返回 `ErrUnsupported`
 - 原生消息框：user32 的 `MessageBoxW`（信息/警告/错误/询问四种图标，OK、确定-取消、是-否、是-否-取消四种按钮组合），不走 COM、不需要 STA
 - 可编辑输入：点击聚焦（蓝框 + 按点击位置落光标）、键入文字（含中文输入法）、Backspace / Delete 删除、鼠标拖选 / Ctrl+A 全选、Ctrl+C 复制选区（后端写系统剪贴板）、Ctrl+V 粘贴（后端读系统剪贴板；单行 input 粘贴多行文本折成单行，textarea 保留换行）、方向键 / Home / End 移动光标、Shift+方向键 / Shift+Home/End 扩展选区（锚点不动、活动端随按键移动，越过锚点后选区反向）、输入与退格替换选区、Tab 循环切换（text / password / textarea；password 可聚焦可输入，值全程按 ● 掩码，光标与点击定位同掩码口径，明文不落画不进 SVG，但 Ctrl+C 复制真实值）；`<textarea>` 多行编辑（折行显示、Enter 换行、跨行拖选、超出盒高的行不绘制、纵向滚动跟随光标并支持滚轮）；其余 input type 按 UA 外观区分渲染：radio/checkbox 13x13 控件、submit/reset/button 按钮外观（value 居中）
+- 页面文本可选中：普通 HTML 文本（`<p>` / `<div>` / 标题 / 列表 / 表格单元格等，不含 input/textarea）用鼠标拖选，选区以半透明蓝高亮、`Ctrl+C` 复制（跨段落/列表项/单元格自动补换行）。拖选是**文档级选区**（位置 = 文本节点 + 流文本 rune 偏移），只记重绘账、不触发重排；与输入框选区互斥——点页面文本让输入框失焦并清页面选区，点/拖输入框或在其内键入、粘贴、Ctrl+A 时清页面选区。高亮区间在更新选区时预算到文本节点上，渲染与 SVG 导出直接读，不做全文档遍历
 - 表单与链接控件：`<select>`/`<option>` 下拉（点击展开选项浮层，点选项选中并派发 `change`，下方放不下且上方放得下时整组上移，浮层压过流内容与定位层、命中测试同层序）；`<button>` 内容按 HTML 规范垂直居中（Chrome/Edge 同款，定高按钮尤其明显）、`<a href>` 链接（UA 蓝色 + 下划线，`SetOnNavigate` 注册导航回调，导航在 click 冒泡之后执行）
 - 勾选控件：`<input type=radio|checkbox>` 点击切换选中（`checked` 布尔属性按存在性判定，API `IsChecked` / `SetChecked`）；选中态绘制强调色方块 + 白色对勾、强调色圆环 + 实心圆（Chrome 口径），radio 盒恒为正圆；radio 仅 name 非空且相同的项互斥（实测无 name / `name=""` 各自独立）；点 label（包裹其控件或 `for` 指向）等效点该控件
 - DOM 式 API：`QuerySelector` / `GetBoundingClientRect` / `SetText` / `OnClick` / `OnKeyDown` / `IsChecked` / `SetChecked` 等；内容变化自动触发重排重绘。`OnKeyDown` 注册**元素级按键处理器**（派发给聚焦元素，处理器返回 true 表示已消费、引擎的默认动作不再执行，等价网页的 preventDefault）——浏览器地址栏「回车打开」、记事本查找框「回车查找」都靠它接，不必改引擎的默认动作；伪类状态也可直接读写：`SetHoveredElement` / `HoveredElement` / `SetActiveElement` / `ActiveElement` / `OnDocumentMouseMove`（自建主循环的应用层用它驱动 `:hover`/`:active`，`browser` 门面已自动接好）
@@ -681,6 +682,7 @@ goroutine 里被并发调用**（实现必须线程安全）；加载失败按�
 - `<input>` 可编辑仅支持 text/password 类型；radio/checkbox 无键盘 Space 切换、无 disabled / indeterminate / 表单重置；无剪切（Ctrl+X）、无按词扩展选区（Ctrl+Shift+方向键）
 - `<select>` 仅鼠标交互（展开/收起/选中），无键盘上下键选择、无 multiple、无 optgroup；选项浮层不随视口裁剪（超出视口的选项画到窗口外）；收起态按内容收缩（文字 + 箭头位 16px，与 Chrome 同口径）
 - `<textarea>` 无剪切（Ctrl+X）、无按词扩展选区（Ctrl+Shift+方向键）；滚轮可滚动（超盒高的行随滚动偏移平移、半截行按裁剪截断；后端未实现 `Clipper` 时退化为整行丢弃）
+- 页面文本选区：无双击选词 / 三击选行，拖选越出视口不会自动滚动；复制按「最近块级祖先变化即换行」处理，`<br>` 不产生文本节点，跨 `<br>` 复制不会插入换行；`input` 内的文本仍走控件自己的选区模型（两者互斥）
 - 行高（`line-height: normal`）由 SDL_ttf 的 `TTF_FontAscent`/`TTF_FontDescent`
   计算（两者都是 **int32 有符号**返回值，`TTF_FontDescent` 为负——不按 int32 重解释
   会被当成巨大正数再钳成 0，所有字体的行盒就会短 2~3px）

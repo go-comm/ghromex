@@ -138,6 +138,14 @@ func dumpSVGPositioned(b *strings.Builder, e HTMLElement, ctr *int) {
 	}
 }
 
+// svgEmitSelectionRect 输出一块选区高亮。颜色/透明度直接取渲染用的
+// selectionColor，避免绘制与导出两处各写一份常量。
+func svgEmitSelectionRect(b *strings.Builder, r clipRect) {
+	cr, cg, cb, ca := selectionColor.RGBA()
+	fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.2f"/>`+"\n",
+		r.x, r.y, r.w, r.h, hexColor(cr, cg, cb), float64(ca)/255)
+}
+
 func dumpSVGNode(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *int) {
 	dumpSVGNodeFill(b, e, clips, ctr, "")
 }
@@ -196,12 +204,31 @@ func dumpSVGNodeFill(b *strings.Builder, e HTMLElement, clips []svgClip, ctr *in
 				decAttr = ` text-decoration="line-through"`
 			}
 		}
-		for _, run := range tn.node.runs {
+		hasFlowSel := tn.node.flowSelHi > tn.node.flowSelLo
+		var measure func(string) int
+		if hasFlowSel {
+			fg := NewFakeGraphics()
+			px, weightNum, bold, family := fontOf(base.computed)
+			measure = func(s string) int {
+				return prefixWidth(fg, s, px, weightNum, bold, family)
+			}
+		}
+		flowOff := 0
+		for i := range tn.node.runs {
+			// 文档级文本选区高亮：与渲染路径同色同位置，画在文字之前。
+			if hasFlowSel {
+				run := &tn.node.runs[i]
+				if x, w, ok := flowRunSelectionRect(tn.node, run, flowOff, measure); ok {
+					svgEmitSelectionRect(b, clipRect{x: x, y: run.y, w: w, h: run.h})
+				}
+			}
+			run := &tn.node.runs[i]
 			// y 是 SVG 的基线坐标：基线 = 片段顶边 + 该片段的 ascent
 			// （与下划线等装饰同口径，见 drawDecoration）。用片段底边
 			// （y+h）会把文字整体画低一个 descent。
 			fmt.Fprintf(b, `<text x="%d" y="%d" font-size="%d"%s%s%s%s fill="%s">%s</text>`+"\n",
 				run.x, run.y+run.asc, fs, ff, fw, fsAttr, decAttr, fill, escapeXML(run.text))
+			flowOff += runeLen(run.text)
 		}
 		return
 	}
@@ -638,10 +665,7 @@ func dumpControlText(b *strings.Builder, base *htmlElement, comp CSSStyleDeclara
 	// 的 alpha 0x82/255）。SVG 是静态导出，仍导出当前选区状态，便于无头
 	// 测试核对拖选/Ctrl+A 后的高亮几何。
 	emitSelection := func(r clipRect) {
-		// 颜色/透明度直接取渲染用的 selectionColor，避免两处各写一份常量。
-		cr, cg, cb, ca := selectionColor.RGBA()
-		fmt.Fprintf(b, `<rect x="%d" y="%d" width="%d" height="%d" fill="%s" fill-opacity="%.2f"/>`+"\n",
-			r.x, r.y, r.w, r.h, hexColor(cr, cg, cb), float64(ca)/255)
+		svgEmitSelectionRect(b, r)
 	}
 	bold := comp.FontWeight() == FontWeightBold
 

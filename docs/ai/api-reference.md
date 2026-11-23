@@ -1,7 +1,7 @@
 # API 参考（自动生成）
 
 > 本文件由 `tools/gen-ai-context.ps1` 从 `go doc -all` 自动生成，请勿手工编辑；接口变化后重新运行脚本即可。
-> 生成时间: 2026-11-23 00:48
+> 生成时间: 2026-11-23 09:45
 
 ---
 
@@ -1499,13 +1499,14 @@ func SelectValue(sel HTMLElement) string
     SelectValue 返回 select 当前选中项的值（渲染同口径）。
 
 func SelectedText(doc HTMLDocument) (string, bool)
-    SelectedText 返回聚焦输入当前选中的文本。第二个返回值为 false 表示
-    没有选区（或没有聚焦输入），后端据此决定是否写剪贴板——空选区不应 清空用户原有剪贴板。
+    SelectedText 返回当前选中的文本：优先返回文档级文本选区（普通页面 文本），其次返回聚焦输入内的选区。第二个返回值为 false
+    表示没有选区， 后端据此决定是否写剪贴板——空选区不应清空用户原有剪贴板。
 
     password 返回真实 value（浏览器允许选中并复制密码框内容），显示层 的 ● 掩码只在绘制/SVG 导出时生效。
 
 func SelectionLength(doc HTMLDocument) (int, bool)
-    SelectionLength 返回聚焦输入当前选区的 rune 数，第二个返回值为 false 表示没有选区（或没有聚焦输入）。
+    SelectionLength 返回当前选区的 rune 数，第二个返回值为 false 表示没有 选区。文档级文本选区优先（与
+    SelectedText 同口径）。
 
     与 SelectedText 相比它不复制选区文本：状态栏这类每帧都要刷新、只关心 「选中多少字」的场景用它，避免为一句提示复制整个选区（全选一份
     19.5MB 的文档就是 19.5MB 的临时分配）。
