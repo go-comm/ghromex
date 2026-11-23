@@ -37,6 +37,16 @@
 // HWND 当父窗口（拿错会让 Show 直接回 E_INVALIDARG），只能问
 // SDL_GetWindowWMInfo。取不到时返回 0（对话框照样能弹，只是不挂主窗口）。
 //
+// # 文件拖放（拖入窗口）
+//
+// 只做接收方向：Win32 WM_DROPFILES + HDROP（filedrop.go）。建窗后子类化
+// 窗口过程并 DragAcceptFiles 打开接收，收到消息时一次取全整批路径，
+// PollEvent 交成 EventFilesDropped（多选拖放不拆成多条事件）；Close 前
+// 恢复原来的窗口过程。把窗口里的文件拖出去是 OLE 源端（IDropSource +
+// DoDragDrop），与本包无关。
+//
+// 拿不到原生窗口时（dummy 驱动等）拖放静默不可用，不影响建窗与其它功能。
+//
 // # 动态加载约定
 //
 //   - 符号用 bindSdl / bindTtf 绑定（必需，缺失即启动失败），或

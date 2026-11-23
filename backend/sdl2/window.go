@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -58,6 +59,19 @@ type Window struct {
 	// 观测到任何 motion（缓存未被刷新过），此时不做平移（见 staleOffset）。
 	originX, originY int
 	originKnown      bool
+
+	// 文件拖放（拖入窗口）状态，见 filedrop.go：
+	//
+	//   - dropHWND/dropOldProc 是子类化时的原生窗口句柄与原来的窗口过程
+	//     （SDL 装的）；dropOldProc == 0 表示未启用；
+	//   - pendingDrops 是窗口过程已经收到、还没交给 PollEvent 的路径。
+	//
+	// 加锁是为了让注入路径（InjectEvent）与真实窗口过程共用一条队列；
+	// 正常生产路径上两者本来就在同一个 goroutine。
+	dropHWND     uintptr
+	dropOldProc  uintptr
+	dropMu       sync.Mutex
+	pendingDrops []string
 }
 
 // NewWindow 创建带渲染器的窗口。坐标体系 1:1（1 CSS px = 1 物理像素）。
@@ -199,6 +213,9 @@ func NewWindowWithOptions(o WindowOptions) (*Window, error) {
 			fmt.Fprintf(os.Stderr, "ghromex: 设置窗口图标失败: %v\n", err)
 		}
 	}
+	// 文件拖放接收（拖入窗口）：拿不到原生窗口（dummy 驱动等）时静默
+	// 不可用，不影响窗口其它功能。
+	enableFileDrop(win)
 	return win, nil
 }
 
@@ -261,9 +278,20 @@ func (win *Window) SetVSync(on bool) {
 //
 // 事件怎么解释成引擎动作（点击、按键、滚轮）是上一层的事：后端只解码
 // SDL 事件，不认识文档与引擎。
+//
+// 文件拖放是例外：它不经过 SDL 事件队列——WM_DROPFILES 在 SDL_PumpEvents
+// 的消息泵里被本包的窗口过程截获（见 filedrop.go），路径直接进了窗口的
+// 待处理队列。所以先取队列，再问 SDL；SDL 侧没有事件时再看一眼队列，因为
+// 消息泵可能刚好在本轮里处理掉一次拖放却什么 SDL 事件都没产生。
 func (win *Window) PollEvent() (Event, bool) {
+	if files := win.takeDrops(); len(files) > 0 {
+		return Event{Kind: EventFilesDropped, Files: files}, true
+	}
 	ev, ok := pollEvent()
 	if !ok {
+		if files := win.takeDrops(); len(files) > 0 {
+			return Event{Kind: EventFilesDropped, Files: files}, true
+		}
 		return Event{}, false
 	}
 	return win.toPublicEvent(ev), true
@@ -413,6 +441,11 @@ func (win *Window) InjectEvent(ev Event) {
 	case EventTextInput:
 		put32(0, eventTextInput)
 		copy(buf[12:44], ev.Text)
+	case EventFilesDropped:
+		// 拖放路径不在 SDL 事件体里（真实路径由 WM_DROPFILES 的 HDROP
+		// 解出，见 filedrop.go），直接进待处理队列即可，效果与真实拖放一致。
+		win.queueDrops(ev.Files)
+		return
 	}
 	sdlPushEvent(uintptr(unsafe.Pointer(&buf[0])))
 }
@@ -694,6 +727,8 @@ func (win *Window) Close() {
 		return
 	}
 	win.closed = true
+	// 恢复窗口过程必须赶在 SDL_DestroyWindow 之前（见 filedrop.go）。
+	disableFileDrop(win)
 	if win.g != nil {
 		win.g.CloseFonts()
 	}

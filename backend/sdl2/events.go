@@ -38,6 +38,9 @@ const (
 	EventKeyDown
 	// EventTextInput 是文本输入（UTF-8；中文 IME 的组合串也走这里）。
 	EventTextInput
+	// EventFilesDropped 是文件被拖放到窗口（拖入方向）：Files 是本批
+	// 拖入的绝对路径（UTF-8），一次拖放事件给全一批，多选拖放不会被拆开。
+	EventFilesDropped
 )
 
 // Event 是一个平台事件。
@@ -58,6 +61,10 @@ type Event struct {
 
 	// Text 是文本输入内容（UTF-8）。
 	Text string
+
+	// Files 是本批拖入窗口的文件路径（仅 EventFilesDropped 有意义；
+	// 绝对路径，UTF-8，顺序与资源管理器里拖出的顺序一致）。
+	Files []string
 
 	// Width/Height 是窗口的新尺寸（仅 EventWindowResized 有意义）。
 	Width, Height int
