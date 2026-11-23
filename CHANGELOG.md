@@ -18,6 +18,41 @@
 
 ## 未发布
 
+**文档瘦身：README 拆成门面 + 分册，`docs/ai/api-reference.md` 删除**。
+两条动机同源：**AI（和人）取信息的成本**。README 此前 1489 行 / 125KB，
+其中「性能实测」684 行、「组件库 ui」216 行、「CSS 子集」197 行、「已知限制」
+114 行——找一条 CSS 口径要翻四分之一本文件；而 `docs/ai/api-reference.md`
+182KB / 3716 行是 `go doc -all` 的完整镜像，与 `go doc` 同源，留着只产生
+「重复 + 过期 + diff 噪音」三害。
+
+- **README 只留门面**（1489 → 200 行 / 22KB）：定位、特性、环境要求、
+  快速开始、最小代码示例，末尾加一张**文档地图**（想知道什么 → 去哪看）。
+- **拆出 6 个分册**（内容逐字保留，只调标题层级与交叉引用）：
+
+  | 新文件 | 原章节 | 行数 |
+  |---|---|---|
+  | `docs/ui.md` | 组件库 ui | 217 |
+  | `docs/project-structure.md` | 项目结构 | 65 |
+  | `docs/css-support.md` | 已支持的 CSS 子集 | 198 |
+  | `docs/limitations.md` | 已知限制 | 116 |
+  | `docs/performance.md` | 性能实测 | 685 |
+  | `docs/development.md` | 调试环境变量 + 开发与测试 | 38 |
+
+- **交叉引用改写成真链接**：分册之间的「见『已知限制』」这类口语指代改成
+  `[limitations.md](limitations.md)` 这样的可点链接；`docs/ui.md` 里的截图
+  路径补 `../` 前缀；`docs/performance.md` 里指向 RFC 与 CHANGELOG 的引用
+  改成相对路径。
+- **落盘 API 清单删除**：`docs/ai/api-reference.md`（182KB）与它的生成脚本
+  `tools/gen-ai-context.ps1` 一并删除——`go doc` 本地离线可跑，pkg.go.dev
+  提供网页版，两者都是**权威且永不过期**的来源，仓库不需要再养一份副本。
+- **指针全部改道**（15 处代码注释 + 4 处文档）：按内容分别指向
+  `docs/limitations.md`（已知限制）、`docs/css-support.md`（字体/渲染口径）、
+  `docs/performance.md`（性能数据）、`docs/ai/architecture.md`；
+  `ghromex.go` 的「查接口」清单同步改成指向各分册。AGENTS.md 的
+  「开始开发前必读」第 3 条改为「接口就地查，不落盘」。
+- **无损校验**：拆分前后逐行做多重集比对（忽略标题行与空行），LOST 的每一行
+  都有对应的 ADDED 行（全是上面说的指针改写），**无内容丢失**。
+
 **页面文本可选中：文档级文本选区（普通 HTML 文本的拖选、高亮与 Ctrl+C 复制）**。
 此前只有 `input` / `textarea` 有选区模型，`<p>`、`<div>`、标题等页面文字拖不动
 （用户报告「HTML 的文本内容不能鼠标选中」）。本轮补一套文档级选区，与控件选区
@@ -56,8 +91,7 @@ module provides package」——AI 拿到这个模块只能猜包名，根级查
   （报「too many periods in symbol specification」），也不接受多个包位置参数
   （`go doc $(go list ./...)` 报 usage），得「一个包一条命令」；
   `go doc <包> <符号>` 查单个类型/函数。
-- **文档双写**：根包注释是「入口与导航」，`docs/ai/api-reference.md` 是「全量
-  落盘 API」（已重新生成，根包作为 `# package .` 进首节）；AGENTS.md 的
+- **文档双写**：根包注释是「入口与导航」；AGENTS.md 的
   「开始开发前必读」把 `go doc github.com/go-comm/ghromex` 提到第 1 条——
   先跑它就知道该查哪个包，不必猜。
 

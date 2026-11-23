@@ -18,7 +18,7 @@ import (
 //  1. 管线缺陷（可修）：纹理被缩放/坐标非整数/alpha 合成错误（如字形 surface
 //     实为预乘 alpha 却按直通 alpha 贴图，边缘会系统性偏浅 = 观感发虚）；
 //  2. 灰度 AA 固有：无横向子像素分解，竖笔边缘只能靠覆盖度过渡，
-//     与 LCD/ClearType 的锐度差是物理性的（README 已注明）。
+//     与 LCD/ClearType 的锐度差是物理性的（docs/css-support.md 已注明）。
 //
 // 判据：把同一 face、同一 hinting 直出的 blended surface 合成到白底，与
 // 经 Graphics.DrawText → SDL_RenderCopy → 回读得到的落屏像素逐个比对。

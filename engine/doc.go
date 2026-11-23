@@ -20,7 +20,7 @@
 //  1. 纯 Go 可移植：engine 不得 import 平台包或图形库。窗口、剪贴板、
 //     字体文件路径等平台能力由 backend/sdl2 提供（browser 是门面）。
 //  2. 1 CSS px = 1 物理像素：布局全程整数像素，不做小数舍入（与浏览器的
-//     亚像素差异是已知取舍，见根 README「已知限制」）。
+//     亚像素差异是已知取舍，见 docs/limitations.md）。
 //  3. 布局流水线顺序固定（见 windows.go 的 LayoutDocument）：
 //     resolveStylesTree → layoutBox → layoutPositioned → applyScrollOffsets
 //     → layoutSelectPopups。新增定位/滚动/浮层特性必须挂到正确的遍次，

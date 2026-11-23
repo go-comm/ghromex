@@ -1,6 +1,6 @@
 # ghromex 架构地图（AI 上下文）
 
-> 本文件与 `api-reference.md`（自动生成）共同构成 AI 开发上下文。入口见根目录 `AGENTS.md`。
+> 本文件与根包的 `go doc github.com/go-comm/ghromex`（模块总览与接口导航）共同构成 AI 开发上下文。入口见根目录 `AGENTS.md`。
 
 一句话：**ghromex 是一个纯 Go 的「迷你浏览器 + 桌面应用框架」**——用 Go 重写 HTML/CSS 的解析、级联、布局、绘制、事件与文本编辑（一个子集），SDL2 做窗口层，`ui` 包做应用工作台。没有 JS、没有 CGO、没有 WebView，适合做工具类桌面应用。
 
@@ -226,7 +226,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 - 可选能力用「类型断言 + 回退」而非配置开关（`Clipper`、`SpriteDrawer` 模式）。
 - 回调注册一律 `SetOnXxx` / `OnXxx`；文档状态读写 `Xxx()` / `SetXxx()`。
 - 注释与文档为中文；解释「为什么」多于「是什么」（口径、坑、实测数据）。
-- 性能敏感改动要在 README「性能实测」章节留口径一致的前后对比数据。
+- 性能敏感改动要在 [docs/performance.md](../performance.md) 留口径一致的前后对比数据。
 
 ## 示例索引（examples/，各自可独立运行）
 

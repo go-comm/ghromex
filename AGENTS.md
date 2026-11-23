@@ -6,8 +6,8 @@
 
 1. **`go doc github.com/go-comm/ghromex`** — 模块总览与**接口导航**：定位、分层图、核心入口、必守不变量，以及「该查哪个包、用哪条命令查」。跑完这条就知道接口在哪，不必猜包名。
 2. **`docs/ai/architecture.md`** — 架构地图：分层与依赖规则、核心接口、主循环、典型用法代码、扩展点、坑与惯例。**改动前先读它。**
-3. **`docs/ai/api-reference.md`** — 全部公开 API（自动生成，勿手改）。接口变了运行 `powershell -File tools\gen-ai-context.ps1` 重新生成。
-4. 详细行为口径、性能实测数据见 `README.md`（很长，按需检索章节，不要整读）。
+3. **接口就地查，不落盘**：`go doc github.com/go-comm/ghromex/<包>[ <符号>]`（离线可用）或 https://pkg.go.dev/github.com/go-comm/ghromex 。仓库里不再维护自动生成的 API 清单——它与 `go doc` 同源、只会过期和制造 diff 噪音。
+4. 行为口径与专项数据按 `README.md` 的「文档地图」进分册：CSS 支持 `docs/css-support.md`、与浏览器的差异 `docs/limitations.md`、性能实测 `docs/performance.md`、组件库 `docs/ui.md`、调试与测试 `docs/development.md`。
 
 ## 30 秒速览
 
@@ -20,8 +20,8 @@
 
 - 构建/测试任意平台都要过：`go build ./...`、`go test ./...`（平台差异用构建标签 + stub 文件）。
 - `NewWindow→Run→Close` 同一 goroutine（SDL `LockOSThread`）。
-- 新增 API 写中文 doc comment（会进入 api-reference）；跨层值类型放 `core`，`engine/graphics.go` 加类型别名。
-- 提交前更新 `CHANGELOG.md`；性能敏感改动在 README 性能章节留同口径对比数据。
+- 新增 API 写中文 doc comment（`go doc` / pkg.go.dev 即时可见）；跨层值类型放 `core`，`engine/graphics.go` 加类型别名。
+- 提交前更新 `CHANGELOG.md`；性能敏感改动在 `docs/performance.md` 留同口径对比数据。
 
 ## 无头验证（无需显示器/DLL）
 

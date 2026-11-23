@@ -1057,7 +1057,7 @@ func applyDecl(comp CSSStyleDeclaration, prop, value string) {
 		}
 	case "list-style-image":
 		// 图片标记需要图片解码与加载，引擎不支持：接受 url(...)/none 但
-		// 不保存，标记仍按 list-style-type 绘制（详见 README 已知限制）。
+		// 不保存，标记仍按 list-style-type 绘制（详见 docs/limitations.md）。
 	case "list-style":
 		applyListStyleShorthand(comp, v)
 	case "top":

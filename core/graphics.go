@@ -191,8 +191,9 @@ var (
 	_ StyledPaint   = (*paint)(nil)
 	_ WeightedPaint = (*paint)(nil)
 )
-func (p *paint) Background() Color      { return p.bg }
-func (p *paint) SetBackground(c Color)  { p.bg = c }
+
+func (p *paint) Background() Color     { return p.bg }
+func (p *paint) SetBackground(c Color) { p.bg = c }
 
 // Image 是绘制目标里的一张位图。
 type Image interface {
@@ -255,7 +256,7 @@ type Graphics interface {
 // Clipper 是 Graphics 的可选扩展：矩形裁剪栈。overflow 非 visible 的
 // 元素绘制其内容前 PushClip、画完 PopClip，超出裁剪区的像素不落笔。
 // 实现方可自行选择不支持（不实现本接口时渲染层退化为不裁剪，内容
-// 可能画出盒外——README 已知限制）。栈语义：每层与上一层求交集。
+// 可能画出盒外——docs/limitations.md 已知限制）。栈语义：每层与上一层求交集。
 type Clipper interface {
 	PushClip(x, y, w, h int)
 	PopClip()

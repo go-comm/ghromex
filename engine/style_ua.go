@@ -115,9 +115,9 @@ sup { vertical-align: super; }
    button: buttonface=#EFEFEF、文字色 buttontext=#000（不继承）、居中文本、
            边框灰 #767676、字号 13px（≈浏览器 13.33px Arial）。
            字体统一 Arial（引擎默认字体，桌面 UI 取向；Chrome 控件用系统
-           UI 字体 Segoe UI，见 README「字体默认语义」）。
+           UI 字体 Segoe UI，见 docs/css-support.md「字体默认语义」）。
            垂直 padding 3px：Chrome 实测外盒高 25（Segoe 13.33 行高所致），
-           引擎字形高 16 → 24，1px 差异属字体行高度量（见 README 已知限制）。
+           引擎字形高 16 → 24，1px 差异属字体行高度量（见 docs/limitations.md）。
    input : field=#FFF、边框同上、padding 1px 2px、宽高 177x21（border-box
            外盒值，Chrome 实测 size=20 默认）。
    Chrome 的 border 实为 2px outset/inset，引擎目前只支持平面 solid，用 1px 近似。

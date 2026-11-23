@@ -4,7 +4,7 @@ package engine
 // 先画到离屏缓冲再整体按 alpha 混合。这里用「子树内每一次绘制动作的颜色
 // alpha 都乘以 opacity」近似——对单色盒（背景/边框/文字/阴影）与浏览器
 // 观感一致，对「半透明子元素叠在半透明父元素上」这类重叠场景会有差异
-// （真 CSS 先合成整组再混合，引擎是逐个混合），README 已知限制里注明。
+// （真 CSS 先合成整组再混合，引擎是逐个混合），docs/limitations.md 里注明。
 
 // withOpacity 用 alpha 缩放包装 g；k>=1 时原样返回（不引入额外分配）。
 func withOpacity(g Graphics, k float64) Graphics {

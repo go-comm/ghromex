@@ -10,7 +10,7 @@ import (
 // ---------------------------------------------------------------------------
 // 灰度文本 tone 曲线（GHROMEX_CONTRAST，方案 A）
 //
-// 背景（README「渲染段」的矩阵实测）：SDL_ttf 的 blended 输出是
+// 背景（docs/css-support.md「渲染段」的矩阵实测）：SDL_ttf 的 blended 输出是
 // FreeType 覆盖度**线性直出**，没有任何 gamma/对比度后处理；Chrome（Skia/
 // DirectWrite）在覆盖度之后还有一道 tone 调整（Skia SkMaskGamma 同类），把
 // 过渡像素推向两端——同样覆盖率观感更"利"。本文件在字形 surface 上做该

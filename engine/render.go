@@ -1312,8 +1312,8 @@ func paintBoxShadows(g Graphics, bx, by, bw, bh, r int, shadows []Shadow, curren
 		}
 		// 退化路径：圆角矩形填充（有模糊时多层）。若后端支持矩形裁剪，
 		// 就按元素边框盒把盒外区域切成上/下/左/右四条带分别画，等价于
-		// 把洞挖掉；不支持裁剪时只能整块画（盒内可能透出阴影，见 README
-		// 已知限制）。
+		// 把洞挖掉；不支持裁剪时只能整块画（盒内可能透出阴影，见
+		// docs/limitations.md）。
 		if cl, ok := g.(Clipper); ok {
 			paintShadowLayersClipped(g, cl, sx-pad, sy-pad, sw+2*pad, shh+2*pad,
 				bx, by, bw, bh, sx, sy, sw, shh, sr, pad, c)

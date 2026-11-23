@@ -737,7 +737,7 @@ func inlineBoxBaseline(g Graphics, che *htmlElement, outerH int) (asc, desc int)
 //
 // 浮动的可见范围按「每个父元素自己的块格式化上下文」实现：子元素内部产生
 // 的浮动只影响该子元素自己的行盒，不向父级兄弟传播（真实 CSS 里若子块
-// 没有建立新 BFC，浮动会外溢）。这是已知简化，见 README 已知限制。
+// 没有建立新 BFC，浮动会外溢）。这是已知简化，见 docs/limitations.md）。
 type floatRect struct {
 	x, y, w, h int
 	side       FloatSide

@@ -344,7 +344,7 @@ func lcdText() bool {
 // 进程启动前设定的环境变量才对全部 face 生效）。LCD 强制 LIGHT_SUBPIXEL
 // （子像素分解依赖该档位）；灰度路径按 GHROMEX_HINT 选档：
 // normal|light|mono|none，默认/非法值 = normal。
-// 默认 normal 的依据（README「渲染段」的矩阵实测 vs Chrome 灰度基线）：
+// 默认 normal 的依据（docs/css-support.md「渲染段」的矩阵实测 vs Chrome 灰度基线）：
 // CJK13 hardH 7≈0（Chrome 0，竖画无锯齿）、hardV 237≈227（横画利）、ink 412
 // 接近 Chrome 347——是全部候选里与 Chrome 轮廓最同构的一档；light 纵向更软
 // （hardV 75，即"糊"的来源）。回退/扫描用 GHROMEX_HINT=light|none|mono。
@@ -885,7 +885,7 @@ func (g *Graphics) FontMetrics(text string, fontSize int, bold bool, family stri
 }
 
 // FontMetricsWeight 实现 core.WeightedMeasurer：数值字重档位下的行度量
-//（半粗面与粗体面的 ascent/descent 可能有细微差异，需同档位取用）。
+// （半粗面与粗体面的 ascent/descent 可能有细微差异，需同档位取用）。
 func (g *Graphics) FontMetricsWeight(text string, fontSize, weightNum int, family string) (int, int) {
 	return g.fontMetrics(text, fontSize, fontTierOf(weightNum >= 550, weightNum), family)
 }
@@ -1045,7 +1045,7 @@ func (g *Graphics) DrawText(x, y, w, h int, paint core.Paint, text string) {
 				// LCD 子像素：前景色与落点背景色合成出实色 surface
 				//（TTF_RenderUTF8_LCD 的三通道即子像素分解），纹理按不透明
 				// 直贴（BLENDMODE_NONE）。彩底上竖笔边缘会有轻微彩边
-				//（浏览器子像素渲染同性质，README 已注明）。
+				//（浏览器子像素渲染同性质，docs/css-support.md 已注明）。
 				fgc := uintptr(cr) | uintptr(cg)<<8 | uintptr(cb)<<16 | uintptr(ca)<<24
 				bgc := uintptr(br) | uintptr(bg)<<8 | uintptr(bb)<<16 | uintptr(0xFF)<<24
 				surf := ttfRenderUTF8LCD(f.handle, p, fgc, bgc)

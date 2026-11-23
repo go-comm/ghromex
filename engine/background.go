@@ -16,7 +16,7 @@ import (
 //	background-image、background（简写）、background-repeat、
 //	background-position、background-size、background-origin、background-clip
 //
-// 不做（README 已知限制）：渐变 <image>、background-attachment: fixed、
+// 不做（docs/limitations.md）：渐变 <image>、background-attachment: fixed、
 // repeat 的 space/round 两种铺法（退化为普通平铺）；圆角仍用「角标补盖」
 // 近似（引擎的裁剪栈只有矩形）。
 //

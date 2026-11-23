@@ -60,7 +60,8 @@
 //	go doc github.com/go-comm/ghromex/<包> <符号>     单个类型/函数（含方法）
 //	go list ./...                    包清单（要全量就把清单里每个包喂给上面的 go doc）
 //
-// 全量落盘版：docs/ai/api-reference.md（由 tools/gen-ai-context.ps1 重新生成）。
+// 全量落盘版已撤销：接口用 `go doc` / pkg.go.dev 即时查，仓库不再维护
+// 同源落盘副本（只会过期和制造 diff 噪音）。
 //
 // 包 → 职责（据此定位该查哪个包）：
 //
@@ -73,10 +74,17 @@
 //	examples/*  可运行示例：browser / notepad / kit / portal / ua / stylebook / snip /
 //	            iconsheet / stressgen
 //
-// 落盘文档（很长，按需检索，别整读）：
+// 文档分册（README 只留门面，细节按文末「文档地图」进分册）：
 //
 //	docs/ai/architecture.md   架构地图（分层、不变量、扩展点、坑）
-//	docs/ai/api-reference.md  全量 API（自动生成，勿手改）
-//	README.md                 行为口径 + 性能实测
+//	docs/ui.md                组件库 ui（菜单/工具栏/状态栏/主题/图标）
+//	docs/css-support.md       已支持的 CSS 子集（属性、值、UA 默认样式、字体口径）
+//	docs/limitations.md       已知限制（哪里和浏览器不一样）
+//	docs/performance.md       性能实测（口径、分段数据、内存/时间优化记录）
+//	docs/development.md       调试环境变量、开发与测试
+//	docs/project-structure.md 项目结构与各包职责
+//	runtime/README.md         平台能力分层约定
+//	libs/README.md            第三方 DLL 版本、出处、许可与查找顺序
+//	docs/rfc/                 设计决策的来龙去脉
 //	AGENTS.md                 AI 开发指引入口
 package ghromex

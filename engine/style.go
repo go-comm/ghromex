@@ -425,7 +425,7 @@ type CSSStyleDeclaration interface {
 	Clear() ClearSide
 	SetClear(c ClearSide) CSSStyleDeclaration
 	// Opacity 是 opacity 的计算值（0~1），不继承。引擎没有图层合成，
-	// 按「子树所有绘制颜色的 alpha 乘以该值」近似（见 README 已知限制）。
+	// 按「子树所有绘制颜色的 alpha 乘以该值」近似（见 docs/limitations.md）。
 	Opacity() float32
 	SetOpacity(o float32) CSSStyleDeclaration
 	// Cursor 是 cursor 的计算值（命中时使用的系统指针形状），沿父链继承。

@@ -373,7 +373,7 @@ func TestSelectPopupTextPaintCarriesBlue(t *testing.T) {
 	if !alphaBlack {
 		t.Error("未选中项（Alpha）文字应为黑字#000000")
 	}
-	// 控件 UA 默认字体首项为 Arial（不再 system-ui/Segoe UI），README「字体默认语义」。
+	// 控件 UA 默认字体首项为 Arial（不再 system-ui/Segoe UI），docs/css-support.md「字体默认语义」。
 	// 后面附 system-ui 只为 CJK 回退档位（Chrome 控件汉字落雅黑），拉丁仍用 Arial。
 	if alphaFam != "Arial, system-ui, sans-serif" {
 		t.Errorf("选项文字 font-family = %q, want \"Arial, system-ui, sans-serif\"（控件 UA 默认字体）", alphaFam)
