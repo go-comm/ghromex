@@ -197,4 +197,4 @@ Win32 COM 调用，无 CGO），消息框走 user32 的 `MessageBoxW`（不需�
 
 ## 更新日志
 
-当前版本 **v0.7.1**，逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v0.9.0**，逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。
