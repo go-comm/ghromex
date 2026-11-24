@@ -82,8 +82,10 @@ srv, err := debug.ServeFromEnv(win)
 - 动作按顺序执行，**每个动作后自动插一道同步栅栏**（一个空的主循环任务），
   所以下一个动作看到的是上一个动作已经落地后的世界——不必自己插 `wait`
   去等事件派发。`wait` 是真的睡眠，用来让滚动动画跨帧推进。
-- 输入走 `Window.InjectEvent`（`SDL_PushEvent`），与真人操作同一条解码链路，
-  所以坐标修正、焦点链、悬停档位这些真实 bug 都能被复现。
+- 输入走 `browser.Window.InjectInput`（内部翻译成 SDL 事件 → `SDL_PushEvent`），
+  与真人操作同一条解码链路，所以坐标修正、焦点链、悬停档位这些真实 bug
+  都能被复现。键码/修饰键/按键号用 `browser` 包导出的中性常量
+  （`KeyEnter`/`ModCtrl`/`MouseButtonLeft` 等），脚本不碰平台事件模型。
 - 动作 `state`/`hit`/`text`/`dom` 是观测：结果进响应的 `results[]`。
 - `close` 之后不再插栅栏（窗口正在退出，等来的只会是「主循环已退出」）。
 
@@ -109,7 +111,10 @@ SDL 的窗口与渲染器绑在 `NewWindow→Run→Close` 所在的那个 OS 线
 ### 不在发布路径里
 
 `debug` 与 `ui` 同层，但 `engine`/`browser`/`ui` 都不许 import 它
-（`core/arch_test.go` 的 `TestDebugIsNotADependency` 钉死）。别把端口暴露到
+（`core/arch_test.go` 的 `TestDebugIsNotADependency` 钉死）。它自己也只依赖
+`engine` + `browser`，**不 import `backend/sdl2`**：注入走
+`browser.Window.InjectInput`（中性 `browser.InputEvent`，`core/arch_test.go`
+的分层表钉死了 `debug` 只能依赖 `engine`/`browser`）。别把端口暴露到
 局域网，也别在发行版里默认开启。
 
 ## 开发与测试

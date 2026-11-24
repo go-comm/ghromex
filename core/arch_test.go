@@ -42,8 +42,9 @@ func TestLayeringHasNoBackwardDependency(t *testing.T) {
 		{dir: "ui", allow: []string{"engine", "browser"}},
 		// 调试服务与 ui 同层（都在 browser 之上），但只被示例/开发期用：
 		// engine/browser/ui 都不许 import 它，否则发布路径会被拖上一个
-		// HTTP 服务。它读平台事件模型是为了注入输入，不自己造事件。
-		{dir: "debug", allow: []string{"engine", "browser", "backend/sdl2"}},
+		// HTTP 服务。注入输入走 browser 的中立 InputEvent，不读平台事件
+		// 模型——后端一换实现，脚本与调试服务都不用改。
+		{dir: "debug", allow: []string{"engine", "browser"}},
 	}
 	for _, c := range cases {
 		allowed := map[string]bool{"core": true}

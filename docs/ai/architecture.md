@@ -26,7 +26,7 @@
 | `runtime/{clipboard,dialog,screen}` | 上述平台能力的通用调用入口（类型别名转发） | 调用方只 import 这一层，不碰 backend |
 | `browser` | 装配门面：持有 `HTMLDocument`，跑主循环（事件 → 引擎动作 → 重排 → 重绘） | 生命周期同一 goroutine；把平台差异挡在应用之外 |
 | `ui` | 菜单栏/工具栏/状态栏 + 页面控件（TextInputView/TextAreaView/BarView）+ 浅色/深色主题 + 快捷键 | 装在文档 DOM 里（`position:fixed` + body 占位块），换文档要重装 |
-| `debug` | 本地调试服务：HTTP/JSON 注入输入 + 观测状态（`Serve`/`ServeFromEnv`） | **可选开发期外挂**，只被示例/宿主显式引用；`engine`/`browser`/`ui` 都不许 import 它（`TestDebugIsNotADependency`） |
+| `debug` | 本地调试服务：HTTP/JSON 注入输入 + 观测状态（`Serve`/`ServeFromEnv`） | **可选开发期外挂**，只被示例/宿主显式引用；`engine`/`browser`/`ui` 都不许 import 它（`TestDebugIsNotADependency`）；自己也只依赖 `engine`+`browser`，**不 import `backend/sdl2`**（注入走 `Window.InjectInput`） |
 
 **为什么有 `core`**：Go 接口是结构化的。若后端直接 import 引擎来「实现引擎的接口」，依赖方向就反了。所以把接口和跨层值类型下沉到 `core`，引擎用类型别名（`type Color = core.Color`）保持对外 API 不变。`core/arch_test.go` 是架构护栏：钉死依赖单向、平台层禁止反向 import 上层、`browser` 必须同时依赖 engine 与 backend/sdl2。
 
@@ -228,7 +228,8 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 | 高频输入按帧合并（拖动窗口等） | `browser.Window.SetFrameHandler`：事件排空后每帧调一次，返回 true 时主循环改用 1ms 轮询（空闲 10ms） | `browser/window.go`、`examples/snip/preview.go` |
 | 接收拖入窗口的文件 | `browser.Window.SetFileDropHandler`：一次拖放调一次，给整批绝对路径（多选不拆分）；后端 `WM_DROPFILES` → `sdl2.EventFilesDropped`。只做接收方向 | `backend/sdl2/filedrop.go`、`browser/window.go` |
 | 自定义窗口图标 | 造一个 `*core.Bitmap`（`engine.DecodeImage` 解 PNG/JPEG/GIF 字节），传给 `browser.Options.Icon`（建窗即设）或 `browser.Window.SetIcon`（运行期换）；`ui.Spec.Icon` 同理。**只吃位图**，`.ico` 多帧容器要宿主先取出其中一档 | `core/graphics.go`（`IconSetter`）、`backend/sdl2/window.go`、`browser/window.go` |
-| 从外部脚本驱动/观测窗口 | `debug.Serve(win, debug.Options{Addr:...})`（或 `ServeFromEnv` + `GHROMEX_DEBUG_PORT`）；输入走 `Window.InjectEvent`，读状态/截图走 `Window.Do`。别在生产代码里 import `debug` | `debug/server.go`、`debug/input.go`、`debug/state.go`、`examples/browser/main.go` |
+| 从外部脚本驱动/观测窗口 | `debug.Serve(win, debug.Options{Addr:...})`（或 `ServeFromEnv` + `GHROMEX_DEBUG_PORT`）；输入走 `Window.InjectInput`（中性 `browser.InputEvent`，本包不 import `backend/sdl2`），读状态/截图走 `Window.Do`。别在生产代码里 import `debug` | `debug/server.go`、`debug/input.go`、`debug/state.go`、`examples/browser/main.go` |
+| 代码里注入点击/按键（无头测试、宿主脚本） | `browser.Window.InjectInput(browser.InputEvent{...})`：鼠标/滚轮/按键/文本/拖放共用一个结构，内部翻译成平台事件后入队；主循环没跑时返回 `ErrLoopNotRunning` | `browser/input.go` |
 | 别的 goroutine 想碰窗口/文档 | `browser.Window.Post`（不等）/ `browser.Window.Do`（等结果）交回主循环；`Run` 没跑时返回 `ErrLoopNotRunning`。`Run` 内每帧事件排空后执行 | `browser/tasks.go`、`browser/window.go`（`Run`） |
 
 ## 无头模式与测试

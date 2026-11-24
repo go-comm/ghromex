@@ -14,7 +14,8 @@
 //   - 坐标是视口像素（1 CSS px = 1 物理像素）；
 //   - 滚轮是**档位**（整数），SDL 口径：dy 正 = 滚轮向上（滚动偏移减小，
 //     露出更靠上的内容）；browser 层再按每档 100px 换算给引擎；
-//   - 按键是 SDL 键码（字母即 ASCII），修饰键用 SDL 的 KMOD 位。
+//   - 按键是 browser 包导出的键码（字母/数字即 ASCII，控制键用
+//     browser.KeyEnter 等），修饰键用 browser.ModShift/ModCtrl/ModAlt。
 
 package debug
 
@@ -29,9 +30,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-comm/ghromex/backend/sdl2"
 	"github.com/go-comm/ghromex/browser"
-	"github.com/go-comm/ghromex/engine"
 )
 
 // dragStepDelay 是拖拽相邻两帧之间的间隔：拖选阈值是 3px，动画/选区推进
@@ -144,8 +143,7 @@ func (s *Server) runAction(a action) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseMotion, X: x, Y: y})
-		return nil, nil
+		return nil, s.inject(browser.InputEvent{Kind: browser.InputMouseMove, X: x, Y: y})
 
 	case "down", "up":
 		x, y, err := s.point(a)
@@ -156,12 +154,11 @@ func (s *Server) runAction(a action) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		kind := sdl2.EventMouseButtonDown
+		kind := browser.InputMouseDown
 		if strings.EqualFold(a.Op, "up") {
-			kind = sdl2.EventMouseButtonUp
+			kind = browser.InputMouseUp
 		}
-		s.win.InjectEvent(sdl2.Event{Kind: kind, Button: btn, X: x, Y: y})
-		return nil, nil
+		return nil, s.inject(browser.InputEvent{Kind: kind, Button: btn, X: x, Y: y})
 
 	case "click":
 		x, y, err := s.point(a)
@@ -174,10 +171,13 @@ func (s *Server) runAction(a action) (any, error) {
 		}
 		// 先补一条 motion：真实点击前光标就在那儿，悬停态与光标形状
 		// （CSS cursor）要在按下之前就位。
-		s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseMotion, X: x, Y: y})
-		s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonDown, Button: btn, X: x, Y: y})
-		s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonUp, Button: btn, X: x, Y: y})
-		return nil, nil
+		if err := s.inject(browser.InputEvent{Kind: browser.InputMouseMove, X: x, Y: y}); err != nil {
+			return nil, err
+		}
+		if err := s.inject(browser.InputEvent{Kind: browser.InputMouseDown, Button: btn, X: x, Y: y}); err != nil {
+			return nil, err
+		}
+		return nil, s.inject(browser.InputEvent{Kind: browser.InputMouseUp, Button: btn, X: x, Y: y})
 
 	case "drag":
 		x, y, err := s.point(a)
@@ -199,18 +199,23 @@ func (s *Server) runAction(a action) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseMotion, X: x, Y: y})
-		s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonDown, Button: btn, X: x, Y: y})
+		if err := s.inject(browser.InputEvent{Kind: browser.InputMouseMove, X: x, Y: y}); err != nil {
+			return nil, err
+		}
+		if err := s.inject(browser.InputEvent{Kind: browser.InputMouseDown, Button: btn, X: x, Y: y}); err != nil {
+			return nil, err
+		}
 		for i := 1; i <= steps; i++ {
 			// 每步之间真睡一会儿：拖选阈值是 3px，引擎的拖选/滚动动画
 			// 都要跨帧推进，全塞进同一帧就等于一次瞬移。
 			time.Sleep(dragStepDelay)
 			mx := x + (x2-x)*i/steps
 			my := y + (y2-y)*i/steps
-			s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseMotion, X: mx, Y: my})
+			if err := s.inject(browser.InputEvent{Kind: browser.InputMouseMove, X: mx, Y: my}); err != nil {
+				return nil, err
+			}
 		}
-		s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonUp, Button: btn, X: x2, Y: y2})
-		return nil, nil
+		return nil, s.inject(browser.InputEvent{Kind: browser.InputMouseUp, Button: btn, X: x2, Y: y2})
 
 	case "wheel":
 		x, y, err := s.point(a)
@@ -224,16 +229,14 @@ func (s *Server) runAction(a action) (any, error) {
 		if a.DY != nil {
 			dy = *a.DY
 		}
-		s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseWheel, WheelX: dx, WheelY: dy, X: x, Y: y})
-		return nil, nil
+		return nil, s.inject(browser.InputEvent{Kind: browser.InputWheel, WheelX: dx, WheelY: dy, X: x, Y: y})
 
 	case "key":
 		key, mods, err := keyOf(a)
 		if err != nil {
 			return nil, err
 		}
-		s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventKeyDown, Key: key, Mod: mods})
-		return nil, nil
+		return nil, s.inject(browser.InputEvent{Kind: browser.InputKeyDown, Key: key, Mods: mods})
 
 	case "text":
 		txt := a.Text
@@ -243,15 +246,13 @@ func (s *Server) runAction(a action) (any, error) {
 		if txt == "" {
 			return nil, fmt.Errorf("debug: text 动作需要 text 或 s 字段")
 		}
-		s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventTextInput, Text: txt})
-		return nil, nil
+		return nil, s.inject(browser.InputEvent{Kind: browser.InputTextInput, Text: txt})
 
 	case "drop":
 		if len(a.Files) == 0 {
 			return nil, fmt.Errorf("debug: drop 动作需要 files 数组")
 		}
-		s.win.InjectEvent(sdl2.Event{Kind: sdl2.EventFilesDropped, Files: a.Files})
-		return nil, nil
+		return nil, s.inject(browser.InputEvent{Kind: browser.InputFilesDropped, Files: a.Files})
 
 	case "wait", "sleep":
 		ms := 100
@@ -390,18 +391,29 @@ func (s *Server) point(a action) (int, int, error) {
 	return x, y, nil
 }
 
+// inject 注入一个输入事件并把「主循环没跑」的错误收敛成带上下文的报错。
+//
+// 改成返回 error 是有意的：`target.InjectInput` 报错说明事件根本没进队列，
+// 动作必须失败——否则脚本会拿到「成功」但窗口毫无反应。
+func (s *Server) inject(ev browser.InputEvent) error {
+	if err := s.win.InjectInput(ev); err != nil {
+		return fmt.Errorf("注入事件失败: %w", err)
+	}
+	return nil
+}
+
 // buttonOf 解析按键名。
-func buttonOf(name *string) (uint8, error) {
+func buttonOf(name *string) (int, error) {
 	if name == nil || *name == "" {
-		return sdl2.MouseButtonLeft, nil
+		return browser.MouseButtonLeft, nil
 	}
 	switch strings.ToLower(strings.TrimSpace(*name)) {
 	case "left", "1":
-		return sdl2.MouseButtonLeft, nil
+		return browser.MouseButtonLeft, nil
 	case "middle", "2":
-		return sdl2.MouseButtonMiddle, nil
+		return browser.MouseButtonMiddle, nil
 	case "right", "3":
-		return sdl2.MouseButtonRight, nil
+		return browser.MouseButtonRight, nil
 	}
 	return 0, fmt.Errorf("debug: 未知鼠标键 %q（left/middle/right）", *name)
 }
@@ -447,56 +459,57 @@ func keyOf(a action) (int, uint16, error) {
 func modOf(name string) (uint16, bool) {
 	switch strings.ToLower(name) {
 	case "ctrl", "control":
-		return sdl2.KmodCtrl, true
+		return browser.ModCtrl, true
 	case "shift":
-		return sdl2.KmodShift, true
+		return browser.ModShift, true
 	case "alt":
-		return sdl2.KmodAlt, true
+		return browser.ModAlt, true
 	}
 	return 0, false
 }
 
-// keyCodeOf 把键名翻成 SDL 键码。
+// keyCodeOf 把键名翻成 browser 包导出的键码。
 //
-// 字母与数字用 ASCII（SDL 的 SDLK_a 就是 'a'）；控制键用引擎已导出的常量
-// （engine.KeyEnter 等），扫描码区的键（方向键/Home/End）沿用同一套编码。
+// 字母与数字用 ASCII（SDL 的 SDLK_a 就是 'a'）；控制键用 browser.Key*
+// 常量（与引擎 text_input.go 的 Key* 同值）。browser 包自带的这些常量
+// 让「调 debug / 调 InjectInput」都不必 import engine。
 func keyCodeOf(name string) (int, bool) {
 	switch strings.ToLower(name) {
 	case "enter", "return":
-		return engine.KeyEnter, true
+		return browser.KeyEnter, true
 	case "tab":
-		return engine.KeyTab, true
+		return browser.KeyTab, true
 	case "esc", "escape":
-		return engine.KeyEscape, true
+		return browser.KeyEscape, true
 	case "backspace", "bs":
-		return engine.KeyBackspace, true
+		return browser.KeyBackspace, true
 	case "delete", "del":
-		return engine.KeyDelete, true
+		return browser.KeyDelete, true
 	case "space":
 		return ' ', true
 	case "home":
-		return engine.KeyHome, true
+		return browser.KeyHome, true
 	case "end":
-		return engine.KeyEnd, true
+		return browser.KeyEnd, true
 	case "left", "←":
-		return engine.KeyLeft, true
+		return browser.KeyLeft, true
 	case "right", "→":
-		return engine.KeyRight, true
+		return browser.KeyRight, true
 	case "up", "↑":
-		return engine.KeyUp, true
+		return browser.KeyUp, true
 	case "down", "↓":
-		return engine.KeyDown, true
+		return browser.KeyDown, true
 	case "pageup", "pgup":
-		return 0x4000004B, true // SDL_SCANCODE_PAGEUP (75)
+		return browser.KeyPageUp, true
 	case "pagedown", "pgdn", "pgdown":
-		return 0x4000004E, true // SDL_SCANCODE_PAGEDOWN (78)
-	case "insert":
-		return 0x40000049, true // SDL_SCANCODE_INSERT (73)
+		return browser.KeyPageDown, true
+	case "insert", "ins":
+		return browser.KeyInsert, true
 	}
-	// F1~F12：SDL_SCANCODE_F1 = 58，键码 = 0x40000000 | 扫描码。
+	// F1~F12。
 	if len(name) >= 2 && (name[0] == 'f' || name[0] == 'F') {
 		if n, err := strconv.Atoi(name[1:]); err == nil && n >= 1 && n <= 12 {
-			return 0x40000000 | (58 + n - 1), true
+			return browser.KeyF1 + (n - 1), true
 		}
 	}
 	// 单字符：字母/数字/常用符号按 ASCII 走。

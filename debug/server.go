@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-comm/ghromex/backend/sdl2"
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
 )
@@ -73,7 +72,7 @@ type target interface {
 	// —— 跨线程安全 ——
 	Do(f func() (any, error), timeout time.Duration) (any, error)
 	Running() bool
-	InjectEvent(ev sdl2.Event) // SDL_PushEvent：事件在主循环下一帧被消费
+	InjectInput(ev browser.InputEvent) error // 事件在主循环下一帧被消费
 	RequestClose()
 
 	// —— 必须主线程（包在 Do 任务里）——

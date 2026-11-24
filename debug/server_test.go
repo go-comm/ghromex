@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-comm/ghromex/backend/sdl2"
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
 )
@@ -33,7 +32,7 @@ type fakeWin struct {
 
 	vp        *engine.HeadlessViewport
 	doc       engine.HTMLDocument
-	injected  []sdl2.Event
+	injected  []browser.InputEvent
 	opens     int
 	doCalls   int
 	resizeW   int
@@ -93,10 +92,14 @@ func (f *fakeWin) Running() bool {
 	return f.running
 }
 
-func (f *fakeWin) InjectEvent(ev sdl2.Event) {
+func (f *fakeWin) InjectInput(ev browser.InputEvent) error {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.running {
+		return browser.ErrLoopNotRunning
+	}
 	f.injected = append(f.injected, ev)
-	f.mu.Unlock()
+	return nil
 }
 
 func (f *fakeWin) RequestClose() {
@@ -163,10 +166,10 @@ func (f *fakeWin) ScreenshotPNG() ([]byte, error) {
 	return shotPNG, nil
 }
 
-func (f *fakeWin) events() []sdl2.Event {
+func (f *fakeWin) events() []browser.InputEvent {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]sdl2.Event(nil), f.injected...)
+	return append([]browser.InputEvent(nil), f.injected...)
 }
 
 // newTestServer 起一个用假窗口的调试服务，返回 httptest 记录器用的请求函数。
@@ -480,13 +483,13 @@ func TestInputClickInjectsMotionDownUp(t *testing.T) {
 	if len(evs) != 3 {
 		t.Fatalf("注入 %d 个事件, want 3（motion+down+up）: %+v", len(evs), evs)
 	}
-	if evs[0].Kind != sdl2.EventMouseMotion || evs[0].X != 140 || evs[0].Y != 110 {
+	if evs[0].Kind != browser.InputMouseMove || evs[0].X != 140 || evs[0].Y != 110 {
 		t.Errorf("事件 0 = %+v, want motion(140,110)", evs[0])
 	}
-	if evs[1].Kind != sdl2.EventMouseButtonDown || evs[1].Button != sdl2.MouseButtonLeft {
+	if evs[1].Kind != browser.InputMouseDown || evs[1].Button != browser.MouseButtonLeft {
 		t.Errorf("事件 1 = %+v, want 左键按下", evs[1])
 	}
-	if evs[2].Kind != sdl2.EventMouseButtonUp {
+	if evs[2].Kind != browser.InputMouseUp {
 		t.Errorf("事件 2 = %+v, want 抬起", evs[2])
 	}
 }
@@ -501,7 +504,7 @@ func TestInputKeepsLastPoint(t *testing.T) {
 		t.Fatalf("注入 %d 个事件: %+v", len(evs), evs)
 	}
 	// 省略坐标的滚轮落在最后已知位置：脚本连着滚好几格不必每行重抄坐标。
-	if evs[1].Kind != sdl2.EventMouseWheel || evs[1].X != 300 || evs[1].Y != 200 || evs[1].WheelY != -1 {
+	if evs[1].Kind != browser.InputWheel || evs[1].X != 300 || evs[1].Y != 200 || evs[1].WheelY != -1 {
 		t.Errorf("滚轮事件 = %+v, want (300,200) dy=-1", evs[1])
 	}
 }
@@ -521,20 +524,20 @@ func TestInputKeyMapping(t *testing.T) {
 	if len(evs) != 5 {
 		t.Fatalf("注入 %d 个按键, want 5", len(evs))
 	}
-	if evs[0].Key != 's' || evs[0].Mod != uint16(sdl2.KmodCtrl|sdl2.KmodShift) {
+	if evs[0].Key != 's' || evs[0].Mods != browser.ModCtrl|browser.ModShift {
 		t.Errorf("ctrl+shift+s = %+v", evs[0])
 	}
-	if evs[1].Key != engine.KeyEnter || evs[1].Mod != 0 {
-		t.Errorf("enter = %+v, want key=%d", evs[1], engine.KeyEnter)
+	if evs[1].Key != browser.KeyEnter || evs[1].Mods != 0 {
+		t.Errorf("enter = %+v, want key=%d", evs[1], browser.KeyEnter)
 	}
-	if evs[2].Key != 0x40000000|62 {
-		t.Errorf("F5 = 0x%x, want 0x%x", evs[2].Key, 0x40000000|62)
+	if evs[2].Key != browser.KeyF5 {
+		t.Errorf("F5 = 0x%x, want %d", evs[2].Key, browser.KeyF5)
 	}
-	if evs[3].Key != 0x4000004E {
-		t.Errorf("pagedown = 0x%x, want 0x4000004E", evs[3].Key)
+	if evs[3].Key != browser.KeyPageDown {
+		t.Errorf("pagedown = 0x%x, want %d", evs[3].Key, browser.KeyPageDown)
 	}
-	if evs[4].Key != engine.KeyUp {
-		t.Errorf("↑ = 0x%x, want %d", evs[4].Key, engine.KeyUp)
+	if evs[4].Key != browser.KeyUp {
+		t.Errorf("↑ = 0x%x, want %d", evs[4].Key, browser.KeyUp)
 	}
 }
 
@@ -571,10 +574,10 @@ func TestInputTextAndDropAndResize(t *testing.T) {
 	if len(evs) != 2 {
 		t.Fatalf("注入 %d 个事件, want 2（文本 + 拖放）: %+v", len(evs), evs)
 	}
-	if evs[0].Kind != sdl2.EventTextInput || evs[0].Text != "你好，世界" {
+	if evs[0].Kind != browser.InputTextInput || evs[0].Text != "你好，世界" {
 		t.Errorf("文本事件 = %+v", evs[0])
 	}
-	if evs[1].Kind != sdl2.EventFilesDropped || len(evs[1].Files) != 1 ||
+	if evs[1].Kind != browser.InputFilesDropped || len(evs[1].Files) != 1 ||
 		evs[1].Files[0] != `C:\a b\图.png` {
 		t.Errorf("拖放事件 = %+v", evs[1])
 	}
@@ -596,13 +599,13 @@ func TestInputDragWalksThroughFrames(t *testing.T) {
 	if len(evs) != 6 {
 		t.Fatalf("注入 %d 个事件, want 6: %+v", len(evs), evs)
 	}
-	if evs[0].Kind != sdl2.EventMouseMotion || evs[1].Kind != sdl2.EventMouseButtonDown {
+	if evs[0].Kind != browser.InputMouseMove || evs[1].Kind != browser.InputMouseDown {
 		t.Errorf("拖拽应以移动+按下开头: %+v", evs[:2])
 	}
 	if evs[2].X != 43 || evs[3].X != 76 || evs[4].X != 110 {
 		t.Errorf("中间点 = %d,%d,%d, want 43,76,110（分步位移才有位移量）", evs[2].X, evs[3].X, evs[4].X)
 	}
-	if evs[5].Kind != sdl2.EventMouseButtonUp || evs[5].X != 110 {
+	if evs[5].Kind != browser.InputMouseUp || evs[5].X != 110 {
 		t.Errorf("抬起事件 = %+v", evs[5])
 	}
 }
