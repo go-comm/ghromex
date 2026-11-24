@@ -4,7 +4,7 @@
 `github.com/go-comm/ghromex@v0.5.0` 直接取用）。
 
 
-## 未发布
+## v0.10.0 — 2026-11-24
 
 ### 重构：debug 去 sdl2 依赖
 
