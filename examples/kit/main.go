@@ -13,6 +13,7 @@
 //	go run ./examples/kit -dump-icon icon.png   # 把生成的窗口图标写成 PNG（核对形状/透明边）
 //	go run ./examples/kit -no-icon              # 不设窗口图标（用系统默认）
 //	go run ./examples/kit -exit-after 2s       # 调试/CI
+//	go run ./examples/kit -debug-port 9241     # 本地调试服务：HTTP/JSON 驱动与观测
 package main
 
 import (
@@ -25,6 +26,7 @@ import (
 	"os"
 
 	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/examples/internal/debugsrv"
 	"github.com/go-comm/ghromex/ui"
 )
 
@@ -49,6 +51,7 @@ func main() {
 	dark := flag.Bool("dark", false, "使用深色主题")
 	noIcon := flag.Bool("no-icon", false, "不设窗口图标（用系统默认图标）")
 	exitAfter := flag.Duration("exit-after", 0, "运行指定时长后自动退出（调试/CI）")
+	debugPort := debugsrv.Flag()
 	flag.Parse()
 
 	// 命令闭包要在 App 建好之前定义（buildSpec 只接收一个写状态栏的
@@ -132,6 +135,9 @@ func main() {
 	if *exitAfter > 0 {
 		app.Window().SetAutoExit(*exitAfter)
 	}
+	// 调试服务：-debug-port 优先，留空则看环境变量 GHROMEX_DEBUG_PORT。
+	stopDebug := debugsrv.Serve(app.Window(), *debugPort)
+	defer stopDebug()
 	if err := app.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "运行失败:", err)
 		os.Exit(1)

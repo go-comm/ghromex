@@ -5,6 +5,7 @@
 //	go run ./examples/stylebook -dump-png out.png  # 无头出图：软件光栅 PNG，文字是占位方块
 //	go run ./examples/stylebook -dump-svg out.svg  # 无头出图：级联+布局导出 SVG，核对几何/配色
 //	go run ./examples/stylebook -shot out.png      # 真实窗口整页截图：真实字体，超长页分段拼接
+//	go run ./examples/stylebook -debug-port 9241   # 本地调试服务：HTTP/JSON 驱动与观测
 //
 // index.html 与 stylebook.css 同目录 go:embed：页面里的
 // <link rel="stylesheet" href="stylebook.css"> 由本文件的加载器接住——引擎
@@ -30,6 +31,7 @@ import (
 
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/examples/internal/debugsrv"
 )
 
 //go:embed index.html
@@ -43,6 +45,7 @@ func main() {
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	shot := flag.String("shot", "", "真实窗口整页截图：真实字体，超长页分段回读拼接存 PNG")
+	debugPort := debugsrv.Flag()
 	flag.Parse()
 
 	if *dumpPNG != "" || *dumpSVG != "" {
@@ -98,6 +101,9 @@ func main() {
 	if *exitAfter > 0 {
 		win.SetAutoExit(time.Duration(*exitAfter))
 	}
+	// 调试服务：-debug-port 优先，留空则看环境变量 GHROMEX_DEBUG_PORT。
+	stopDebug := debugsrv.Serve(win, *debugPort)
+	defer stopDebug()
 	if err := win.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "运行失败:", err)
 		os.Exit(1)

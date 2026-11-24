@@ -4,6 +4,22 @@
 `github.com/go-comm/ghromex@v0.5.0` 直接取用）。
 
 
+## 未发布
+
+### 示例全面接入调试服务
+
+- 全部带窗口的示例都支持本地调试服务（HTTP/JSON 驱动与观测）：统一的
+  `-debug-port` 旗标（留空则看环境变量 `GHROMEX_DEBUG_PORT`），示例列表：
+  `browser`、`iconsheet`、`kit`、`notepad`、`portal`、`snip`、`stylebook`、`ua`。
+  `stressgen` 只生成 HTML、不开窗口，不适用。
+- 新增示例内部共享 helper `examples/internal/debugsrv`（Go internal 规则：
+  只对 `examples/` 目录树可见，不算公开 API）：`debugsrv.Flag()` 注册旗标，
+  `debugsrv.Serve(win, port)` 起服务并返回收尾函数。端口被占、地址非回环
+  这类错误直接报错退出——「以为开了其实没开」必须让人看见。
+- `examples/browser` 原有的内联接线改用同一 helper，口径统一。
+- `docs/development.md`：调试服务一节改为「全部窗口示例均已接好」。
+
+
 ## v0.10.0 — 2026-11-24
 
 ### 重构：debug 去 sdl2 依赖

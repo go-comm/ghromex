@@ -43,8 +43,16 @@ if err == nil {
 srv, err := debug.ServeFromEnv(win)
 ```
 
-`examples/browser` 已经接好：`go run ./examples/browser -debug-port 9223`
-（`-debug-port` 优先于环境变量）。
+所有带窗口的示例都接好了调试服务（统一的 `-debug-port` 旗标，优先于环境变量
+`GHROMEX_DEBUG_PORT`）：
+
+```
+go run ./examples/portal -debug-port 9223
+```
+
+示例列表：`browser`、`iconsheet`、`kit`、`notepad`、`portal`、`snip`、
+`stylebook`、`ua`。`stressgen` 只生成 HTML、不开窗口，不适用。
+共享接线在 `examples/internal/debugsrv`（示例内部 helper，不是公开 API）。
 
 ### 端点
 

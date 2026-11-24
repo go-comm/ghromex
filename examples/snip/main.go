@@ -7,6 +7,7 @@
 //	go run ./examples/snip -delay 1s          # 留时间切换窗口再抓屏
 //	go run ./examples/snip -source a.png -shot-overlay o.png -shot-preview p.png
 //	go run ./examples/snip -dump-capture raw.png   # 把抓到的桌面原样落盘（排查"打开就是灰"）
+//	go run ./examples/snip -debug-port 9241        # 本地调试服务：HTTP/JSON 驱动与观测
 //
 // 只支持主屏：多显示器虚拟桌面（负坐标、混合 DPI）留给后续能力。
 package main
@@ -25,6 +26,7 @@ import (
 
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/examples/internal/debugsrv"
 	"github.com/go-comm/ghromex/runtime/dialog"
 	"github.com/go-comm/ghromex/runtime/screen"
 )
@@ -61,15 +63,16 @@ func main() {
 	shotOverlay := flag.String("shot-overlay", "", "真实窗口截图：选区页存 PNG 后退出")
 	shotPreview := flag.String("shot-preview", "", "真实窗口截图：预览页存 PNG 后退出")
 	exitAfter := flag.Duration("exit-after", 0, "打开后指定时长自动退出（调试/CI）")
+	debugPort := debugsrv.Flag()
 	flag.Parse()
 
-	if err := run(*delay, *source, *dumpCapture, *shotOverlay, *shotPreview, *exitAfter); err != nil {
+	if err := run(*delay, *source, *dumpCapture, *shotOverlay, *shotPreview, *exitAfter, *debugPort); err != nil {
 		fmt.Fprintln(os.Stderr, "snip:", err)
 		os.Exit(1)
 	}
 }
 
-func run(delay time.Duration, source, dumpCapture, overlayPath, previewPath string, exitAfter time.Duration) error {
+func run(delay time.Duration, source, dumpCapture, overlayPath, previewPath string, exitAfter time.Duration, debugPort string) error {
 	var (
 		desktop *image.RGBA
 		err     error
@@ -127,6 +130,10 @@ func run(delay time.Duration, source, dumpCapture, overlayPath, previewPath stri
 	if err := a.startOverlay(); err != nil {
 		return err
 	}
+	// 调试服务：截图工具是全窗口覆盖层，脚本能用它读命中/状态、注入拖选，
+	// 不必靠人抓鼠标。-debug-port 优先，留空则看环境变量 GHROMEX_DEBUG_PORT。
+	stopDebug := debugsrv.Serve(win, debugPort)
+	defer stopDebug()
 	return win.Run()
 }
 

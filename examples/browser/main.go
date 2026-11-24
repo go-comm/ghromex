@@ -32,8 +32,8 @@ import (
 	"time"
 
 	"github.com/go-comm/ghromex/browser"
-	"github.com/go-comm/ghromex/debug"
 	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/examples/internal/debugsrv"
 	"github.com/go-comm/ghromex/ui"
 )
 
@@ -49,7 +49,7 @@ func main() {
 	dumpPNG := flag.String("dump-png", "", "无头出图：软件光栅 PNG，文字是占位方块，断言布局/配色用")
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
-	debugPort := flag.String("debug-port", "", "调试服务端口（如 9223；0=随机，仅绑回环）。也可用环境变量 GHROMEX_DEBUG_PORT")
+	debugPort := debugsrv.Flag()
 	flag.Parse()
 
 	if *dumpPNG != "" || *dumpSVG != "" {
@@ -98,21 +98,8 @@ func main() {
 	// 调试服务：-debug-port 优先，其次环境变量 GHROMEX_DEBUG_PORT。
 	// 起在 Run 之前是安全的——服务本身不碰窗口，请求真正落到窗口上要等
 	// 主循环跑起来（没跑时请求会明确报「主循环未在运行」）。
-	if *debugPort != "" {
-		srv, err := debug.Serve(win, debug.Options{Addr: *debugPort})
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "调试服务启动失败:", err)
-			os.Exit(1)
-		}
-		defer srv.Close()
-		fmt.Println("调试服务:", srv.URL("/debug/"))
-	} else if srv, err := debug.ServeFromEnv(win); err != nil {
-		fmt.Fprintln(os.Stderr, "调试服务启动失败:", err)
-		os.Exit(1)
-	} else if srv != nil {
-		defer srv.Close()
-		fmt.Println("调试服务:", srv.URL("/debug/"))
-	}
+	stopDebug := debugsrv.Serve(win, *debugPort)
+	defer stopDebug()
 	if err := win.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "运行失败:", err)
 		os.Exit(1)

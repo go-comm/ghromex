@@ -14,6 +14,7 @@
 //	go run ./examples/notepad -shot out.png -shot-find # 截图前先展开查找替换栏
 //	go run ./examples/notepad -shot out.png -shot-select # 截图前全选（状态栏报选中字数）
 //	go run ./examples/notepad -dark                  # 深色主题
+//	go run ./examples/notepad -debug-port 9241       # 本地调试服务：HTTP/JSON 驱动与观测
 //
 // 页面完全由 page.go 用 Go 构造，没有 HTML 文件。
 //
@@ -45,6 +46,7 @@ import (
 
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/examples/internal/debugsrv"
 	"github.com/go-comm/ghromex/runtime/clipboard"
 	"github.com/go-comm/ghromex/runtime/dialog"
 	"github.com/go-comm/ghromex/ui"
@@ -77,6 +79,7 @@ func main() {
 	shotFind := flag.Bool("shot-find", false, "与 -shot 配合：截图前展开查找替换栏（模拟 Ctrl+F）")
 	shotSelect := flag.Bool("shot-select", false, "与 -shot 配合：截图前全选编辑区（模拟 Ctrl+A，状态栏报选中字数）")
 	dark := flag.Bool("dark", false, "使用深色主题")
+	debugPort := debugsrv.Flag()
 	flag.Parse()
 
 	theme := ui.Light()
@@ -150,6 +153,9 @@ func main() {
 	if *exitAfter > 0 {
 		win.SetAutoExit(time.Duration(*exitAfter))
 	}
+	// 调试服务：-debug-port 优先，留空则看环境变量 GHROMEX_DEBUG_PORT。
+	stopDebug := debugsrv.Serve(win, *debugPort)
+	defer stopDebug()
 	if err := win.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "运行失败:", err)
 		os.Exit(1)

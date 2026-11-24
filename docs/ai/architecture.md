@@ -228,7 +228,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 | 高频输入按帧合并（拖动窗口等） | `browser.Window.SetFrameHandler`：事件排空后每帧调一次，返回 true 时主循环改用 1ms 轮询（空闲 10ms） | `browser/window.go`、`examples/snip/preview.go` |
 | 接收拖入窗口的文件 | `browser.Window.SetFileDropHandler`：一次拖放调一次，给整批绝对路径（多选不拆分）；后端 `WM_DROPFILES` → `sdl2.EventFilesDropped`。只做接收方向 | `backend/sdl2/filedrop.go`、`browser/window.go` |
 | 自定义窗口图标 | 造一个 `*core.Bitmap`（`engine.DecodeImage` 解 PNG/JPEG/GIF 字节），传给 `browser.Options.Icon`（建窗即设）或 `browser.Window.SetIcon`（运行期换）；`ui.Spec.Icon` 同理。**只吃位图**，`.ico` 多帧容器要宿主先取出其中一档 | `core/graphics.go`（`IconSetter`）、`backend/sdl2/window.go`、`browser/window.go` |
-| 从外部脚本驱动/观测窗口 | `debug.Serve(win, debug.Options{Addr:...})`（或 `ServeFromEnv` + `GHROMEX_DEBUG_PORT`）；输入走 `Window.InjectInput`（中性 `browser.InputEvent`，本包不 import `backend/sdl2`），读状态/截图走 `Window.Do`。别在生产代码里 import `debug` | `debug/server.go`、`debug/input.go`、`debug/state.go`、`examples/browser/main.go` |
+| 从外部脚本驱动/观测窗口 | `debug.Serve(win, debug.Options{Addr:...})`（或 `ServeFromEnv` + `GHROMEX_DEBUG_PORT`）；输入走 `Window.InjectInput`（中性 `browser.InputEvent`，本包不 import `backend/sdl2`），读状态/截图走 `Window.Do`。别在生产代码里 import `debug`；示例里的统一接线在 `examples/internal/debugsrv`（internal 包，不算生产代码） | `debug/server.go`、`debug/input.go`、`debug/state.go`、`examples/internal/debugsrv/debugsrv.go` |
 | 代码里注入点击/按键（无头测试、宿主脚本） | `browser.Window.InjectInput(browser.InputEvent{...})`：鼠标/滚轮/按键/文本/拖放共用一个结构，内部翻译成平台事件后入队；主循环没跑时返回 `ErrLoopNotRunning` | `browser/input.go` |
 | 别的 goroutine 想碰窗口/文档 | `browser.Window.Post`（不等）/ `browser.Window.Do`（等结果）交回主循环；`Run` 没跑时返回 `ErrLoopNotRunning`。`Run` 内每帧事件排空后执行 | `browser/tasks.go`、`browser/window.go`（`Run`） |
 
@@ -255,7 +255,7 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 
 | 目录 | 内容 |
 |---|---|
-| `examples/browser` | 最小浏览器门面：`browser.New` + `OpenDocument` + `Run`；`-debug-port` / `GHROMEX_DEBUG_PORT` 挂调试服务 |
+| `examples/browser` | 最小浏览器门面：`browser.New` + `OpenDocument` + `Run`；`-debug-port` / `GHROMEX_DEBUG_PORT` 挂调试服务（全部窗口示例都有这层接线，见 `examples/internal/debugsrv`） |
 | `examples/notepad` | 记事本：`ui.Install` + 主题 + TextAreaView/BarView/TextInputView + Ctrl+S 对话框 |
 | `examples/kit` | 组件画廊：表单控件全家桶 + `NewBufferedViewport` 截图 + 程序化窗口图标（`ui.Spec.Icon` / `-dump-icon` / `-no-icon`） |
 | `examples/portal` | 门户页：定位层/层叠/滚动性能基准页 |
@@ -263,3 +263,4 @@ paths, _ := dialog.OpenFileDialog(dialog.Parent(hwnd), dialog.Options{...})
 | `examples/stylebook` | 作者样式表全集：`<link>` 外链样式表（`docOptions` 加载器回调）+ 全标签/CSS 对照页（对照 Chrome） |
 | `examples/snip` | 截图小工具：`runtime/screen` 桌面抓屏 |
 | `examples/iconsheet` | ui 内置图标表：`ui.Icons()` 全量展示 + 搜索过滤 |
+| `examples/internal/debugsrv` | 示例内部共享 helper（非公开 API）：`-debug-port` 旗标 + 起调试服务。Go internal 规则保证它只对 `examples/` 目录树可见，所以它可以 import `debug` 而不违反「生产代码不依赖 debug」的护栏 |

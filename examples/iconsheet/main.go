@@ -10,6 +10,7 @@
 //	go run ./examples/iconsheet -shot iconsheet.png   # 真实窗口截图：真实字体观感
 //	go run ./examples/iconsheet -dump-png sheet.png   # 无头出图：软件光栅，文字是占位方块
 //	go run ./examples/iconsheet -dump-svg sheet.svg   # 无头出图：SVG，核对布局/层级
+//	go run ./examples/iconsheet -debug-port 9241      # 本地调试服务：HTTP/JSON 驱动与观测
 package main
 
 import (
@@ -23,6 +24,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-comm/ghromex/engine"
+	"github.com/go-comm/ghromex/examples/internal/debugsrv"
 	"github.com/go-comm/ghromex/runtime/clipboard"
 	"github.com/go-comm/ghromex/ui"
 )
@@ -103,6 +105,7 @@ func main() {
 	dumpSVG := flag.String("dump-svg", "", "无头出图：级联+布局导出 SVG（真实 <text>），核对几何/层级/配色")
 	shot := flag.String("shot", "", "真实窗口截图：真实字体渲染一帧存 PNG（Window.Screenshot 回读）")
 	exitAfter := flag.Duration("exit-after", 0, "运行指定时长后自动退出（调试/CI）")
+	debugPort := debugsrv.Flag()
 	flag.Parse()
 
 	entries := ui.Icons()
@@ -183,6 +186,9 @@ func main() {
 	if *exitAfter > 0 {
 		app.Window().SetAutoExit(*exitAfter)
 	}
+	// 调试服务：-debug-port 优先，留空则看环境变量 GHROMEX_DEBUG_PORT。
+	stopDebug := debugsrv.Serve(app.Window(), *debugPort)
+	defer stopDebug()
 	if err := app.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "运行失败:", err)
 		os.Exit(1)
