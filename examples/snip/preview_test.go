@@ -10,10 +10,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-comm/ghromex/backend/sdl2"
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
 )
+
+// inject 注入一个输入事件：走 browser.InjectInput（中性 InputEvent，与真人
+// 操作同一条解码链路）。注入失败直接判测试失败——事件没进队列时，后面的
+// 断言只会变成「莫名不成立」。
+func inject(t *testing.T, win *browser.Window, ev browser.InputEvent) {
+	t.Helper()
+	if err := win.InjectInput(ev); err != nil {
+		t.Fatalf("注入 %+v 失败: %v", ev, err)
+	}
+}
 
 // 工具条区域的鼠标事件必须放行给引擎，否则“保存/关闭”按钮永远点不到；
 // 图片区的事件才由拖动逻辑接管。这里用真实注入事件走一遍完整链路。
@@ -60,11 +69,11 @@ func TestPreviewToolbarClickPassesThrough(t *testing.T) {
 
 	win.SetKeyHandler(a.onKey)
 	win.SetMouseHandler(a.onMouse)
-	win.InjectEvent(sdl2.Event{
-		Kind: sdl2.EventMouseButtonDown, Button: sdl2.MouseButtonLeft, X: cx, Y: cy,
+	inject(t, win, browser.InputEvent{
+		Kind: browser.InputMouseDown, Button: browser.MouseButtonLeft, X: cx, Y: cy,
 	})
-	win.InjectEvent(sdl2.Event{
-		Kind: sdl2.EventMouseButtonUp, Button: sdl2.MouseButtonLeft, X: cx, Y: cy,
+	inject(t, win, browser.InputEvent{
+		Kind: browser.InputMouseUp, Button: browser.MouseButtonLeft, X: cx, Y: cy,
 	})
 
 	win.SetAutoExit(300 * time.Millisecond)
@@ -113,7 +122,7 @@ func TestPreviewDragAppliesOncePerFrame(t *testing.T) {
 
 	// 按下 (30,20)：抓取偏移 = (30,20)。
 	if !a.onMouse(browser.MouseEvent{
-		Kind: browser.MouseDown, Button: sdl2.MouseButtonLeft, X: 30, Y: 20,
+		Kind: browser.MouseDown, Button: browser.MouseButtonLeft, X: 30, Y: 20,
 	}) {
 		t.Fatal("图片区按下应被拖动逻辑消费")
 	}
@@ -145,7 +154,7 @@ func TestPreviewDragAppliesOncePerFrame(t *testing.T) {
 
 	// 抬起：本帧位移仍要落成，但不再报告 busy。
 	a.onMouse(browser.MouseEvent{
-		Kind: browser.MouseUp, Button: sdl2.MouseButtonLeft, X: 35, Y: 20,
+		Kind: browser.MouseUp, Button: browser.MouseButtonLeft, X: 35, Y: 20,
 	})
 	if a.onFrame() {
 		t.Fatal("抬起后 onFrame 不应再报告 busy")
@@ -161,7 +170,7 @@ func TestPreviewDragAppliesOncePerFrame(t *testing.T) {
 // 事件不读 WM_LBUTTONDOWN 的 lParam，直接取内部缓存坐标（mouse->x/y），
 // 该缓存只在 motion 时刷新（.temp/mousecache 用 SendMessage 实证）。于是
 // 用户不动鼠标直接按下时，事件携带的是**相对旧窗口 (0,0)** 的坐标——
-// 后端解码层按「缓存原点 vs 当前位置」平移修正（backend/sdl2 的 fixStale），
+// 后端解码层按「缓存原点 vs 当前位置」平移修正（后端的 fixStale），
 // 这里断言修正后的抓取点是新窗口系的 (0,0)、窗口跟随光标走。
 func TestPreviewFirstClickAfterTransitionDrags(t *testing.T) {
 	os.Setenv("SDL_VIDEO_DRIVER", "dummy")
@@ -191,17 +200,17 @@ func TestPreviewFirstClickAfterTransitionDrags(t *testing.T) {
 
 	// 选区：从右下 (250,170) 拖到左上 (30,40)（从右下往左上拽是常用手势）。
 	// 抬起处理里 startPreview 把窗口变成 (30,40) 220×158：barTop=130。
-	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonDown, Button: sdl2.MouseButtonLeft, X: 250, Y: 170})
-	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseMotion, X: 30, Y: 40})
-	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonUp, Button: sdl2.MouseButtonLeft, X: 30, Y: 40})
+	inject(t, win, browser.InputEvent{Kind: browser.InputMouseDown, Button: browser.MouseButtonLeft, X: 250, Y: 170})
+	inject(t, win, browser.InputEvent{Kind: browser.InputMouseMove, X: 30, Y: 40})
+	inject(t, win, browser.InputEvent{Kind: browser.InputMouseUp, Button: browser.MouseButtonLeft, X: 30, Y: 40})
 
 	// 首击：光标停在 (30,40)（旧窗口系）没动过 → 按钮事件带缓存坐标 (30,40)。
 	// 修正后应为新窗口系 (0,0)；若没修正会以 (30,40) 为抓取点，首拖窗口
 	// 瞬移，用户感知为「这一下没抓住」。
-	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonDown, Button: sdl2.MouseButtonLeft, X: 30, Y: 40})
+	inject(t, win, browser.InputEvent{Kind: browser.InputMouseDown, Button: browser.MouseButtonLeft, X: 30, Y: 40})
 	// 拖动与抬起（motion 是 Windows 按 lParam 现算的，天然是新窗口系）。
-	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseMotion, X: 36, Y: 46})
-	win.InjectEvent(sdl2.Event{Kind: sdl2.EventMouseButtonUp, Button: sdl2.MouseButtonLeft, X: 36, Y: 46})
+	inject(t, win, browser.InputEvent{Kind: browser.InputMouseMove, X: 36, Y: 46})
+	inject(t, win, browser.InputEvent{Kind: browser.InputMouseUp, Button: browser.MouseButtonLeft, X: 36, Y: 46})
 
 	win.SetAutoExit(400 * time.Millisecond)
 	if err := win.Run(); err != nil {

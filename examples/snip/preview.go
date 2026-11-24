@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 
-	"github.com/go-comm/ghromex/backend/sdl2"
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
 )
@@ -33,7 +32,7 @@ type previewState struct {
 
 // startPreview 把当前窗口从“整屏选区”原地缩成悬浮预览。
 //
-// 复用同一个窗口而不是关掉重开：sdl2.Window.Close 会调 SDL_Quit，
+// 复用同一个窗口而不是关掉重开：平台后端的 Window.Close 会调 SDL_Quit，
 // 顺序开第二个窗会有明显桌面闪烁，还会丢焦点。原地改尺寸/位置/文档
 // 则在一帧之内完成变化。
 func (a *app) startPreview(r image.Rectangle) error {
@@ -114,11 +113,11 @@ html,body{margin:0;padding:0;}
 func (p *previewState) onMouse(a *app, ev browser.MouseEvent) bool {
 	switch ev.Kind {
 	case browser.MouseDown:
-		if ev.Button == sdl2.MouseButtonRight {
+		if ev.Button == browser.MouseButtonRight {
 			a.win.RequestClose()
 			return true
 		}
-		if ev.Button != sdl2.MouseButtonLeft {
+		if ev.Button != browser.MouseButtonLeft {
 			return true
 		}
 		if ev.Y >= p.barTop {

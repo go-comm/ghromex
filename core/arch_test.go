@@ -3,6 +3,7 @@ package core_test
 import (
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -84,6 +85,36 @@ func TestDebugIsNotADependency(t *testing.T) {
 	}
 }
 
+// 示例是「应用层的样板」：只许用公开门面（browser / engine / ui /
+// runtime/* / debug），不许直接碰平台后端。
+//
+// 为什么单独钉这条：示例一度直接 import backend/sdl2 手搓 sdl2.Event 与
+// 按键号，等于把「换一次后端就得改一遍示例」写进仓库。注入有公开 API
+// （browser.Window.InjectInput + 中性 browser.InputEvent），按键号也有
+// （browser.MouseButton*），没有理由绕过。调试服务同理只走 browser 门面。
+func TestExamplesDoNotImportBackend(t *testing.T) {
+	root := filepath.Join("..", "examples")
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, path)
+		for _, imp := range fileRepoImports(t, path) {
+			if strings.HasPrefix(imp, "backend/") {
+				t.Errorf("examples/%s 依赖了 %s：示例只用公开门面，注入走 browser.InjectInput",
+					rel, imp)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("遍历 examples: %v", err)
+	}
+}
+
 // repoImports 列出一个目录里所有 .go 文件导入的仓库内包。
 //
 // test=false 时只看非测试文件：测试可以按需引用引擎（如 browser 层的
@@ -92,7 +123,6 @@ func repoImports(t *testing.T, dir string, test bool) []string {
 	t.Helper()
 	// 测试跑在 core 包目录下，仓库根在上一层。
 	dir = filepath.Join("..", dir)
-	fset := token.NewFileSet()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("读取目录 %s: %v", dir, err)
@@ -107,18 +137,27 @@ func repoImports(t *testing.T, dir string, test bool) []string {
 		if isTest != test {
 			continue
 		}
-		f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.ImportsOnly)
+		out = append(out, fileRepoImports(t, filepath.Join(dir, name))...)
+	}
+	return out
+}
+
+// fileRepoImports 列出一个 .go 文件导入的仓库内包。
+func fileRepoImports(t *testing.T, path string) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+	if err != nil {
+		t.Fatalf("解析 %s: %v", path, err)
+	}
+	var out []string
+	for _, spec := range f.Imports {
+		p, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
-			t.Fatalf("解析 %s: %v", filepath.Join(dir, name), err)
+			continue
 		}
-		for _, spec := range f.Imports {
-			p, err := strconv.Unquote(spec.Path.Value)
-			if err != nil {
-				continue
-			}
-			if strings.HasPrefix(p, "github.com/go-comm/ghromex/") {
-				out = append(out, strings.TrimPrefix(p, "github.com/go-comm/ghromex/"))
-			}
+		if strings.HasPrefix(p, "github.com/go-comm/ghromex/") {
+			out = append(out, strings.TrimPrefix(p, "github.com/go-comm/ghromex/"))
 		}
 	}
 	return out

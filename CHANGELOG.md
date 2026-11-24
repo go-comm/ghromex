@@ -19,6 +19,16 @@
 - `examples/browser` 原有的内联接线改用同一 helper，口径统一。
 - `docs/development.md`：调试服务一节改为「全部窗口示例均已接好」。
 
+### 示例不再依赖平台后端
+
+- `examples/snip` 不再 import `backend/sdl2`：按键判断改用 `browser.MouseButton*`
+  （与 `browser.MouseEvent.Button` 的编号一一对应），事件注入改用
+  `browser.Window.InjectInput` + 中性 `browser.InputEvent`
+  （`InputMouseDown/Up/Move`），不再手搓 `sdl2.Event`。
+- `core/arch_test.go` 新增护栏 `TestExamplesDoNotImportBackend`：递归扫描
+  `examples/` 下所有 `.go`（含测试），出现 `backend/*` 依赖即失败——示例是
+  应用层的样板，「换一次后端就得改一遍示例」不能悄悄发生。
+
 
 ## v0.10.0 — 2026-11-24
 

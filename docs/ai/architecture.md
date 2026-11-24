@@ -28,7 +28,7 @@
 | `ui` | 菜单栏/工具栏/状态栏 + 页面控件（TextInputView/TextAreaView/BarView）+ 浅色/深色主题 + 快捷键 | 装在文档 DOM 里（`position:fixed` + body 占位块），换文档要重装 |
 | `debug` | 本地调试服务：HTTP/JSON 注入输入 + 观测状态（`Serve`/`ServeFromEnv`） | **可选开发期外挂**，只被示例/宿主显式引用；`engine`/`browser`/`ui` 都不许 import 它（`TestDebugIsNotADependency`）；自己也只依赖 `engine`+`browser`，**不 import `backend/sdl2`**（注入走 `Window.InjectInput`） |
 
-**为什么有 `core`**：Go 接口是结构化的。若后端直接 import 引擎来「实现引擎的接口」，依赖方向就反了。所以把接口和跨层值类型下沉到 `core`，引擎用类型别名（`type Color = core.Color`）保持对外 API 不变。`core/arch_test.go` 是架构护栏：钉死依赖单向、平台层禁止反向 import 上层、`browser` 必须同时依赖 engine 与 backend/sdl2。
+**为什么有 `core`**：Go 接口是结构化的。若后端直接 import 引擎来「实现引擎的接口」，依赖方向就反了。所以把接口和跨层值类型下沉到 `core`，引擎用类型别名（`type Color = core.Color`）保持对外 API 不变。`core/arch_test.go` 是架构护栏：钉死依赖单向、平台层禁止反向 import 上层、`browser` 必须同时依赖 engine 与 backend/sdl2、示例不许 import `backend/*`。
 
 ## 两个核心抽象
 

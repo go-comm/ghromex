@@ -5,7 +5,6 @@ import (
 	"image"
 	"os"
 
-	"github.com/go-comm/ghromex/backend/sdl2"
 	"github.com/go-comm/ghromex/browser"
 	"github.com/go-comm/ghromex/engine"
 )
@@ -151,11 +150,11 @@ func (a *app) onOverlayMouse(ev browser.MouseEvent) bool {
 	o := a.ov
 	switch ev.Kind {
 	case browser.MouseDown:
-		if ev.Button == sdl2.MouseButtonRight {
+		if ev.Button == browser.MouseButtonRight {
 			a.win.RequestClose()
 			return true
 		}
-		if ev.Button != sdl2.MouseButtonLeft {
+		if ev.Button != browser.MouseButtonLeft {
 			return true
 		}
 		x, y := clampPoint(ev.X, ev.Y, o.w, o.h)
@@ -174,7 +173,7 @@ func (a *app) onOverlayMouse(ev browser.MouseEvent) bool {
 		return true
 
 	case browser.MouseUp:
-		if ev.Button != sdl2.MouseButtonLeft || !o.dragging {
+		if ev.Button != browser.MouseButtonLeft || !o.dragging {
 			return true
 		}
 		o.dragging = false
